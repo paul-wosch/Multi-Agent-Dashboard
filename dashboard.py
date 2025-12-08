@@ -17,30 +17,64 @@ class Agent:
         self.prompt_template = prompt_template
         self.model = model
 
-    def run(self, input):
-        prompt = self.prompt_template.format(input=input)
+    def run(self, variables: dict):
+        """
+        variables = {"task": "...", "plan": "...", "answer": "...", "critique": "..."}
+        Any variable used inside the prompt template will be filled.
+        """
+
+        prompt = self.prompt_template.format(**variables)
+
         response = client.responses.create(
             model=self.model,
             input=prompt
         )
+
         return response.output_text
 
 
 class MultiAgentEngine:
     def __init__(self):
         self.agents = {}
+        self.state = {}
         self.memory = {}
 
     def add_agent(self, name, prompt_template, model="gpt-4.1-nano"):
         self.agents[name] = Agent(name, prompt_template, model)
 
     def run_seq(self, steps, initial_input):
-        current = initial_input
+
+        # structured state used internally
+        self.state = {
+            "task": initial_input,
+            "plan": "",
+            "answer": "",
+            "critique": "",
+            "final": ""
+        }
+
+        # memory used for UI (clean agent-output mapping)
+        self.memory = {}
+
         for agent_name in steps:
             agent = self.agents[agent_name]
-            current = agent.run(current)
-            self.memory[agent_name] = current
-        return current
+
+            output = agent.run(self.state)
+
+            # Update structured state
+            if agent_name == "planner":
+                self.state["plan"] = output
+            elif agent_name == "solver":
+                self.state["answer"] = output
+            elif agent_name == "critic":
+                self.state["critique"] = output
+            elif agent_name == "finalizer":
+                self.state["final"] = output
+
+            # Update memory for the dashboard
+            self.memory[agent_name] = output
+
+        return self.state.get("final", "")
 
     def get_output(self, agent_name):
         return self.memory.get(agent_name, "")
@@ -65,36 +99,51 @@ default_agents = {
     "planner": """
 You are the Planner Agent.
 Clarify the task and produce steps.
-Task: {input}
+
+Task:
+{task}
+
 Output:
 - Clarified Task
 - Plan
 """,
+
     "solver": """
 You are the Solver Agent.
 Use the plan to produce an answer.
+
 Plan:
-{input}
+{plan}
+
 Output:
 - Answer
 """,
+
     "critic": """
 You are the Critic Agent.
 Evaluate the answer.
+
 Answer:
-{input}
+{answer}
+
 Output:
 - Issues
 - Improvements
 """,
+
     "finalizer": """
 You are the Finalizer Agent.
-Apply improvements and produce final answer.
-Input:
-{input}
-Output:
-- Final Answer
-"""
+You must revise the original answer using the critique.
+
+Original Answer:
+{answer}
+
+Critique:
+{critique}
+
+Your task:
+Return the improved final answer only.
+""",
 }
 
 # Session state initialization
