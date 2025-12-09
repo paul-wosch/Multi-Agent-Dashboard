@@ -2,14 +2,99 @@ import streamlit as st
 from openai import OpenAI
 import difflib
 import json
-from config import OPENAI_API_KEY
+import sqlite3
+from datetime import datetime
+from config import OPENAI_API_KEY, DB_FILE_PATH
 
-# --------------------------------------
-# Multi-agent engine (drop-in compatible)
-# --------------------------------------
+# ======================================================
+# DATABASE SETUP
+# ======================================================
+
+DB_PATH = DB_FILE_PATH
+
+def init_db():
+    conn = sqlite3.connect(DB_FILE_PATH)
+    c = conn.cursor()
+
+    # Runs table
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT,
+            task_input TEXT,
+            final_output TEXT
+        )
+    """)
+
+    # Agent outputs table
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS agent_outputs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER,
+            agent_name TEXT,
+            output TEXT,
+            FOREIGN KEY(run_id) REFERENCES runs(id)
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+def save_run_to_db(task_input, final_output, memory_dict):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    ts = datetime.utcnow().isoformat()
+
+    # Store run entry
+    c.execute("""
+        INSERT INTO runs (timestamp, task_input, final_output)
+        VALUES (?, ?, ?)
+    """, (ts, task_input, final_output))
+
+    run_id = c.lastrowid
+
+    # Store agent outputs
+    for agent, output in memory_dict.items():
+        c.execute("""
+            INSERT INTO agent_outputs (run_id, agent_name, output)
+            VALUES (?, ?, ?)
+        """, (run_id, agent, output))
+
+    conn.commit()
+    conn.close()
+    return run_id
+
+
+def load_runs():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT id, timestamp, task_input FROM runs ORDER BY id DESC")
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+def load_run_details(run_id):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    c.execute("SELECT timestamp, task_input, final_output FROM runs WHERE id = ?", (run_id,))
+    run = c.fetchone()
+
+    c.execute("SELECT agent_name, output FROM agent_outputs WHERE run_id = ?", (run_id,))
+    agents = c.fetchall()
+
+    conn.close()
+    return run, agents
+
+
+# ======================================================
+# MULTI-AGENT ENGINE (FIXED VERSION)
+# ======================================================
 
 client = OpenAI(api_key=OPENAI_API_KEY)
-
 
 class Agent:
     def __init__(self, name, prompt_template, model="gpt-4.1-nano"):
@@ -80,20 +165,24 @@ class MultiAgentEngine:
         return self.memory.get(agent_name, "")
 
 
-# --------------------------------------
-#  GUI Dashboard
-# --------------------------------------
+# ======================================================
+# GUI START
+# ======================================================
 
 st.set_page_config(page_title="Multi-Agent Debug Dashboard", layout="wide")
-
 st.title("🧠 Multi-Agent Pipeline Debug Dashboard")
-st.caption("Inspect agent outputs, compare steps, and visualize pipeline flows.")
+st.caption("Inspect agent outputs, compare steps, visualize pipeline flows, and store runs in SQLite.")
 
-# --------------------------------------
-# Sidebar: Pipeline configuration
-# --------------------------------------
 
+# Initialize DB
+init_db()
+
+# Sidebar
 st.sidebar.header("Pipeline Configuration")
+
+# ======================================================
+# DEFAULT AGENTS (UPDATED TO MATCH STRUCTURED STATE)
+# ======================================================
 
 default_agents = {
     "planner": """
@@ -146,7 +235,8 @@ Return the improved final answer only.
 """,
 }
 
-# Session state initialization
+
+# Session
 if "engine" not in st.session_state:
     st.session_state.engine = MultiAgentEngine()
     for name, tmpl in default_agents.items():
@@ -162,9 +252,10 @@ task_input = st.sidebar.text_area("Task Input", placeholder="Enter your task..."
 
 run_button = st.sidebar.button("Run Pipeline")
 
-# --------------------------------------
-# Main: Execute pipeline
-# --------------------------------------
+
+# ======================================================
+# EXECUTE PIPELINE
+# ======================================================
 
 if run_button:
     st.subheader("🚀 Pipeline Execution")
@@ -178,23 +269,33 @@ if run_button:
     st.write("### 🟢 Final Output")
     st.code(final_output, language="markdown")
 
-# --------------------------------------
-# Display agent-by-agent outputs
-# --------------------------------------
+    # Save run to DB
+    run_id = save_run_to_db(
+        task_input=task_input,
+        final_output=final_output,
+        memory_dict=st.session_state.engine.memory
+    )
+    st.info(f"Run saved to DB with ID: {run_id}")
+
+
+# ======================================================
+# AGENT OUTPUT PANEL
+# ======================================================
 
 st.write("---")
 st.header("📁 Agent Outputs")
 
 if st.session_state.engine.memory:
     for agent_name in pipeline_steps:
-        st.subheader(f"**🔹 {agent_name.upper()} Output**")
+        st.subheader(f"🔹 {agent_name.upper()} Output")
         st.code(st.session_state.engine.get_output(agent_name), language="markdown")
 else:
-    st.info("Run a pipeline to inspect agent outputs.")
+    st.info("Run the pipeline to inspect agent outputs.")
 
-# --------------------------------------
-# Comparison Tools
-# --------------------------------------
+
+# ======================================================
+# COMPARISON TOOLS
+# ======================================================
 
 st.write("---")
 st.header("🔍 Compare Agent Outputs")
@@ -216,27 +317,50 @@ if a1 != "None" and a2 != "None" and a1 != a2:
 
     st.code("\n".join(diff), language="diff")
 
-elif a1 != "None" and a1 == a2:
-    st.warning("Select two different agents.")
 
-# --------------------------------------
-# Memory & Export
-# --------------------------------------
+# ======================================================
+# DATABASE HISTORY VIEWER
+# ======================================================
 
 st.write("---")
-st.header("📦 Memory & Export Tools")
+st.header("📜 Past Runs (Saved in Database)")
 
-if st.session_state.engine.memory:
+runs = load_runs()
 
-    if st.button("Export Memory as JSON"):
-        json_data = json.dumps(st.session_state.engine.memory, indent=2)
-        st.download_button(
-            "Download Memory.json",
-            data=json_data,
-            file_name="agent_memory.json",
-            mime="application/json"
-        )
+run_options = {f"Run {r[0]} — {r[1]}": r[0] for r in runs}
 
-    st.json(st.session_state.engine.memory)
-else:
-    st.info("Run the pipeline to populate memory.")
+selected_run = st.selectbox("Select a past run", ["None"] + list(run_options.keys()))
+
+if selected_run != "None":
+    run_id = run_options[selected_run]
+    run, agents = load_run_details(run_id)
+
+    timestamp, task, final = run
+
+    st.subheader(f"🗂 Run {run_id} — {timestamp}")
+    st.write("### Task Input")
+    st.code(task)
+
+    st.write("### Final Output")
+    st.code(final)
+
+    st.write("### Agent Outputs")
+    for agent_name, output in agents:
+        st.markdown(f"#### 🔸 {agent_name}")
+        st.code(output)
+
+    # Export JSON
+    export = {
+        "run_id": run_id,
+        "timestamp": timestamp,
+        "task_input": task,
+        "final_output": final,
+        "agents": {a[0]: a[1] for a in agents}
+    }
+
+    st.download_button(
+        "Download Run as JSON",
+        data=json.dumps(export, indent=2),
+        file_name=f"run_{run_id}.json",
+        mime="application/json"
+    )
