@@ -292,6 +292,45 @@ run_button = st.sidebar.button("Run Pipeline")
 
 
 # ======================================================
+# AGENT INTERACTION GRAPH
+# ======================================================
+
+st.write("---")
+st.header("🧩 Agent Interaction Graph")
+
+
+def render_agent_graph(steps):
+    AGENT_COLORS = {
+        "planner": "#c7e9c0",
+        "solver": "#fdd0a2",
+        "critic": "#fcbba1",
+        "finalizer": "#c6dbef"
+    }
+
+    dot = graphviz.Digraph()
+
+    # Style (optional)
+    dot.attr("node", shape="box", style="rounded,filled", color="#6baed6", fillcolor="#deebf7")
+
+    # Add nodes
+    for agent in steps:
+        color = AGENT_COLORS.get(agent, "#deebf7")
+        dot.node(agent, agent, fillcolor=color)
+        # dot.node(agent, agent)
+
+    # Add edges
+    for i in range(len(steps) - 1):
+        dot.edge(steps[i], steps[i + 1], label="passes output →")
+
+    return dot
+
+if pipeline_steps:
+    st.graphviz_chart(render_agent_graph(pipeline_steps))
+else:
+    st.info("Select agents in the pipeline to generate the graph.")
+
+
+# ======================================================
 # EXECUTE PIPELINE
 # ======================================================
 
