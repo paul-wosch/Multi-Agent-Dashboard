@@ -1,3 +1,4 @@
+import graphviz
 import streamlit as st
 from openai import OpenAI
 import difflib
@@ -366,6 +367,31 @@ if st.session_state.engine.memory:
         st.code(st.session_state.engine.get_output(agent_name))
 else:
     st.info("Run a pipeline to see outputs.")
+
+
+# ======================================================
+# COMPARISON TOOLS
+# ======================================================
+
+st.write("---")
+st.header("🔍 Compare Agent Outputs")
+
+a1 = st.selectbox("Agent A", ["None"] + pipeline_steps)
+a2 = st.selectbox("Agent B", ["None"] + pipeline_steps)
+
+if a1 != "None" and a2 != "None" and a1 != a2:
+    out1 = st.session_state.engine.get_output(a1)
+    out2 = st.session_state.engine.get_output(a2)
+
+    diff = difflib.unified_diff(
+        out1.splitlines(),
+        out2.splitlines(),
+        fromfile=a1,
+        tofile=a2,
+        lineterm=""
+    )
+
+    st.code("\n".join(diff), language="diff")
 
 
 # ======================================================
