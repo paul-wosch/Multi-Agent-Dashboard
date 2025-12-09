@@ -13,7 +13,7 @@ from config import OPENAI_API_KEY, DB_FILE_PATH
 DB_PATH = DB_FILE_PATH
 
 def init_db():
-    conn = sqlite3.connect(DB_FILE_PATH)
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
     # Runs table
@@ -37,6 +37,17 @@ def init_db():
         )
     """)
 
+    # Versioned agent prompts
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS agent_prompt_versions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            agent_name TEXT,
+            version INTEGER,
+            prompt TEXT,
+            timestamp TEXT
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -47,7 +58,6 @@ def save_run_to_db(task_input, final_output, memory_dict):
 
     ts = datetime.utcnow().isoformat()
 
-    # Store run entry
     c.execute("""
         INSERT INTO runs (timestamp, task_input, final_output)
         VALUES (?, ?, ?)
@@ -55,7 +65,6 @@ def save_run_to_db(task_input, final_output, memory_dict):
 
     run_id = c.lastrowid
 
-    # Store agent outputs
     for agent, output in memory_dict.items():
         c.execute("""
             INSERT INTO agent_outputs (run_id, agent_name, output)
@@ -67,31 +76,62 @@ def save_run_to_db(task_input, final_output, memory_dict):
     return run_id
 
 
-def load_runs():
+# ======================================================
+# VERSIONED PROMPT STORAGE
+# ======================================================
+
+def save_prompt_version(agent_name, prompt_text):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("SELECT id, timestamp, task_input FROM runs ORDER BY id DESC")
+
+    c.execute("SELECT MAX(version) FROM agent_prompt_versions WHERE agent_name = ?", (agent_name,))
+    result = c.fetchone()[0]
+    new_version = 1 if result is None else result + 1
+
+    ts = datetime.utcnow().isoformat()
+
+    c.execute("""
+        INSERT INTO agent_prompt_versions (agent_name, version, prompt, timestamp)
+        VALUES (?, ?, ?, ?)
+    """, (agent_name, new_version, prompt_text, ts))
+
+    conn.commit()
+    conn.close()
+
+    return new_version
+
+
+def load_prompt_versions(agent_name):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    c.execute("""
+        SELECT id, version, prompt, timestamp
+        FROM agent_prompt_versions
+        WHERE agent_name = ?
+        ORDER BY version DESC
+    """, (agent_name,))
+
     rows = c.fetchall()
     conn.close()
     return rows
 
 
-def load_run_details(run_id):
+def load_prompt_version_by_id(version_id):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
-    c.execute("SELECT timestamp, task_input, final_output FROM runs WHERE id = ?", (run_id,))
-    run = c.fetchone()
+    c.execute("""
+        SELECT agent_name, version, prompt FROM agent_prompt_versions WHERE id = ?
+    """, (version_id,))
 
-    c.execute("SELECT agent_name, output FROM agent_outputs WHERE run_id = ?", (run_id,))
-    agents = c.fetchall()
-
+    result = c.fetchone()
     conn.close()
-    return run, agents
+    return result
 
 
 # ======================================================
-# MULTI-AGENT ENGINE (FIXED VERSION)
+# MULTI-AGENT ENGINE (MERGED VERSION)
 # ======================================================
 
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -103,18 +143,11 @@ class Agent:
         self.model = model
 
     def run(self, variables: dict):
-        """
-        variables = {"task": "...", "plan": "...", "answer": "...", "critique": "..."}
-        Any variable used inside the prompt template will be filled.
-        """
-
         prompt = self.prompt_template.format(**variables)
-
         response = client.responses.create(
             model=self.model,
             input=prompt
         )
-
         return response.output_text
 
 
@@ -127,9 +160,12 @@ class MultiAgentEngine:
     def add_agent(self, name, prompt_template, model="gpt-4.1-nano"):
         self.agents[name] = Agent(name, prompt_template, model)
 
+    def update_agent_prompt(self, name, new_prompt):
+        self.agents[name].prompt_template = new_prompt
+
     def run_seq(self, steps, initial_input):
 
-        # structured state used internally
+        # Structured variable state
         self.state = {
             "task": initial_input,
             "plan": "",
@@ -138,7 +174,6 @@ class MultiAgentEngine:
             "final": ""
         }
 
-        # memory used for UI (clean agent-output mapping)
         self.memory = {}
 
         for agent_name in steps:
@@ -146,7 +181,6 @@ class MultiAgentEngine:
 
             output = agent.run(self.state)
 
-            # Update structured state
             if agent_name == "planner":
                 self.state["plan"] = output
             elif agent_name == "solver":
@@ -156,7 +190,6 @@ class MultiAgentEngine:
             elif agent_name == "finalizer":
                 self.state["final"] = output
 
-            # Update memory for the dashboard
             self.memory[agent_name] = output
 
         return self.state.get("final", "")
@@ -170,24 +203,22 @@ class MultiAgentEngine:
 # ======================================================
 
 st.set_page_config(page_title="Multi-Agent Debug Dashboard", layout="wide")
-st.title("🧠 Multi-Agent Pipeline Debug Dashboard")
-st.caption("Inspect agent outputs, compare steps, visualize pipeline flows, and store runs in SQLite.")
+st.title("🧠 Multi-Agent Pipeline Debug Dashboard (Structured + Prompt Versioning)")
+st.caption("Inspect agent outputs, version agent prompts, run pipelines, and store history in SQLite.")
 
-
-# Initialize DB
 init_db()
 
-# Sidebar
-st.sidebar.header("Pipeline Configuration")
 
 # ======================================================
-# DEFAULT AGENTS (UPDATED TO MATCH STRUCTURED STATE)
+# DEFAULT AGENTS (STRUCTURED STATE)
 # ======================================================
 
 default_agents = {
     "planner": """
 You are the Planner Agent.
-Clarify the task and produce steps.
+Refrain from producing the actual solution.
+Only clarify the task and produce steps.
+
 
 Task:
 {task}
@@ -235,12 +266,18 @@ Return the improved final answer only.
 """,
 }
 
-
-# Session
+# First-time initialization
 if "engine" not in st.session_state:
     st.session_state.engine = MultiAgentEngine()
     for name, tmpl in default_agents.items():
         st.session_state.engine.add_agent(name, tmpl)
+
+
+# ======================================================
+# SIDEBAR — PIPELINE CONFIG
+# ======================================================
+
+st.sidebar.header("Pipeline Configuration")
 
 pipeline_steps = st.sidebar.multiselect(
     "Select Agents to Run in Sequence",
@@ -248,7 +285,7 @@ pipeline_steps = st.sidebar.multiselect(
     default=list(default_agents.keys())
 )
 
-task_input = st.sidebar.text_area("Task Input", placeholder="Enter your task...")
+task_input = st.sidebar.text_area("Task Input", placeholder="Enter your task here...")
 
 run_button = st.sidebar.button("Run Pipeline")
 
@@ -259,7 +296,7 @@ run_button = st.sidebar.button("Run Pipeline")
 
 if run_button:
     st.subheader("🚀 Pipeline Execution")
-    with st.spinner("Running agents..."):
+    with st.spinner("Running agents…"):
         final_output = st.session_state.engine.run_seq(
             steps=pipeline_steps,
             initial_input=task_input
@@ -269,7 +306,6 @@ if run_button:
     st.write("### 🟢 Final Output")
     st.code(final_output, language="markdown")
 
-    # Save run to DB
     run_id = save_run_to_db(
         task_input=task_input,
         final_output=final_output,
@@ -279,7 +315,46 @@ if run_button:
 
 
 # ======================================================
-# AGENT OUTPUT PANEL
+# VERSIONED PROMPT EDITOR
+# ======================================================
+
+st.write("---")
+st.header("✏️ Versioned Agent Prompt Editor")
+
+agent_to_edit = st.selectbox("Select Agent", list(st.session_state.engine.agents.keys()))
+
+current_prompt = st.session_state.engine.agents[agent_to_edit].prompt_template
+new_prompt = st.text_area("Prompt Template", current_prompt, height=200)
+
+col1, col2 = st.columns(2)
+
+with col1:
+    if st.button("💾 Save New Prompt Version"):
+        version = save_prompt_version(agent_to_edit, new_prompt)
+        st.session_state.engine.update_agent_prompt(agent_to_edit, new_prompt)
+        st.success(f"Saved as version {version}")
+
+with col2:
+    if st.button("♻️ Revert to Default"):
+        default = default_agents[agent_to_edit]
+        st.session_state.engine.update_agent_prompt(agent_to_edit, default)
+        st.success("Reverted to default prompt")
+
+
+# Version history
+st.subheader("📚 Prompt Version History")
+versions = load_prompt_versions(agent_to_edit)
+
+for vid, vnum, vprompt, ts in versions:
+    with st.expander(f"Version {vnum} — {ts}"):
+        st.code(vprompt)
+        if st.button(f"Load Version {vnum}", key=f"load_{vid}"):
+            st.session_state.engine.update_agent_prompt(agent_to_edit, vprompt)
+            st.success(f"Loaded version {vnum}!")
+
+
+# ======================================================
+# AGENT OUTPUTS
 # ======================================================
 
 st.write("---")
@@ -288,71 +363,59 @@ st.header("📁 Agent Outputs")
 if st.session_state.engine.memory:
     for agent_name in pipeline_steps:
         st.subheader(f"🔹 {agent_name.upper()} Output")
-        st.code(st.session_state.engine.get_output(agent_name), language="markdown")
+        st.code(st.session_state.engine.get_output(agent_name))
 else:
-    st.info("Run the pipeline to inspect agent outputs.")
+    st.info("Run a pipeline to see outputs.")
 
 
 # ======================================================
-# COMPARISON TOOLS
+# PAST RUNS VIEWER
 # ======================================================
+
+def load_runs():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT id, timestamp, task_input FROM runs ORDER BY id DESC")
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def load_run_details(run_id):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT timestamp, task_input, final_output FROM runs WHERE id = ?", (run_id,))
+    run = c.fetchone()
+    c.execute("SELECT agent_name, output FROM agent_outputs WHERE run_id = ?", (run_id,))
+    agents = c.fetchall()
+    conn.close()
+    return run, agents
 
 st.write("---")
-st.header("🔍 Compare Agent Outputs")
-
-a1 = st.selectbox("Agent A", ["None"] + pipeline_steps)
-a2 = st.selectbox("Agent B", ["None"] + pipeline_steps)
-
-if a1 != "None" and a2 != "None" and a1 != a2:
-    out1 = st.session_state.engine.get_output(a1)
-    out2 = st.session_state.engine.get_output(a2)
-
-    diff = difflib.unified_diff(
-        out1.splitlines(),
-        out2.splitlines(),
-        fromfile=a1,
-        tofile=a2,
-        lineterm=""
-    )
-
-    st.code("\n".join(diff), language="diff")
-
-
-# ======================================================
-# DATABASE HISTORY VIEWER
-# ======================================================
-
-st.write("---")
-st.header("📜 Past Runs (Saved in Database)")
+st.header("📜 Past Runs")
 
 runs = load_runs()
-
 run_options = {f"Run {r[0]} — {r[1]}": r[0] for r in runs}
 
-selected_run = st.selectbox("Select a past run", ["None"] + list(run_options.keys()))
+sel_run = st.selectbox("Select Past Run", ["None"] + list(run_options.keys()))
 
-if selected_run != "None":
-    run_id = run_options[selected_run]
+if sel_run != "None":
+    run_id = run_options[sel_run]
     run, agents = load_run_details(run_id)
+    ts, task, final = run
 
-    timestamp, task, final = run
-
-    st.subheader(f"🗂 Run {run_id} — {timestamp}")
+    st.subheader(f"🗂 Run {run_id} — {ts}")
     st.write("### Task Input")
     st.code(task)
-
     st.write("### Final Output")
     st.code(final)
 
-    st.write("### Agent Outputs")
     for agent_name, output in agents:
-        st.markdown(f"#### 🔸 {agent_name}")
+        st.write(f"#### 🔸 {agent_name}")
         st.code(output)
 
-    # Export JSON
     export = {
         "run_id": run_id,
-        "timestamp": timestamp,
+        "timestamp": ts,
         "task_input": task,
         "final_output": final,
         "agents": {a[0]: a[1] for a in agents}
