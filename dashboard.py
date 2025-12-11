@@ -8,6 +8,63 @@ from datetime import datetime
 from config import OPENAI_API_KEY, DB_FILE_PATH
 
 # ======================================================
+# DEFAULT AGENTS (STRUCTURED STATE)
+# ======================================================
+
+default_agents = {
+    "planner": """
+You are the Planner Agent.
+Refrain from producing the actual solution.
+Only clarify the task and produce steps.
+
+
+Task:
+{task}
+
+Output:
+- Clarified Task
+- Plan
+""",
+
+    "solver": """
+You are the Solver Agent.
+Use the plan to produce an answer.
+
+Plan:
+{plan}
+
+Output:
+- Answer
+""",
+
+    "critic": """
+You are the Critic Agent.
+Evaluate the answer.
+
+Answer:
+{answer}
+
+Output:
+- Issues
+- Improvements
+""",
+
+    "finalizer": """
+You are the Finalizer Agent.
+You must revise the original answer using the critique.
+
+Original Answer:
+{answer}
+
+Critique:
+{critique}
+
+Your task:
+Return the improved final answer only.
+""",
+}
+
+# ======================================================
 # DATABASE SETUP
 # ======================================================
 
@@ -49,6 +106,15 @@ def init_db():
         )
     """)
 
+    # Agents table (persistent registry)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS agents (
+            agent_name TEXT PRIMARY KEY,
+            model TEXT,
+            prompt_template TEXT
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -75,6 +141,42 @@ def save_run_to_db(task_input, final_output, memory_dict):
     conn.commit()
     conn.close()
     return run_id
+
+
+# ======================================================
+# AGENT PERSISTENCE
+# ======================================================
+
+def load_agents_from_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT agent_name, model, prompt_template FROM agents")
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+def save_agent_to_db(agent_name, model, prompt_template):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    c.execute("""
+        INSERT OR REPLACE INTO agents (agent_name, model, prompt_template)
+        VALUES (?, ?, ?)
+    """, (agent_name, model, prompt_template))
+
+    conn.commit()
+    conn.close()
+
+
+def bootstrap_default_agents(defaults):
+    """Runs once if agents table is empty."""
+    existing = load_agents_from_db()
+    if existing:
+        return  # already bootstrapped
+
+    for name, prompt in defaults.items():
+        save_agent_to_db(name, "gpt-4.1-nano", prompt)
 
 
 # ======================================================
@@ -208,70 +310,15 @@ st.title("🧠 Multi-Agent Pipeline Debug Dashboard (Structured + Prompt Version
 st.caption("Inspect agent outputs, version agent prompts, run pipelines, and store history in SQLite.")
 
 init_db()
+bootstrap_default_agents(default_agents)
 
-
-# ======================================================
-# DEFAULT AGENTS (STRUCTURED STATE)
-# ======================================================
-
-default_agents = {
-    "planner": """
-You are the Planner Agent.
-Refrain from producing the actual solution.
-Only clarify the task and produce steps.
-
-
-Task:
-{task}
-
-Output:
-- Clarified Task
-- Plan
-""",
-
-    "solver": """
-You are the Solver Agent.
-Use the plan to produce an answer.
-
-Plan:
-{plan}
-
-Output:
-- Answer
-""",
-
-    "critic": """
-You are the Critic Agent.
-Evaluate the answer.
-
-Answer:
-{answer}
-
-Output:
-- Issues
-- Improvements
-""",
-
-    "finalizer": """
-You are the Finalizer Agent.
-You must revise the original answer using the critique.
-
-Original Answer:
-{answer}
-
-Critique:
-{critique}
-
-Your task:
-Return the improved final answer only.
-""",
-}
-
-# First-time initialization
+# First-time initialization (now loaded from DB)
 if "engine" not in st.session_state:
     st.session_state.engine = MultiAgentEngine()
-    for name, tmpl in default_agents.items():
-        st.session_state.engine.add_agent(name, tmpl)
+
+    stored_agents = load_agents_from_db()
+    for name, model, prompt in stored_agents:
+        st.session_state.engine.add_agent(name, prompt_template=prompt, model=model)
 
 
 # ======================================================
@@ -372,12 +419,18 @@ with col1:
     if st.button("💾 Save New Prompt Version"):
         version = save_prompt_version(agent_to_edit, new_prompt)
         st.session_state.engine.update_agent_prompt(agent_to_edit, new_prompt)
+        save_agent_to_db(agent_to_edit,
+                         st.session_state.engine.agents[agent_to_edit].model,
+                         new_prompt)
         st.success(f"Saved as version {version}")
 
 with col2:
     if st.button("♻️ Revert to Default"):
         default = default_agents[agent_to_edit]
         st.session_state.engine.update_agent_prompt(agent_to_edit, default)
+        save_agent_to_db(agent_to_edit,
+                         st.session_state.engine.agents[agent_to_edit].model,
+                         default)
         st.success("Reverted to default prompt")
 
 
