@@ -6,6 +6,7 @@ import json
 import sqlite3
 from datetime import datetime
 from config import OPENAI_API_KEY, DB_FILE_PATH
+from db import get_conn
 from typing import List, Dict, Any, Tuple, Optional
 
 # =======================
@@ -108,75 +109,71 @@ def init_db():
     - if agents table exists but lacks new columns, add them (role, input_vars, output_vars)
     - keep prompt_version compatible
     """
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
+    with get_conn(DB_PATH) as conn:
+        c = conn.cursor()
 
-    # Runs table
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS runs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TEXT,
-            task_input TEXT,
-            final_output TEXT
-        )
-    """)
+        # Runs table
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT,
+                task_input TEXT,
+                final_output TEXT
+            )
+        """)
 
-    # Agent outputs per run
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS agent_outputs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            run_id INTEGER,
-            agent_name TEXT,
-            output TEXT,
-            FOREIGN KEY(run_id) REFERENCES runs(id)
-        )
-    """)
+        # Agent outputs per run
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS agent_outputs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id INTEGER,
+                agent_name TEXT,
+                output TEXT,
+                FOREIGN KEY(run_id) REFERENCES runs(id)
+            )
+        """)
 
-    # Versioned agent prompts (augment to include metadata JSON for full snapshot)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS agent_prompt_versions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            agent_name TEXT,
-            version INTEGER,
-            prompt TEXT,
-            metadata_json TEXT,
-            timestamp TEXT
-        )
-    """)
+        # Versioned agent prompts (augment to include metadata JSON for full snapshot)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS agent_prompt_versions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_name TEXT,
+                version INTEGER,
+                prompt TEXT,
+                metadata_json TEXT,
+                timestamp TEXT
+            )
+        """)
 
-    # Agents table (persistent registry)
-    # We'll create with the new schema if not exists.
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS agents (
-            agent_name TEXT PRIMARY KEY,
-            model TEXT,
-            prompt_template TEXT,
-            role TEXT,
-            input_vars TEXT,   -- JSON array
-            output_vars TEXT   -- JSON array
-        )
-    """)
+        # Agents table (persistent registry)
+        # We'll create with the new schema if not exists.
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS agents (
+                agent_name TEXT PRIMARY KEY,
+                model TEXT,
+                prompt_template TEXT,
+                role TEXT,
+                input_vars TEXT,   -- JSON array
+                output_vars TEXT   -- JSON array
+            )
+        """)
 
-    # Pipelines table (saved pipelines)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS pipelines (
-            pipeline_name TEXT PRIMARY KEY,
-            steps_json TEXT,     -- JSON list of agent names in order
-            metadata_json TEXT,  -- optional pipeline metadata
-            timestamp TEXT
-        )
-    """)
-
-    conn.commit()
-    conn.close()
+        # Pipelines table (saved pipelines)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS pipelines (
+                pipeline_name TEXT PRIMARY KEY,
+                steps_json TEXT,     -- JSON list of agent names in order
+                metadata_json TEXT,  -- optional pipeline metadata
+                timestamp TEXT
+            )
+        """)
 
 
 def _get_table_columns(table: str) -> List[str]:
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute(f"PRAGMA table_info({table})")
-    rows = c.fetchall()
-    conn.close()
+    with get_conn(DB_PATH) as conn:
+        c = conn.cursor()
+        c.execute(f"PRAGMA table_info({table})")
+        rows = c.fetchall()
     return [r[1] for r in rows]  # name column
 
 
@@ -186,17 +183,15 @@ def migrate_agents_table():
     this function is mainly defensive if older DB structure exists.
     """
     cols = _get_table_columns("agents")
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    if "role" not in cols:
-        # can't use IF NOT EXISTS for ALTER in SQLite; do add columns safely
-        c.execute("ALTER TABLE agents ADD COLUMN role TEXT")
-    if "input_vars" not in cols:
-        c.execute("ALTER TABLE agents ADD COLUMN input_vars TEXT")
-    if "output_vars" not in cols:
-        c.execute("ALTER TABLE agents ADD COLUMN output_vars TEXT")
-    conn.commit()
-    conn.close()
+    with get_conn(DB_PATH) as conn:
+        c = conn.cursor()
+        if "role" not in cols:
+            # can't use IF NOT EXISTS for ALTER in SQLite; do add columns safely
+            c.execute("ALTER TABLE agents ADD COLUMN role TEXT")
+        if "input_vars" not in cols:
+            c.execute("ALTER TABLE agents ADD COLUMN input_vars TEXT")
+        if "output_vars" not in cols:
+            c.execute("ALTER TABLE agents ADD COLUMN output_vars TEXT")
 
 
 # =======================
@@ -204,94 +199,84 @@ def migrate_agents_table():
 # =======================
 
 def save_run_to_db(task_input: str, final_output: str, memory_dict: Dict[str, Any]) -> int:
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
+    with get_conn(DB_PATH) as conn:
+        c = conn.cursor()
 
-    ts = datetime.utcnow().isoformat()
+        ts = datetime.utcnow().isoformat()
 
-    c.execute("""
-        INSERT INTO runs (timestamp, task_input, final_output)
-        VALUES (?, ?, ?)
-    """, (ts, task_input, final_output))
-
-    run_id = c.lastrowid
-
-    for agent, output in memory_dict.items():
-        # store as text (string)
         c.execute("""
-            INSERT INTO agent_outputs (run_id, agent_name, output)
+            INSERT INTO runs (timestamp, task_input, final_output)
             VALUES (?, ?, ?)
-        """, (run_id, agent, json.dumps(output) if not isinstance(output, str) else output))
+        """, (ts, task_input, final_output))
 
-    conn.commit()
-    conn.close()
+        run_id = c.lastrowid
+
+        for agent, output in memory_dict.items():
+            # store as text (string)
+            c.execute("""
+                INSERT INTO agent_outputs (run_id, agent_name, output)
+                VALUES (?, ?, ?)
+            """, (run_id, agent, json.dumps(output) if not isinstance(output, str) else output))
+
     return run_id
 
 
 def load_agents_from_db() -> List[Tuple[str, str, str, Optional[str], Optional[str], Optional[str]]]:
     """Returns rows: agent_name, model, prompt_template, role, input_vars_json, output_vars_json"""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT agent_name, model, prompt_template, role, input_vars, output_vars FROM agents")
-    rows = c.fetchall()
-    conn.close()
-    return rows
+    with get_conn(DB_PATH) as conn:
+        c = conn.cursor()
+        c.execute("SELECT agent_name, model, prompt_template, role, input_vars, output_vars FROM agents")
+        rows = c.fetchall()
+        return rows
 
 
 def save_agent_to_db(agent_name: str, model: str, prompt_template: str,
                      role: str = "", input_vars: Optional[List[str]] = None,
                      output_vars: Optional[List[str]] = None):
     """Saves agent metadata. input_vars/output_vars are stored as JSON arrays (strings) for flexibility."""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
 
     input_json = json.dumps(input_vars or [])
     output_json = json.dumps(output_vars or [])
 
-    c.execute("""
-        INSERT OR REPLACE INTO agents (agent_name, model, prompt_template, role, input_vars, output_vars)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (agent_name, model, prompt_template, role, input_json, output_json))
-
-    conn.commit()
-    conn.close()
+    with get_conn(DB_PATH) as conn:
+        c = conn.cursor()
+        c.execute("""
+            INSERT OR REPLACE INTO agents (agent_name, model, prompt_template, role, input_vars, output_vars)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (agent_name, model, prompt_template, role, input_json, output_json))
 
 
 def load_prompt_versions(agent_name: str):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
+    with get_conn(DB_PATH) as conn:
+        c = conn.cursor()
 
-    c.execute("""
-        SELECT id, version, prompt, metadata_json, timestamp
-        FROM agent_prompt_versions
-        WHERE agent_name = ?
-        ORDER BY version DESC
-    """, (agent_name,))
+        c.execute("""
+            SELECT id, version, prompt, metadata_json, timestamp
+            FROM agent_prompt_versions
+            WHERE agent_name = ?
+            ORDER BY version DESC
+        """, (agent_name,))
 
-    rows = c.fetchall()
-    conn.close()
-    return rows
+        rows = c.fetchall()
+        return rows
 
 
 def save_prompt_version(agent_name: str, prompt_text: str, metadata: Optional[dict] = None) -> int:
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
+    with get_conn(DB_PATH) as conn:
+        c = conn.cursor()
 
-    c.execute("SELECT MAX(version) FROM agent_prompt_versions WHERE agent_name = ?", (agent_name,))
-    result = c.fetchone()[0]
-    new_version = 1 if result is None else result + 1
+        c.execute("SELECT MAX(version) FROM agent_prompt_versions WHERE agent_name = ?", (agent_name,))
+        result = c.fetchone()[0]
+        new_version = 1 if result is None else result + 1
 
-    ts = datetime.utcnow().isoformat()
+        ts = datetime.utcnow().isoformat()
+        metadata_json = json.dumps(metadata or {})
 
-    metadata_json = json.dumps(metadata or {})
+        c.execute("""
+            INSERT INTO agent_prompt_versions (agent_name, version, prompt, metadata_json, timestamp)
+            VALUES (?, ?, ?, ?, ?)
+        """, (agent_name, new_version, prompt_text, metadata_json, ts))
 
-    c.execute("""
-        INSERT INTO agent_prompt_versions (agent_name, version, prompt, metadata_json, timestamp)
-        VALUES (?, ?, ?, ?, ?)
-    """, (agent_name, new_version, prompt_text, metadata_json, ts))
-
-    conn.commit()
-    conn.close()
     return new_version
 
 
@@ -299,27 +284,25 @@ def save_prompt_version(agent_name: str, prompt_text: str, metadata: Optional[di
 # Pipeline persistence (save/load)
 # =======================
 def save_pipeline_to_db(pipeline_name: str, steps: List[str], metadata: Optional[dict] = None):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
+    with get_conn(DB_PATH) as conn:
+        c = conn.cursor()
 
-    ts = datetime.utcnow().isoformat()
-    steps_json = json.dumps(steps)
-    metadata_json = json.dumps(metadata or {})
+        ts = datetime.utcnow().isoformat()
+        steps_json = json.dumps(steps)
+        metadata_json = json.dumps(metadata or {})
 
-    c.execute("""
-        INSERT OR REPLACE INTO pipelines (pipeline_name, steps_json, metadata_json, timestamp)
-        VALUES (?, ?, ?, ?)
-    """, (pipeline_name, steps_json, metadata_json, ts))
-    conn.commit()
-    conn.close()
+        c.execute("""
+            INSERT OR REPLACE INTO pipelines (pipeline_name, steps_json, metadata_json, timestamp)
+            VALUES (?, ?, ?, ?)
+        """, (pipeline_name, steps_json, metadata_json, ts))
 
 
 def load_pipelines_from_db() -> List[Tuple[str, List[str], dict, str]]:
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT pipeline_name, steps_json, metadata_json, timestamp FROM pipelines ORDER BY pipeline_name")
-    rows = c.fetchall()
-    conn.close()
+    with get_conn(DB_PATH) as conn:
+        c = conn.cursor()
+        c.execute("SELECT pipeline_name, steps_json, metadata_json, timestamp FROM pipelines ORDER BY pipeline_name")
+        rows = c.fetchall()
+
     result = []
     for name, steps_json, metadata_json, ts in rows:
         steps = json.loads(steps_json) if steps_json else []
@@ -329,11 +312,9 @@ def load_pipelines_from_db() -> List[Tuple[str, List[str], dict, str]]:
 
 
 def delete_pipeline_from_db(pipeline_name: str):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("DELETE FROM pipelines WHERE pipeline_name = ?", (pipeline_name,))
-    conn.commit()
-    conn.close()
+    with get_conn(DB_PATH) as conn:
+        c = conn.cursor()
+        c.execute("DELETE FROM pipelines WHERE pipeline_name = ?", (pipeline_name,))
 
 
 # =======================
@@ -613,12 +594,27 @@ def app_start():
     st.session_state.openai_client = client
 
 
+def reload_agents_into_engine():
+    "Helper to reload agents into the engine."
+    engine = st.session_state.engine
+    engine.agents.clear()
+
+    stored_agents = load_agents_from_db()
+    for name, model, prompt, role, input_json, output_json in stored_agents:
+        input_vars = json.loads(input_json) if input_json else []
+        output_vars = json.loads(output_json) if output_json else []
+        engine.add_agent(name, prompt, model, role, input_vars, output_vars)
+
+
 # Only start the app if we don't already have an engine in session state.
 # This prevents double initialization during reruns.
 if "engine" not in st.session_state:
     # For Streamlit invocation, app_start() should be called here so side-effects
     # happen only when we actually run the app (not at import time by a test runner).
-    app_start()
+    if "engine" not in st.session_state:
+        app_start()
+    else:
+        reload_agents_into_engine()
 
 
 # Also provide the conventional guard so running the script directly will bootstrap.
@@ -649,10 +645,12 @@ else:
 available_agents = list(st.session_state.engine.agents.keys())
 
 # Allow creating an ad-hoc pipeline if no saved pipeline chosen:
+default_steps = pipeline_steps or available_agents
+
 selected_steps = st.sidebar.multiselect(
     "Or select Agents to run (order is preserved by selection)",
     available_agents,
-    default=pipeline_steps or list(default_agents.keys())
+    default=default_steps
 )
 
 # Text input
@@ -884,22 +882,20 @@ if a1 != "None" and a2 != "None" and a1 != a2:
 # PAST RUNS VIEWER
 # ======================================================
 def load_runs():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT id, timestamp, task_input FROM runs ORDER BY id DESC")
-    rows = c.fetchall()
-    conn.close()
-    return rows
+    with get_conn(DB_PATH) as conn:
+        c = conn.cursor()
+        c.execute("SELECT id, timestamp, task_input FROM runs ORDER BY id DESC")
+        rows = c.fetchall()
+        return rows
 
 def load_run_details(run_id: int):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT timestamp, task_input, final_output FROM runs WHERE id = ?", (run_id,))
-    run = c.fetchone()
-    c.execute("SELECT agent_name, output FROM agent_outputs WHERE run_id = ?", (run_id,))
-    agents = c.fetchall()
-    conn.close()
-    return run, agents
+    with get_conn(DB_PATH) as conn:
+        c = conn.cursor()
+        c.execute("SELECT timestamp, task_input, final_output FROM runs WHERE id = ?", (run_id,))
+        run = c.fetchone()
+        c.execute("SELECT agent_name, output FROM agent_outputs WHERE run_id = ?", (run_id,))
+        agents = c.fetchall()
+        return run, agents
 
 st.write("---")
 st.header("📜 Past Runs")
