@@ -739,7 +739,11 @@ if run_button:
 st.write("---")
 st.header("✏️ Versioned Agent Prompt Editor")
 
-agent_to_edit = st.selectbox("Select Agent", list(st.session_state.engine.agents.keys()))
+agent_to_edit = st.selectbox(
+    "Select Agent",
+    list(st.session_state.engine.agents.keys()),
+    key="versioned_editor_select"
+)
 
 agent_obj = st.session_state.engine.agents[agent_to_edit]
 current_prompt = agent_obj.prompt_template
@@ -941,6 +945,39 @@ if sel_run != "None":
     )
 
 
+def parse_agent_row(row):
+    """Normalize agent DB row into a dict."""
+    name, model, prompt, role, input_json, output_json = row
+    return {
+        "name": name,
+        "model": model,
+        "prompt": prompt,
+        "role": role or "",
+        "input_vars": json.loads(input_json) if input_json else [],
+        "output_vars": json.loads(output_json) if output_json else []
+    }
+
+
+# ======================================================
+# SHARED HELPERS (CRUD)
+# ======================================================
+
+def reload_agents_into_engine():
+    engine = st.session_state.engine
+    engine.agents.clear()
+
+    for row in load_agents_from_db():
+        a = parse_agent_row(row)
+        engine.add_agent(
+            a["name"],
+            a["prompt"],
+            a["model"],
+            a["role"],
+            a["input_vars"],
+            a["output_vars"]
+        )
+
+
 # ======================================================
 # AGENT MANAGEMENT PANEL (CRUD)
 # ======================================================
@@ -948,171 +985,186 @@ if sel_run != "None":
 st.write("---")
 st.header("🛠️ Agent Management (CRUD)")
 
-# Load agents
-agents = load_agents_from_db()
-agent_names = [a[0] for a in agents]
+agents_raw = load_agents_from_db()
+agents = [parse_agent_row(a) for a in agents_raw]
+agent_names = [a["name"] for a in agents]
 
-crud_tabs = st.tabs([
-    "📋 List Agents",
-    "➕ Create Agent",
-    "✏️ Edit Agent",
-    "🗑️ Delete Agent",
-    "📄 Duplicate Agent"
+tabs = st.tabs([
+    "📋 List",
+    "➕ Create",
+    "✏️ Edit",
+    "🗑️ Delete",
+    "📄 Duplicate"
 ])
 
 # ------------------------------------------------------
 # LIST AGENTS
 # ------------------------------------------------------
-with crud_tabs[0]:
-    st.subheader("📋 Registered Agents")
+with tabs[0]:
     if not agents:
         st.info("No agents registered.")
     else:
-        for name, model, prompt, role, input_json, output_json in agents:
-            input_vars = json.loads(input_json) if input_json else []
-            output_vars = json.loads(output_json) if output_json else []
-            with st.expander(f"🤖 {name} — Model: {model} — Role: {role}"):
-                st.write("**Input vars:**", input_vars)
-                st.write("**Output vars:**", output_vars)
-                st.code(prompt, language="markdown")
+        for a in agents:
+            with st.expander(f"🤖 {a['name']} — {a['model']} — {a['role']}"):
+                st.write("**Input vars:**", a["input_vars"])
+                st.write("**Output vars:**", a["output_vars"])
+                st.code(a["prompt"], language="markdown")
 
 # ------------------------------------------------------
 # CREATE AGENT
 # ------------------------------------------------------
-with crud_tabs[1]:
-    st.subheader("➕ Create New Agent")
+with tabs[1]:
+    st.subheader("Create Agent")
 
-    new_name = st.text_input("Agent Name", "", key="crud_new_name")
-    new_model = st.text_input("Model", "gpt-4.1-nano", key="crud_new_model")
-    new_role = st.text_input("Role (freeform)", "", key="crud_new_role")
-    new_input_vars = st.text_input("Input vars (comma separated)", "", key="crud_new_input_vars")
-    new_output_vars = st.text_input("Output vars (comma separated)", "", key="crud_new_output_vars")
-    new_prompt = st.text_area("Prompt Template", "", height=200, key="crud_new_prompt")
+    name = st.text_input("Agent Name")
+    model = st.text_input("Model", "gpt-4.1-nano")
+    role = st.text_input("Role")
+    input_vars = st.text_input("Input vars (comma separated)")
+    output_vars = st.text_input("Output vars (comma separated)")
+    prompt = st.text_area("Prompt Template", height=200)
 
-    if st.button("💾 Create Agent"):
-        if not new_name.strip():
-            st.error("Agent name cannot be empty.")
+    if st.button("Create Agent"):
+        if not name.strip():
+            st.error("Agent name required.")
         else:
-            input_vars = [v.strip() for v in (new_input_vars or "").split(",") if v.strip()]
-            output_vars = [v.strip() for v in (new_output_vars or "").split(",") if v.strip()]
-            save_agent_to_db(new_name, new_model, new_prompt, new_role, input_vars, output_vars)
-
-            # Register in engine
-            st.session_state.engine.add_agent(new_name, new_prompt, new_model, new_role, input_vars, output_vars)
-
-            st.success(f"Agent '{new_name}' created successfully!")
+            save_agent_to_db(
+                name.strip(),
+                model,
+                prompt,
+                role,
+                [v.strip() for v in input_vars.split(",") if v.strip()],
+                [v.strip() for v in output_vars.split(",") if v.strip()]
+            )
+            reload_agents_into_engine()
+            st.success("Agent created.")
             st.rerun()
 
 # ------------------------------------------------------
 # EDIT AGENT
 # ------------------------------------------------------
-with crud_tabs[2]:
-    st.subheader("✏️ Edit Existing Agent")
-
-    if not agent_names:
+with tabs[2]:
+    if not agents:
         st.info("No agents to edit.")
     else:
-        agent_to_edit = st.selectbox("Select Agent", agent_names, key="crud_edit_agent_select")
+        selected = st.selectbox(
+            "Select Agent",
+            agent_names,
+            key="crud_edit_select"
+        )
 
-        # Load current agent data
-        for name, model, prompt, role, input_json, output_json in agents:
-            if name == agent_to_edit:
-                current_model = model
-                current_prompt = prompt
-                current_role = role or ""
-                current_input_vars = ", ".join(json.loads(input_json) if input_json else [])
-                current_output_vars = ", ".join(json.loads(output_json) if output_json else [])
-                break
+        agent = next(a for a in agents if a["name"] == selected)
 
-        updated_name = st.text_input("Agent Name", agent_to_edit, key="crud_edit_name")
-        updated_model = st.text_input("Model", current_model, key="crud_edit_model")
-        updated_role = st.text_input("Role (freeform)", current_role, key="crud_edit_role")
-        updated_input_vars = st.text_input("Input vars (comma separated)", current_input_vars, key="crud_edit_input_vars")
-        updated_output_vars = st.text_input("Output vars (comma separated)", current_output_vars, key="crud_edit_output_vars")
-        updated_prompt = st.text_area("Prompt Template", current_prompt, height=200, key="crud_edit_prompt")
+        st.subheader(f"Editing: {selected}")
 
-        if st.button("💾 Save Changes"):
-            input_vars = [v.strip() for v in (updated_input_vars or "").split(",") if v.strip()]
-            output_vars = [v.strip() for v in (updated_output_vars or "").split(",") if v.strip()]
+        name = st.text_input(
+            "Agent Name",
+            agent["name"],
+            key=f"edit_name_{selected}"
+        )
+        model = st.text_input(
+            "Model",
+            agent["model"],
+            key=f"edit_model_{selected}"
+        )
+        role = st.text_input(
+            "Role",
+            agent["role"],
+            key=f"edit_role_{selected}"
+        )
+        input_vars = st.text_input(
+            "Input vars (comma separated)",
+            ", ".join(agent["input_vars"]),
+            key=f"edit_input_{selected}"
+        )
+        output_vars = st.text_input(
+            "Output vars (comma separated)",
+            ", ".join(agent["output_vars"]),
+            key=f"edit_output_{selected}"
+        )
+        prompt = st.text_area(
+            "Prompt Template",
+            agent["prompt"],
+            height=200,
+            key=f"edit_prompt_{selected}"
+        )
 
-            # Update DB
-            save_agent_to_db(updated_name, updated_model, updated_prompt, updated_role, input_vars, output_vars)
+        if st.button("Save Changes"):
+            save_agent_to_db(
+                name.strip(),
+                model,
+                prompt,
+                role,
+                [v.strip() for v in input_vars.split(",") if v.strip()],
+                [v.strip() for v in output_vars.split(",") if v.strip()]
+            )
 
-            # Update engine: remove old if renamed
-            if updated_name != agent_to_edit:
-                st.session_state.engine.remove_agent(agent_to_edit)
+            if name != selected:
+                with get_conn(DB_PATH) as conn:
+                    c = conn.cursor()
+                    c.execute(
+                        "DELETE FROM agents WHERE agent_name = ?",
+                        (selected,)
+                    )
 
-            st.session_state.engine.add_agent(updated_name, updated_prompt, updated_model, updated_role, input_vars, output_vars)
-
-            st.success("Agent updated!")
+            reload_agents_into_engine()
+            st.success("Agent updated.")
             st.rerun()
 
 # ------------------------------------------------------
 # DELETE AGENT
 # ------------------------------------------------------
-with crud_tabs[3]:
-    st.subheader("🗑️ Delete Agent")
-
+with tabs[3]:
     if not agent_names:
         st.info("No agents to delete.")
     else:
-        agent_to_delete = st.selectbox("Select Agent to Delete", agent_names, key="crud_delete_agent_select")
+        target = st.selectbox(
+            "Agent to delete",
+            agent_names,
+            key="crud_delete_select"
+        )
 
-        if st.button("🗑️ Delete Agent"):
-            conn = sqlite3.connect(DB_PATH)
-            c = conn.cursor()
-            c.execute("DELETE FROM agents WHERE agent_name = ?", (agent_to_delete,))
-            conn.commit()
-            conn.close()
+        if st.button("Delete Agent"):
+            with get_conn(DB_PATH) as conn:
+                c = conn.cursor()
+                c.execute("DELETE FROM agents WHERE agent_name = ?", (target,))
 
-            # Remove from engine
-            st.session_state.engine.remove_agent(agent_to_delete)
-
-            st.warning(f"Agent '{agent_to_delete}' deleted.")
+            reload_agents_into_engine()
+            st.warning(f"Deleted agent '{target}'.")
             st.rerun()
 
 # ------------------------------------------------------
 # DUPLICATE AGENT
 # ------------------------------------------------------
-with crud_tabs[4]:
-    st.subheader("📄 Duplicate Agent")
-
-    if not agent_names:
+with tabs[4]:
+    if not agents:
         st.info("No agents to duplicate.")
     else:
-        source_agent = st.selectbox(
-            "Select Agent to Duplicate",
+        source_name = st.selectbox(
+            "Source Agent",
             agent_names,
             key="crud_duplicate_select"
         )
+        source = next(a for a in agents if a["name"] == source_name)
 
-        # Load existing agent details
-        for name, model, prompt, role, input_json, output_json in agents:
-            if name == source_agent:
-                source_model = model
-                source_prompt = prompt
-                source_role = role or ""
-                source_input_vars = json.loads(input_json) if input_json else []
-                source_output_vars = json.loads(output_json) if output_json else []
-                break
+        base = f"{source_name}_copy"
+        new_name = base
+        i = 2
+        while new_name in agent_names:
+            new_name = f"{base}{i}"
+            i += 1
 
-        # Auto-generate a unique duplicate name
-        base_name = f"{source_agent}_copy"
-        new_name = base_name
-        counter = 2
-        existing_names = set(agent_names)
-        while new_name in existing_names:
-            new_name = f"{base_name}{counter}"
-            counter += 1
+        st.write(f"New agent name: **{new_name}**")
 
-        st.write(f"New agent will be named: **{new_name}**")
-
-        if st.button("📄 Duplicate Agent Now", key="crud_duplicate_button"):
-            # Save new entry to DB
-            save_agent_to_db(new_name, source_model, source_prompt, source_role, source_input_vars, source_output_vars)
-
-            # Add to engine
-            st.session_state.engine.add_agent(new_name, source_prompt, source_model, source_role, source_input_vars, source_output_vars)
-
-            st.success(f"Agent '{source_agent}' duplicated as '{new_name}'!")
+        if st.button("Duplicate"):
+            save_agent_to_db(
+                new_name,
+                source["model"],
+                source["prompt"],
+                source["role"],
+                source["input_vars"],
+                source["output_vars"]
+            )
+            reload_agents_into_engine()
+            st.success("Agent duplicated.")
             st.rerun()
+
