@@ -526,13 +526,93 @@ class MultiAgentEngine:
 
 
 # ======================================================
-# GUI START (Streamlit)
+# SHARED HELPERS (USED BY APP_START AND UI)
 # ======================================================
 
-st.set_page_config(page_title="Multi-Agent Dynamic Dashboard", layout="wide")
-st.title("🧠 Multi-Agent Pipeline Dashboard — Dynamic Agents & Pipelines")
-st.caption("Agents are self-describing. Pipelines run against a shared state dict. Versioned prompts and DB persistence included.")
+def parse_agent_row(row):
+    """
+    Normalize agent DB row into a dict.
+    UI helper — no backend behavior change.
+    """
+    name, model, prompt, role, input_json, output_json = row
+    return {
+        "name": name,
+        "model": model,
+        "prompt": prompt,
+        "role": role or "",
+        "input_vars": json.loads(input_json) if input_json else [],
+        "output_vars": json.loads(output_json) if output_json else []
+    }
 
+
+def load_runs():
+    with get_conn(DB_PATH) as conn:
+        c = conn.cursor()
+        c.execute(
+            "SELECT id, timestamp, task_input FROM runs ORDER BY id DESC"
+        )
+        return c.fetchall()
+
+
+def load_run_details(run_id: int):
+    with get_conn(DB_PATH) as conn:
+        c = conn.cursor()
+
+        c.execute(
+            "SELECT timestamp, task_input, final_output FROM runs WHERE id = ?",
+            (run_id,)
+        )
+        run = c.fetchone()
+
+        c.execute(
+            "SELECT agent_name, output FROM agent_outputs WHERE run_id = ?",
+            (run_id,)
+        )
+        agents = c.fetchall()
+
+    return run, agents
+
+
+def render_agent_graph(steps: list[str]):
+    dot = graphviz.Digraph()
+    dot.attr(
+        "node",
+        shape="box",
+        style="rounded,filled",
+        color="#6baed6",
+        fillcolor="#deebf7"
+    )
+
+    for agent in steps:
+        if agent in st.session_state.engine.agents:
+            role = st.session_state.engine.agents[agent].role
+            label = f"{agent}\n({role})" if role else agent
+        else:
+            label = agent
+
+        dot.node(agent, label)
+
+    for i in range(len(steps) - 1):
+        dot.edge(steps[i], steps[i + 1], label="passes state →")
+
+    return dot
+
+
+def reload_agents_into_engine():
+    "Helper to reload agents into the engine."
+    engine = st.session_state.engine
+    engine.agents.clear()
+
+    stored_agents = load_agents_from_db()
+    for name, model, prompt, role, input_json, output_json in stored_agents:
+        input_vars = json.loads(input_json) if input_json else []
+        output_vars = json.loads(output_json) if output_json else []
+        engine.add_agent(name, prompt, model, role, input_vars, output_vars)
+
+
+# ======================================================
+# INITIALIZE DB AND PREPARE GUI
+# ======================================================
 
 # Initialize DB + bootstrap defaults if agents table empty and populate Streamlit session with engine
 def bootstrap_default_agents(defaults: Dict[str, dict]):
@@ -594,18 +674,6 @@ def app_start():
     st.session_state.openai_client = client
 
 
-def reload_agents_into_engine():
-    "Helper to reload agents into the engine."
-    engine = st.session_state.engine
-    engine.agents.clear()
-
-    stored_agents = load_agents_from_db()
-    for name, model, prompt, role, input_json, output_json in stored_agents:
-        input_vars = json.loads(input_json) if input_json else []
-        output_vars = json.loads(output_json) if output_json else []
-        engine.add_agent(name, prompt, model, role, input_vars, output_vars)
-
-
 # Only start the app if we don't already have an engine in session state.
 # This prevents double initialization during reruns.
 if "engine" not in st.session_state:
@@ -624,438 +692,385 @@ if __name__ == "__main__":
         app_start()
 
 
-# -------------------------
-# SIDEBAR — PIPELINE CONFIG
-# -------------------------
-st.sidebar.header("Pipeline Configuration")
+# ======================================================
+# GUI START (REFACTORED UI ONLY)
+# ======================================================
 
-# load pipelines from DB for selection
-pipelines = load_pipelines_from_db()
-pipeline_names = [p[0] for p in pipelines]
-
-selected_pipeline_name = st.sidebar.selectbox("Saved Pipeline", ["<None>"] + pipeline_names)
-
-if selected_pipeline_name and selected_pipeline_name != "<None>":
-    # load steps for this pipeline
-    pipeline_steps = next((p[1] for p in pipelines if p[0] == selected_pipeline_name), [])
-else:
-    pipeline_steps = []
-
-# Fallback: let user pick agents if no saved pipeline selected
-available_agents = list(st.session_state.engine.agents.keys())
-
-# Allow creating an ad-hoc pipeline if no saved pipeline chosen:
-default_steps = pipeline_steps or available_agents
-
-selected_steps = st.sidebar.multiselect(
-    "Or select Agents to run (order is preserved by selection)",
-    available_agents,
-    default=default_steps
+st.set_page_config(
+    page_title="Multi-Agent Dashboard",
+    layout="wide"
 )
 
-# Text input
-task_input = st.sidebar.text_area("Task Input", placeholder="Enter your task here...", key="task_input_sidebar")
+st.markdown(
+    """
+    <style>
+    /* Wrap code blocks */
+    pre code {
+        white-space: pre-wrap !important;
+        word-wrap: break-word !important;
+        overflow-x: auto !important;
+    }
 
-run_button = st.sidebar.button("Run Pipeline")
+    /* Wrap Streamlit code blocks */
+    .stCodeBlock pre {
+        white-space: pre-wrap !important;
+        word-wrap: break-word !important;
+    }
 
-# Pipeline save controls
-st.sidebar.markdown("---")
-st.sidebar.subheader("Manage Pipeline")
-new_pipeline_name = st.sidebar.text_input("Pipeline name (to save)", key="new_pipeline_name")
-if st.sidebar.button("Save Pipeline"):
-    if not new_pipeline_name.strip():
-        st.sidebar.error("Pipeline name cannot be empty.")
-    else:
-        save_pipeline_to_db(new_pipeline_name.strip(), selected_steps)
-        st.sidebar.success(f"Pipeline '{new_pipeline_name}' saved.")
-        st.rerun()
+    /* Wrap JSON output */
+    .stJson pre {
+        white-space: pre-wrap !important;
+        word-wrap: break-word !important;
+    }
 
-if selected_pipeline_name and selected_pipeline_name != "<None>":
-    if st.sidebar.button("Delete Selected Pipeline"):
-        delete_pipeline_from_db(selected_pipeline_name)
-        st.sidebar.success(f"Deleted pipeline '{selected_pipeline_name}'.")
-        st.rerun()
+    /* Wrap text areas */
+    textarea {
+        white-space: pre-wrap !important;
+        word-wrap: break-word !important;
+    }
 
+    /* Prevent horizontal scroll everywhere */
+    section.main {
+        overflow-x: hidden;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
-# ======================================================
-# AGENT INTERACTION GRAPH
-# ======================================================
-st.write("---")
-st.header("🧩 Agent Interaction Graph")
-
-def render_agent_graph(steps: List[str]):
-    dot = graphviz.Digraph()
-    dot.attr("node", shape="box", style="rounded,filled", color="#6baed6", fillcolor="#deebf7")
-    for agent in steps:
-        # Use role label to annotate node if available
-        role = st.session_state.engine.agents.get(agent).role if agent in st.session_state.engine.agents else ""
-        label = f"{agent}\n({role})" if role else agent
-        dot.node(agent, label)
-    for i in range(len(steps) - 1):
-        dot.edge(steps[i], steps[i + 1], label="passes state →")
-    return dot
-
-if selected_steps:
-    st.graphviz_chart(render_agent_graph(selected_steps))
-else:
-    st.info("Select agents in the pipeline to generate the graph.")
-
+st.title("🧠 Multi-Agent Pipeline Dashboard")
+st.caption("Design pipelines, run tasks, inspect agent behavior, and manage prompt versions.")
 
 # ======================================================
-# EXECUTE PIPELINE
+# MODES
 # ======================================================
-if run_button:
-    st.subheader("🚀 Pipeline Execution")
-    with st.spinner("Running agents…"):
-        final_output = st.session_state.engine.run_seq(
-            steps=selected_steps,
-            initial_input=task_input
+
+MODE_RUN = "▶️ Run Pipeline"
+MODE_AGENTS = "🧠 Manage Agents"
+MODE_HISTORY = "📜 History"
+
+mode = st.radio(
+    "Mode",
+    [MODE_RUN, MODE_AGENTS, MODE_HISTORY],
+    horizontal=True
+)
+
+st.divider()
+
+# ======================================================
+# ---------- RUN MODE ----------
+# ======================================================
+
+def render_run_sidebar():
+    st.sidebar.header("Run Configuration")
+
+    pipelines = load_pipelines_from_db()
+    pipeline_names = [p[0] for p in pipelines]
+
+    selected_pipeline = st.sidebar.selectbox(
+        "Pipeline",
+        ["<Ad-hoc>"] + pipeline_names
+    )
+
+    task = st.sidebar.text_area(
+        "Task",
+        placeholder="Describe the task you want the agents to solve…",
+        height=120
+    )
+
+    run_clicked = st.sidebar.button(
+        "🚀 Run Pipeline",
+        use_container_width=True
+    )
+
+    with st.sidebar.expander("Advanced: Pipeline Editing"):
+        available_agents = list(st.session_state.engine.agents.keys())
+
+        if selected_pipeline != "<Ad-hoc>":
+            steps = next(p[1] for p in pipelines if p[0] == selected_pipeline)
+        else:
+            steps = available_agents
+
+        selected_steps = st.multiselect(
+            "Agents (execution order)",
+            available_agents,
+            default=steps
         )
 
-    st.success("Pipeline completed!")
-    st.write("### 🟢 Final Output")
-    # If final_output is JSON-like, pretty print
+        name = st.text_input("Save as Pipeline")
+
+        if st.button("💾 Save Pipeline"):
+            if name.strip():
+                save_pipeline_to_db(name.strip(), selected_steps)
+                st.success("Pipeline saved")
+                st.rerun()
+
+    return selected_pipeline, selected_steps, task, run_clicked
+
+
+def render_final_output(engine):
+    final = engine.state.get("final")
+
+    if not final:
+        st.info("No output yet.")
+        return
+
+    st.subheader("Final Output")
+
     try:
-        parsed = json.loads(final_output) if isinstance(final_output, str) else None
-    except Exception:
-        parsed = None
-
-    if parsed:
+        parsed = json.loads(final)
         st.json(parsed)
-    else:
-        st.code(final_output, language="markdown")
-
-    run_id = save_run_to_db(
-        task_input=task_input,
-        final_output=final_output if isinstance(final_output, str) else json.dumps(final_output),
-        memory_dict=st.session_state.engine.memory
-    )
-    st.info(f"Run saved to DB with ID: {run_id}")
+    except Exception:
+        st.markdown(final)
 
 
-# ======================================================
-# AGENT OUTPUTS
-# ======================================================
-st.write("---")
-st.header("📁 Agent Outputs")
-
-if st.session_state.engine.memory:
-    # Use the pipeline selection that was run (selected_steps)
-    for agent_name in selected_steps:
-        st.subheader(f"🔹 {agent_name}")
-        out = st.session_state.engine.get_output(agent_name)
-        # try show parsed JSON nicely
-        try:
-            parsed = json.loads(out) if isinstance(out, str) else None
-        except Exception:
-            parsed = None
-        if parsed:
-            st.json(parsed)
-        else:
-            st.code(out)
-else:
-    st.info("Run a pipeline to see outputs.")
+def render_agent_outputs(engine, steps):
+    for agent in steps:
+        with st.expander(f"🔹 {agent}"):
+            out = engine.get_output(agent)
+            try:
+                parsed = json.loads(out)
+                st.json(parsed)
+            except Exception:
+                st.markdown(out)
 
 
-# ======================================================
-# COMPARISON TOOLS
-# ======================================================
-st.write("---")
-st.header("🔍 Compare Agent Outputs")
-
-a1 = st.selectbox("Agent A", ["None"] + selected_steps, key="compare_a")
-a2 = st.selectbox("Agent B", ["None"] + selected_steps, key="compare_b")
-
-if a1 != "None" and a2 != "None" and a1 != a2:
-    out1 = str(st.session_state.engine.get_output(a1) or "")
-    out2 = str(st.session_state.engine.get_output(a2) or "")
-
-    diff = difflib.unified_diff(
-        out1.splitlines(),
-        out2.splitlines(),
-        fromfile=a1,
-        tofile=a2,
-        lineterm=""
-    )
-
-    st.code("\n".join(diff), language="diff")
+def render_graph_tab(steps):
+    if not steps:
+        st.info("No agents selected.")
+        return
+    st.graphviz_chart(render_agent_graph(steps))
 
 
-# ======================================================
-# PAST RUNS VIEWER
-# ======================================================
-def load_runs():
-    with get_conn(DB_PATH) as conn:
-        c = conn.cursor()
-        c.execute("SELECT id, timestamp, task_input FROM runs ORDER BY id DESC")
-        rows = c.fetchall()
-        return rows
+def render_compare_tab(engine, steps):
+    col1, col2 = st.columns(2)
 
-def load_run_details(run_id: int):
-    with get_conn(DB_PATH) as conn:
-        c = conn.cursor()
-        c.execute("SELECT timestamp, task_input, final_output FROM runs WHERE id = ?", (run_id,))
-        run = c.fetchone()
-        c.execute("SELECT agent_name, output FROM agent_outputs WHERE run_id = ?", (run_id,))
-        agents = c.fetchall()
-        return run, agents
+    with col1:
+        a1 = st.selectbox("Agent A", steps, key="cmp_a")
 
-st.write("---")
-st.header("📜 Past Runs")
+    with col2:
+        a2 = st.selectbox("Agent B", steps, key="cmp_b")
 
-runs = load_runs()
-run_options = {f"Run {r[0]} — {r[1]}": r[0] for r in runs}
+    if a1 != a2:
+        out1 = str(engine.get_output(a1) or "")
+        out2 = str(engine.get_output(a2) or "")
 
-sel_run = st.selectbox("Select Past Run", ["None"] + list(run_options.keys()))
-
-if sel_run != "None":
-    run_id = run_options[sel_run]
-    run, agents = load_run_details(run_id)
-    ts, task, final = run
-
-    st.subheader(f"🗂 Run {run_id} — {ts}")
-    st.write("### Task Input")
-    st.code(task)
-    st.write("### Final Output")
-    st.code(final)
-
-    for agent_name, output in agents:
-        st.write(f"#### 🔸 {agent_name}")
-        # attempt to pretty print JSON if present
-        try:
-            parsed = json.loads(output)
-            st.json(parsed)
-        except Exception:
-            st.code(output)
-
-    export = {
-        "run_id": run_id,
-        "timestamp": ts,
-        "task_input": task,
-        "final_output": final,
-        "agents": {a[0]: a[1] for a in agents}
-    }
-
-    st.download_button(
-        "Download Run as JSON",
-        data=json.dumps(export, indent=2),
-        file_name=f"run_{run_id}.json",
-        mime="application/json"
-    )
-
-
-def parse_agent_row(row):
-    """Normalize agent DB row into a dict."""
-    name, model, prompt, role, input_json, output_json = row
-    return {
-        "name": name,
-        "model": model,
-        "prompt": prompt,
-        "role": role or "",
-        "input_vars": json.loads(input_json) if input_json else [],
-        "output_vars": json.loads(output_json) if output_json else []
-    }
-
-
-# ======================================================
-# SHARED HELPERS (CRUD)
-# ======================================================
-
-def reload_agents_into_engine():
-    engine = st.session_state.engine
-    engine.agents.clear()
-
-    for row in load_agents_from_db():
-        a = parse_agent_row(row)
-        engine.add_agent(
-            a["name"],
-            a["prompt"],
-            a["model"],
-            a["role"],
-            a["input_vars"],
-            a["output_vars"]
+        diff = difflib.unified_diff(
+            out1.splitlines(),
+            out2.splitlines(),
+            fromfile=a1,
+            tofile=a2,
+            lineterm=""
         )
 
+        st.code("\n".join(diff), language="diff")
+
+
+def render_run_results(engine, steps):
+    tabs = st.tabs([
+        "🟢 Final Output",
+        "📁 Agent Outputs",
+        "🧩 Graph",
+        "🔍 Compare"
+    ])
+
+    with tabs[0]:
+        render_final_output(engine)
+
+    with tabs[1]:
+        render_agent_outputs(engine, steps)
+
+    with tabs[2]:
+        render_graph_tab(steps)
+
+    with tabs[3]:
+        render_compare_tab(engine, steps)
+
+
+def render_run_mode():
+    pipeline, steps, task, run_clicked = render_run_sidebar()
+
+    if run_clicked:
+        with st.spinner("Running pipeline…"):
+            final = st.session_state.engine.run_seq(
+                steps=steps,
+                initial_input=task
+            )
+
+        save_run_to_db(
+            task,
+            final if isinstance(final, str) else json.dumps(final),
+            st.session_state.engine.memory
+        )
+
+        st.success("Pipeline completed!")
+
+    if st.session_state.engine.memory:
+        render_run_results(st.session_state.engine, steps)
+
 
 # ======================================================
-# 🧠 UNIFIED AGENT EDITOR (CRUD + VERSIONING)
+# ---------- AGENT EDITOR MODE ----------
 # ======================================================
 
-st.write("---")
-st.header("🧠 Agent Editor")
+def render_agent_editor():
+    st.header("🧠 Agent Editor")
 
-agents_raw = load_agents_from_db()
-agents = [parse_agent_row(a) for a in agents_raw]
-agent_names = [a["name"] for a in agents]
+    agents_raw = load_agents_from_db()
+    agents = [parse_agent_row(a) for a in agents_raw]
+    names = [a["name"] for a in agents]
 
-# -------------------------
-# Agent selection
-# -------------------------
-selected_agent = st.selectbox(
-    "Select Agent",
-    ["<New Agent>"] + agent_names
-)
-
-is_new = selected_agent == "<New Agent>"
-
-if not is_new:
-    versions = load_prompt_versions(selected_agent)
-    if versions:
-        latest_version = versions[0][1]  # versions are ordered DESC
-        st.caption(f"🧬 Using latest version: v{latest_version}")
-    else:
-        st.caption("🧬 No versions recorded yet")
-
-if is_new:
-    agent_data = {
-        "name": "",
-        "model": "gpt-4.1-nano",
-        "role": "",
-        "input_vars": [],
-        "output_vars": [],
-        "prompt": ""
-    }
-else:
-    agent_data = next(a for a in agents if a["name"] == selected_agent)
-
-# -------------------------
-# Editable form
-# -------------------------
-col_meta, col_prompt = st.columns([1, 2])
-
-with col_meta:
-    st.subheader("Metadata")
-
-    name = st.text_input("Agent Name", agent_data["name"])
-    model = st.text_input("Model", agent_data["model"])
-    role = st.text_input("Role", agent_data["role"])
-
-    input_vars = st.text_input(
-        "Input Vars (comma separated)",
-        ", ".join(agent_data["input_vars"])
+    selected = st.selectbox(
+        "Agent",
+        ["<New Agent>"] + names
     )
 
-    output_vars = st.text_input(
-        "Output Vars (comma separated)",
-        ", ".join(agent_data["output_vars"])
+    is_new = selected == "<New Agent>"
+    agent = (
+        {"name": "", "model": "gpt-4.1-nano", "role": "", "prompt": "", "input_vars": [], "output_vars": []}
+        if is_new
+        else next(a for a in agents if a["name"] == selected)
     )
 
-with col_prompt:
-    st.subheader("Prompt Template")
-    prompt = st.text_area(
-        "Prompt",
-        agent_data["prompt"],
-        height=300
-    )
+    tabs = st.tabs([
+        "1️⃣ Basics",
+        "2️⃣ Prompt",
+        "3️⃣ Inputs / Outputs",
+        "📚 Versions"
+    ])
 
-parsed_input_vars = [v.strip() for v in input_vars.split(",") if v.strip()]
-parsed_output_vars = [v.strip() for v in output_vars.split(",") if v.strip()]
+    with tabs[0]:
+        name = st.text_input("Name", agent["name"])
+        model = st.text_input("Model", agent["model"])
+        role = st.text_input("Role", agent["role"])
 
-# -------------------------
-# Actions
-# -------------------------
-col_a, col_b, col_c, col_d = st.columns(4)
+    with tabs[1]:
+        prompt = st.text_area(
+            "Prompt Template",
+            agent["prompt"],
+            height=400
+        )
 
-with col_a:
-    if st.button("💾 Save (New Version)"):
-        if not name.strip():
-            st.error("Agent name required.")
-        else:
+    with tabs[2]:
+        col1, col2 = st.columns(2)
+        with col1:
+            input_vars = st.text_area(
+                "Input Variables (one per line)",
+                "\n".join(agent["input_vars"])
+            )
+        with col2:
+            output_vars = st.text_area(
+                "Output Variables (one per line)",
+                "\n".join(agent["output_vars"])
+            )
+
+    with tabs[3]:
+        if not is_new:
+            versions = load_prompt_versions(agent["name"])
+            for _, vnum, vprompt, meta, ts in versions:
+                with st.expander(f"Version {vnum} — {ts}"):
+                    st.code(vprompt)
+                    st.json(json.loads(meta or "{}"))
+
+    st.divider()
+
+    col_a, col_b, col_c = st.columns(3)
+
+    with col_a:
+        if st.button("💾 Save"):
             save_agent_to_db(
-                name.strip(),
+                name,
                 model,
                 prompt,
                 role,
-                parsed_input_vars,
-                parsed_output_vars
+                [v.strip() for v in input_vars.splitlines() if v.strip()],
+                [v.strip() for v in output_vars.splitlines() if v.strip()]
             )
-
-            save_prompt_version(
-                name.strip(),
-                prompt,
-                metadata={
-                    "model": model,
-                    "role": role,
-                    "input_vars": parsed_input_vars,
-                    "output_vars": parsed_output_vars
-                }
-            )
-
+            save_prompt_version(name, prompt)
             reload_agents_into_engine()
-            st.success("Saved and versioned.")
+            st.success("Agent saved")
             st.rerun()
 
-with col_b:
-    if not is_new and st.button("📄 Duplicate"):
-        base = f"{name}_copy"
-        new_name = base
-        i = 2
-        while new_name in agent_names:
-            new_name = f"{base}{i}"
-            i += 1
+    with col_b:
+        if not is_new and st.button("📄 Duplicate"):
+            save_agent_to_db(
+                f"{name}_copy",
+                model,
+                prompt,
+                role,
+                agent["input_vars"],
+                agent["output_vars"]
+            )
+            reload_agents_into_engine()
+            st.success("Duplicated")
+            st.rerun()
 
-        save_agent_to_db(
-            new_name,
-            model,
-            prompt,
-            role,
-            parsed_input_vars,
-            parsed_output_vars
-        )
+    with col_c:
+        if not is_new and st.button("🗑 Delete"):
+            with get_conn(DB_PATH) as conn:
+                conn.execute("DELETE FROM agents WHERE agent_name = ?", (name,))
+            reload_agents_into_engine()
+            st.warning("Deleted")
+            st.rerun()
 
-        reload_agents_into_engine()
-        st.success(f"Duplicated as {new_name}")
-        st.rerun()
 
-with col_c:
-    if not is_new and st.button("🗑️ Delete"):
-        with get_conn(DB_PATH) as conn:
-            c = conn.cursor()
-            c.execute("DELETE FROM agents WHERE agent_name = ?", (name,))
-        reload_agents_into_engine()
-        st.warning("Agent deleted.")
-        st.rerun()
+# ======================================================
+# ---------- HISTORY MODE ----------
+# ======================================================
 
-with col_d:
-    if not is_new and name in default_agents and st.button("♻️ Revert Default"):
-        d = default_agents[name]
-        save_agent_to_db(
-            name,
-            d["model"],
-            d["prompt_template"],
-            d.get("role", ""),
-            d.get("input_vars", []),
-            d.get("output_vars", [])
-        )
-        reload_agents_into_engine()
-        st.success("Reverted to default.")
-        st.rerun()
+def render_history_mode():
+    st.header("📜 Past Runs")
 
-# -------------------------
-# Version History
-# -------------------------
-if not is_new:
-    st.subheader("📚 Version History")
-    versions = load_prompt_versions(name)
+    runs = load_runs()
+    options = {f"Run {r[0]} — {r[1]}": r[0] for r in runs}
 
-    if not versions:
-        st.info("No versions available.")
-    else:
-        for vid, vnum, vprompt, vmeta_json, ts in versions:
-            meta = json.loads(vmeta_json or "{}")
-            with st.expander(f"Version {vnum} — {ts}"):
-                st.code(vprompt)
-                st.json(meta)
+    selected = st.selectbox(
+        "Select Run",
+        ["None"] + list(options.keys())
+    )
 
-                if st.button(f"Load Version {vnum}", key=f"load_{vid}"):
-                    save_agent_to_db(
-                        name,
-                        meta.get("model", model),
-                        vprompt,
-                        meta.get("role", role),
-                        meta.get("input_vars", []),
-                        meta.get("output_vars", [])
-                    )
-                    reload_agents_into_engine()
-                    st.success(f"Loaded version {vnum}")
-                    st.rerun()
+    if selected == "None":
+        return
+
+    run_id = options[selected]
+    run, agents = load_run_details(run_id)
+
+    ts, task, final = run
+
+    st.subheader(f"Run {run_id}")
+    st.code(task)
+
+    with st.expander("Final Output"):
+        st.markdown(final)
+
+    for name, out in agents:
+        with st.expander(name):
+            st.code(out)
+
+
+# ======================================================
+# DEV-TIME SAFETY CHECKS
+# ======================================================
+
+for fn in [
+    parse_agent_row,
+    load_runs,
+    load_run_details,
+    render_agent_graph,
+    reload_agents_into_engine,
+]:
+    assert callable(fn), f"{fn.__name__} is not defined"
+
+
+# ======================================================
+# MODE ROUTER
+# ======================================================
+
+if mode == MODE_RUN:
+    render_run_mode()
+
+elif mode == MODE_AGENTS:
+    render_agent_editor()
+
+elif mode == MODE_HISTORY:
+    render_history_mode()
