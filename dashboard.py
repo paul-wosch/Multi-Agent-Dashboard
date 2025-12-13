@@ -734,107 +734,6 @@ if run_button:
 
 
 # ======================================================
-# VERSIONED PROMPT EDITOR
-# ======================================================
-st.write("---")
-st.header("✏️ Versioned Agent Prompt Editor")
-
-agent_to_edit = st.selectbox(
-    "Select Agent",
-    list(st.session_state.engine.agents.keys()),
-    key="versioned_editor_select"
-)
-
-agent_obj = st.session_state.engine.agents[agent_to_edit]
-current_prompt = agent_obj.prompt_template
-
-col_meta, col_prompt = st.columns([1, 3])
-
-with col_meta:
-    st.subheader("Metadata")
-    edited_name = st.text_input("Agent Name", agent_obj.name, key="editor_name")
-    edited_model = st.text_input("Model", agent_obj.model, key="editor_model")
-    edited_role = st.text_input("Role (freeform)", agent_obj.role, key="editor_role")
-    edited_input_vars = st.text_input("Input vars (comma separated)", ", ".join(agent_obj.input_vars), key="editor_input_vars")
-    edited_output_vars = st.text_input("Output vars (comma separated)", ", ".join(agent_obj.output_vars), key="editor_output_vars")
-
-with col_prompt:
-    st.subheader("Prompt Template")
-    new_prompt = st.text_area("Prompt Template", current_prompt, height=300, key="editor_prompt")
-
-col1, col2 = st.columns(2)
-with col1:
-    if st.button("💾 Save New Prompt Version"):
-        # Parse var lists
-        input_vars = [v.strip() for v in (edited_input_vars or "").split(",") if v.strip()]
-        output_vars = [v.strip() for v in (edited_output_vars or "").split(",") if v.strip()]
-
-        # Save versioned prompt snapshot with metadata
-        metadata_snapshot = {
-            "role": edited_role,
-            "input_vars": input_vars,
-            "output_vars": output_vars,
-            "model": edited_model
-        }
-        version = save_prompt_version(agent_to_edit, new_prompt, metadata=metadata_snapshot)
-
-        # Update DB entry for agent (if name changed we need to handle renaming)
-        save_agent_to_db(edited_name, edited_model, new_prompt, edited_role, input_vars, output_vars)
-
-        # If name changed and differs from currently loaded agent, update engine registry
-        if edited_name != agent_obj.name:
-            # remove old entry in engine and add new
-            st.session_state.engine.remove_agent(agent_obj.name)
-        st.session_state.engine.add_agent(edited_name, new_prompt, edited_model, edited_role, input_vars, output_vars)
-
-        st.success(f"Saved as version {version}")
-        st.rerun()
-
-with col2:
-    if st.button("♻️ Revert to Default"):
-        if agent_to_edit in default_agents:
-            default = default_agents[agent_to_edit]
-            save_agent_to_db(agent_to_edit, default.get("model", ""), default.get("prompt_template", ""),
-                             default.get("role", ""), default.get("input_vars", []), default.get("output_vars", []))
-            st.session_state.engine.add_agent(agent_to_edit,
-                                              default.get("prompt_template", ""),
-                                              default.get("model", ""),
-                                              default.get("role", ""),
-                                              default.get("input_vars", []),
-                                              default.get("output_vars", []))
-            st.success("Reverted to default prompt and metadata.")
-            st.rerun()
-        else:
-            st.error("No default available for this agent.")
-
-
-# Version history
-st.subheader("📚 Prompt Version History")
-versions = load_prompt_versions(agent_to_edit)
-if versions:
-    for vid, vnum, vprompt, vmeta_json, ts in versions:
-        try:
-            vmeta = json.loads(vmeta_json) if vmeta_json else {}
-        except Exception:
-            vmeta = {}
-        with st.expander(f"Version {vnum} — {ts} — metadata: {vmeta}"):
-            st.code(vprompt)
-            if st.button(f"Load Version {vnum}", key=f"load_{vid}"):
-                # on load, replace agent state in engine and db
-                metadata_inputs = vmeta.get("input_vars", [])
-                metadata_outputs = vmeta.get("output_vars", [])
-                metadata_model = vmeta.get("model", agent_obj.model)
-                save_agent_to_db(agent_to_edit, metadata_model, vprompt, vmeta.get("role", agent_obj.role),
-                                 metadata_inputs, metadata_outputs)
-                st.session_state.engine.add_agent(agent_to_edit, vprompt, metadata_model, vmeta.get("role", agent_obj.role),
-                                                  metadata_inputs, metadata_outputs)
-                st.success(f"Loaded version {vnum}!")
-                st.rerun()
-else:
-    st.info("No versions found for this agent.")
-
-
-# ======================================================
 # AGENT OUTPUTS
 # ======================================================
 st.write("---")
@@ -979,51 +878,86 @@ def reload_agents_into_engine():
 
 
 # ======================================================
-# AGENT MANAGEMENT PANEL (CRUD)
+# 🧠 UNIFIED AGENT EDITOR (CRUD + VERSIONING)
 # ======================================================
 
 st.write("---")
-st.header("🛠️ Agent Management (CRUD)")
+st.header("🧠 Agent Editor")
 
 agents_raw = load_agents_from_db()
 agents = [parse_agent_row(a) for a in agents_raw]
 agent_names = [a["name"] for a in agents]
 
-tabs = st.tabs([
-    "📋 List",
-    "➕ Create",
-    "✏️ Edit",
-    "🗑️ Delete",
-    "📄 Duplicate"
-])
+# -------------------------
+# Agent selection
+# -------------------------
+selected_agent = st.selectbox(
+    "Select Agent",
+    ["<New Agent>"] + agent_names
+)
 
-# ------------------------------------------------------
-# LIST AGENTS
-# ------------------------------------------------------
-with tabs[0]:
-    if not agents:
-        st.info("No agents registered.")
+is_new = selected_agent == "<New Agent>"
+
+if not is_new:
+    versions = load_prompt_versions(selected_agent)
+    if versions:
+        latest_version = versions[0][1]  # versions are ordered DESC
+        st.caption(f"🧬 Using latest version: v{latest_version}")
     else:
-        for a in agents:
-            with st.expander(f"🤖 {a['name']} — {a['model']} — {a['role']}"):
-                st.write("**Input vars:**", a["input_vars"])
-                st.write("**Output vars:**", a["output_vars"])
-                st.code(a["prompt"], language="markdown")
+        st.caption("🧬 No versions recorded yet")
 
-# ------------------------------------------------------
-# CREATE AGENT
-# ------------------------------------------------------
-with tabs[1]:
-    st.subheader("Create Agent")
+if is_new:
+    agent_data = {
+        "name": "",
+        "model": "gpt-4.1-nano",
+        "role": "",
+        "input_vars": [],
+        "output_vars": [],
+        "prompt": ""
+    }
+else:
+    agent_data = next(a for a in agents if a["name"] == selected_agent)
 
-    name = st.text_input("Agent Name")
-    model = st.text_input("Model", "gpt-4.1-nano")
-    role = st.text_input("Role")
-    input_vars = st.text_input("Input vars (comma separated)")
-    output_vars = st.text_input("Output vars (comma separated)")
-    prompt = st.text_area("Prompt Template", height=200)
+# -------------------------
+# Editable form
+# -------------------------
+col_meta, col_prompt = st.columns([1, 2])
 
-    if st.button("Create Agent"):
+with col_meta:
+    st.subheader("Metadata")
+
+    name = st.text_input("Agent Name", agent_data["name"])
+    model = st.text_input("Model", agent_data["model"])
+    role = st.text_input("Role", agent_data["role"])
+
+    input_vars = st.text_input(
+        "Input Vars (comma separated)",
+        ", ".join(agent_data["input_vars"])
+    )
+
+    output_vars = st.text_input(
+        "Output Vars (comma separated)",
+        ", ".join(agent_data["output_vars"])
+    )
+
+with col_prompt:
+    st.subheader("Prompt Template")
+    prompt = st.text_area(
+        "Prompt",
+        agent_data["prompt"],
+        height=300
+    )
+
+parsed_input_vars = [v.strip() for v in input_vars.split(",") if v.strip()]
+parsed_output_vars = [v.strip() for v in output_vars.split(",") if v.strip()]
+
+# -------------------------
+# Actions
+# -------------------------
+col_a, col_b, col_c, col_d = st.columns(4)
+
+with col_a:
+    if st.button("💾 Save (New Version)"):
         if not name.strip():
             st.error("Agent name required.")
         else:
@@ -1032,139 +966,96 @@ with tabs[1]:
                 model,
                 prompt,
                 role,
-                [v.strip() for v in input_vars.split(",") if v.strip()],
-                [v.strip() for v in output_vars.split(",") if v.strip()]
+                parsed_input_vars,
+                parsed_output_vars
             )
-            reload_agents_into_engine()
-            st.success("Agent created.")
-            st.rerun()
 
-# ------------------------------------------------------
-# EDIT AGENT
-# ------------------------------------------------------
-with tabs[2]:
-    if not agents:
-        st.info("No agents to edit.")
-    else:
-        selected = st.selectbox(
-            "Select Agent",
-            agent_names,
-            key="crud_edit_select"
-        )
-
-        agent = next(a for a in agents if a["name"] == selected)
-
-        st.subheader(f"Editing: {selected}")
-
-        name = st.text_input(
-            "Agent Name",
-            agent["name"],
-            key=f"edit_name_{selected}"
-        )
-        model = st.text_input(
-            "Model",
-            agent["model"],
-            key=f"edit_model_{selected}"
-        )
-        role = st.text_input(
-            "Role",
-            agent["role"],
-            key=f"edit_role_{selected}"
-        )
-        input_vars = st.text_input(
-            "Input vars (comma separated)",
-            ", ".join(agent["input_vars"]),
-            key=f"edit_input_{selected}"
-        )
-        output_vars = st.text_input(
-            "Output vars (comma separated)",
-            ", ".join(agent["output_vars"]),
-            key=f"edit_output_{selected}"
-        )
-        prompt = st.text_area(
-            "Prompt Template",
-            agent["prompt"],
-            height=200,
-            key=f"edit_prompt_{selected}"
-        )
-
-        if st.button("Save Changes"):
-            save_agent_to_db(
+            save_prompt_version(
                 name.strip(),
-                model,
                 prompt,
-                role,
-                [v.strip() for v in input_vars.split(",") if v.strip()],
-                [v.strip() for v in output_vars.split(",") if v.strip()]
+                metadata={
+                    "model": model,
+                    "role": role,
+                    "input_vars": parsed_input_vars,
+                    "output_vars": parsed_output_vars
+                }
             )
 
-            if name != selected:
-                with get_conn(DB_PATH) as conn:
-                    c = conn.cursor()
-                    c.execute(
-                        "DELETE FROM agents WHERE agent_name = ?",
-                        (selected,)
-                    )
-
             reload_agents_into_engine()
-            st.success("Agent updated.")
+            st.success("Saved and versioned.")
             st.rerun()
 
-# ------------------------------------------------------
-# DELETE AGENT
-# ------------------------------------------------------
-with tabs[3]:
-    if not agent_names:
-        st.info("No agents to delete.")
-    else:
-        target = st.selectbox(
-            "Agent to delete",
-            agent_names,
-            key="crud_delete_select"
-        )
-
-        if st.button("Delete Agent"):
-            with get_conn(DB_PATH) as conn:
-                c = conn.cursor()
-                c.execute("DELETE FROM agents WHERE agent_name = ?", (target,))
-
-            reload_agents_into_engine()
-            st.warning(f"Deleted agent '{target}'.")
-            st.rerun()
-
-# ------------------------------------------------------
-# DUPLICATE AGENT
-# ------------------------------------------------------
-with tabs[4]:
-    if not agents:
-        st.info("No agents to duplicate.")
-    else:
-        source_name = st.selectbox(
-            "Source Agent",
-            agent_names,
-            key="crud_duplicate_select"
-        )
-        source = next(a for a in agents if a["name"] == source_name)
-
-        base = f"{source_name}_copy"
+with col_b:
+    if not is_new and st.button("📄 Duplicate"):
+        base = f"{name}_copy"
         new_name = base
         i = 2
         while new_name in agent_names:
             new_name = f"{base}{i}"
             i += 1
 
-        st.write(f"New agent name: **{new_name}**")
+        save_agent_to_db(
+            new_name,
+            model,
+            prompt,
+            role,
+            parsed_input_vars,
+            parsed_output_vars
+        )
 
-        if st.button("Duplicate"):
-            save_agent_to_db(
-                new_name,
-                source["model"],
-                source["prompt"],
-                source["role"],
-                source["input_vars"],
-                source["output_vars"]
-            )
-            reload_agents_into_engine()
-            st.success("Agent duplicated.")
-            st.rerun()
+        reload_agents_into_engine()
+        st.success(f"Duplicated as {new_name}")
+        st.rerun()
 
+with col_c:
+    if not is_new and st.button("🗑️ Delete"):
+        with get_conn(DB_PATH) as conn:
+            c = conn.cursor()
+            c.execute("DELETE FROM agents WHERE agent_name = ?", (name,))
+        reload_agents_into_engine()
+        st.warning("Agent deleted.")
+        st.rerun()
+
+with col_d:
+    if not is_new and name in default_agents and st.button("♻️ Revert Default"):
+        d = default_agents[name]
+        save_agent_to_db(
+            name,
+            d["model"],
+            d["prompt_template"],
+            d.get("role", ""),
+            d.get("input_vars", []),
+            d.get("output_vars", [])
+        )
+        reload_agents_into_engine()
+        st.success("Reverted to default.")
+        st.rerun()
+
+# -------------------------
+# Version History
+# -------------------------
+if not is_new:
+    st.subheader("📚 Version History")
+    versions = load_prompt_versions(name)
+
+    if not versions:
+        st.info("No versions available.")
+    else:
+        for vid, vnum, vprompt, vmeta_json, ts in versions:
+            meta = json.loads(vmeta_json or "{}")
+            with st.expander(f"Version {vnum} — {ts}"):
+                st.code(vprompt)
+                st.json(meta)
+
+                if st.button(f"Load Version {vnum}", key=f"load_{vid}"):
+                    save_agent_to_db(
+                        name,
+                        meta.get("model", model),
+                        vprompt,
+                        meta.get("role", role),
+                        meta.get("input_vars", []),
+                        meta.get("output_vars", [])
+                    )
+                    reload_agents_into_engine()
+                    st.success(f"Loaded version {vnum}")
+                    st.rerun()
