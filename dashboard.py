@@ -1,6 +1,6 @@
 import graphviz
 import streamlit as st
-from openai import OpenAI
+from openai import OpenAI  # still imported for type / factory use
 import difflib
 import json
 import sqlite3
@@ -9,10 +9,11 @@ from config import OPENAI_API_KEY, DB_FILE_PATH
 from typing import List, Dict, Any, Tuple, Optional
 
 # =======================
-# Configuration / Client
+# Configuration
 # =======================
 DB_PATH = DB_FILE_PATH
-client = OpenAI(api_key=OPENAI_API_KEY)
+# NOTE: removed global OpenAI client creation and removed DB init/migration at import time.
+# Use app_start() to perform initialization when running the app.
 
 # =======================
 # DEFAULT AGENTS (Backward-compatible examples)
@@ -97,6 +98,7 @@ Return the improved final answer only.
 
 # ======================================================
 # DB MIGRATION & HELPERS
+# (unchanged; safe to call from app_start())
 # ======================================================
 
 def init_db():
@@ -195,11 +197,6 @@ def migrate_agents_table():
         c.execute("ALTER TABLE agents ADD COLUMN output_vars TEXT")
     conn.commit()
     conn.close()
-
-
-# Call init + migration at module import
-init_db()
-migrate_agents_table()
 
 
 # =======================
@@ -340,7 +337,15 @@ def delete_pipeline_from_db(pipeline_name: str):
 
 
 # =======================
-# Agent class (self-describing)
+# OpenAI client factory
+# =======================
+def create_openai_client(api_key: str):
+    """Factory to create an OpenAI client. Allows tests to replace this factory or pass fake client."""
+    return OpenAI(api_key=api_key)
+
+
+# =======================
+# Agent class (self-describing) with injected client
 # =======================
 class Agent:
     def __init__(self,
@@ -349,13 +354,15 @@ class Agent:
                  model: str = "gpt-4.1-nano",
                  role: str = "",
                  input_vars: Optional[List[str]] = None,
-                 output_vars: Optional[List[str]] = None):
+                 output_vars: Optional[List[str]] = None,
+                 client: Optional[Any] = None):
         self.name = name
         self.prompt_template = prompt_template
         self.model = model
         self.role = role or ""
         self.input_vars = input_vars or []
         self.output_vars = output_vars or []
+        self.client = client  # injected OpenAI client
 
     def describe(self) -> dict:
         return {
@@ -393,7 +400,11 @@ class Agent:
                     return ""
             prompt = self.prompt_template.format_map(SafeDict(**variables))
 
-        # Call LLM
+        # Call LLM using injected client
+        client = self.client
+        if client is None:
+            raise RuntimeError("No OpenAI client injected into Agent. Provide a client via MultiAgentEngine or Agent constructor.")
+
         response = client.responses.create(
             model=self.model,
             input=prompt
@@ -429,21 +440,24 @@ class Agent:
 
 
 # =======================
-# MultiAgentEngine
+# MultiAgentEngine with client injection
 # =======================
 class MultiAgentEngine:
-    def __init__(self):
+    def __init__(self, client: Any):
         # agents: name -> Agent
         self.agents: Dict[str, Agent] = {}
         # shared structured state used by pipelines
         self.state: Dict[str, Any] = {}
         # memory: agent_name -> raw agent output (string or parsed)
         self.memory: Dict[str, Any] = {}
+        # injected OpenAI client instance
+        self.client = client
 
     def add_agent(self, name: str, prompt_template: str, model: str = "gpt-4.1-nano",
                   role: str = "", input_vars: Optional[List[str]] = None,
                   output_vars: Optional[List[str]] = None):
-        self.agents[name] = Agent(name, prompt_template, model, role, input_vars, output_vars)
+        # ensure Agent has the engine's client
+        self.agents[name] = Agent(name, prompt_template, model, role, input_vars, output_vars, client=self.client)
 
     def remove_agent(self, name: str):
         self.agents.pop(name, None)
@@ -538,7 +552,8 @@ st.set_page_config(page_title="Multi-Agent Dynamic Dashboard", layout="wide")
 st.title("🧠 Multi-Agent Pipeline Dashboard — Dynamic Agents & Pipelines")
 st.caption("Agents are self-describing. Pipelines run against a shared state dict. Versioned prompts and DB persistence included.")
 
-# Initialize DB + bootstrap defaults if agents table empty
+
+# Initialize DB + bootstrap defaults if agents table empty and populate Streamlit session with engine
 def bootstrap_default_agents(defaults: Dict[str, dict]):
     existing = load_agents_from_db()
     if existing:
@@ -555,11 +570,30 @@ def bootstrap_default_agents(defaults: Dict[str, dict]):
         # also save a versioned prompt snapshot
         save_prompt_version(name, data.get("prompt_template", ""), metadata={"role": data.get("role", "")})
 
-bootstrap_default_agents(default_agents)
 
-# Session state engine
-if "engine" not in st.session_state:
-    st.session_state.engine = MultiAgentEngine()
+def app_start():
+    """
+    Explicit application bootstrap. Call this once when running the Streamlit app.
+    - initializes DB and migrations
+    - creates an OpenAI client via factory
+    - creates the MultiAgentEngine with the injected client
+    - bootstraps default agents if DB empty
+    - loads agents from DB into the engine
+    - stores engine into st.session_state
+    """
+    # DB migrations
+    init_db()
+    migrate_agents_table()
+
+    # create OpenAI client (factory)
+    client = create_openai_client(OPENAI_API_KEY)
+
+    # create engine with injected client
+    engine = MultiAgentEngine(client=client)
+
+    # Ensure default agents exist in DB (only if table empty)
+    bootstrap_default_agents(default_agents)
+
     # Load agents from DB into engine
     stored_agents = load_agents_from_db()
     for name, model, prompt, role, input_json, output_json in stored_agents:
@@ -571,7 +605,27 @@ if "engine" not in st.session_state:
             output_vars = json.loads(output_json) if output_json else []
         except Exception:
             output_vars = []
-        st.session_state.engine.add_agent(name, prompt, model, role, input_vars, output_vars)
+        engine.add_agent(name, prompt, model, role, input_vars, output_vars)
+
+    # Save engine into session state
+    st.session_state.engine = engine
+    # Optionally keep client in session state for custom use
+    st.session_state.openai_client = client
+
+
+# Only start the app if we don't already have an engine in session state.
+# This prevents double initialization during reruns.
+if "engine" not in st.session_state:
+    # For Streamlit invocation, app_start() should be called here so side-effects
+    # happen only when we actually run the app (not at import time by a test runner).
+    app_start()
+
+
+# Also provide the conventional guard so running the script directly will bootstrap.
+if __name__ == "__main__":
+    # If run as a script, ensure app_start was executed (idempotent).
+    if "engine" not in st.session_state:
+        app_start()
 
 
 # -------------------------
