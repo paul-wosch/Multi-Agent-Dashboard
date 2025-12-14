@@ -3,10 +3,10 @@ import streamlit as st
 from openai import OpenAI  # still imported for type / factory use
 import difflib
 import json
-import sqlite3
 from datetime import datetime
-from config import OPENAI_API_KEY, DB_FILE_PATH
-from db import get_conn
+from config import OPENAI_API_KEY, DB_FILE_PATH, MIGRATIONS_PATH
+from db.db import get_conn
+from db.migrations import apply_migrations
 from typing import List, Dict, Any, Tuple, Optional
 
 # =======================
@@ -643,8 +643,8 @@ def app_start():
     - stores engine into st.session_state
     """
     # DB migrations
-    init_db()
-    migrate_agents_table()
+    with get_conn(DB_PATH) as conn:
+        apply_migrations(conn, migrations_dir=MIGRATIONS_PATH)
 
     # create OpenAI client (factory)
     client = create_openai_client(OPENAI_API_KEY)
@@ -658,15 +658,14 @@ def app_start():
     # Load agents from DB into engine
     stored_agents = load_agents_from_db()
     for name, model, prompt, role, input_json, output_json in stored_agents:
-        try:
-            input_vars = json.loads(input_json) if input_json else []
-        except Exception:
-            input_vars = []
-        try:
-            output_vars = json.loads(output_json) if output_json else []
-        except Exception:
-            output_vars = []
-        engine.add_agent(name, prompt, model, role, input_vars, output_vars)
+        engine.add_agent(
+            name,
+            prompt,
+            model,
+            role,
+            json.loads(input_json or "[]"),
+            json.loads(output_json or "[]"),
+        )
 
     # Save engine into session state
     st.session_state.engine = engine

@@ -4,13 +4,22 @@ from dotenv import dotenv_values
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 
-DATA_DIR = Path("data")
-DATA_PATH = (PROJECT_ROOT / DATA_DIR).resolve()
-# Ensure data folder is created if not existing
-DATA_PATH.mkdir(exist_ok=True)
-
 DB_FILE = Path("multi_agent_runs.db")
-DB_FILE_PATH = (DATA_PATH / DB_FILE).resolve()
+
+DATA_DIR = Path("data")
+DB_DIR = Path("db")
+MIGRATIONS_DIR = Path("migrations")
+
+DATA_PATH = (PROJECT_ROOT / DATA_DIR).resolve()
+DB_PATH = (DATA_PATH / DB_DIR).resolve()
+MIGRATIONS_PATH = (DATA_PATH / MIGRATIONS_DIR).resolve()
+
+# Ensure folders are created if not existing
+DATA_PATH.mkdir(exist_ok=True)
+DB_PATH.mkdir(exist_ok=True)
+MIGRATIONS_PATH.mkdir(exist_ok=True)
+
+DB_FILE_PATH = (DATA_PATH / DB_DIR / DB_FILE).resolve()
 
 DOTENV_FILE = Path(".env")
 DOTENV_FILE_PATH = (PROJECT_ROOT / DOTENV_FILE).resolve()
@@ -22,9 +31,13 @@ def main():
     """Print global constants."""
     files_and_paths = {"PROJECT_ROOT": PROJECT_ROOT,
                        "DATA_DIR": DATA_DIR,
+                       "DB_DIR": DB_DIR,
+                       "MIGRATIONS_DIR": MIGRATIONS_DIR,
                        "DATA_PATH": DATA_PATH,
                        "DB_FILE": DB_FILE,
+                       "DB_PATH": DB_PATH,
                        "DB_FILE_PATH": DB_FILE_PATH,
+                       "MIGRATIONS_PATH": MIGRATIONS_PATH,
                        }
 
     print("Current file and path resolutions:")
