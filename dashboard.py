@@ -7,6 +7,7 @@ from datetime import datetime
 from config import OPENAI_API_KEY, DB_FILE_PATH, MIGRATIONS_PATH
 from db.db import get_conn
 from db.migrations import apply_migrations
+from llm_client import LLMClient, TextResponse
 from typing import List, Dict, Any, Tuple, Optional
 
 # =======================
@@ -232,21 +233,23 @@ def create_openai_client(api_key: str):
 # Agent class (self-describing) with injected client
 # =======================
 class Agent:
-    def __init__(self,
-                 name: str,
-                 prompt_template: str,
-                 model: str = "gpt-4.1-nano",
-                 role: str = "",
-                 input_vars: Optional[List[str]] = None,
-                 output_vars: Optional[List[str]] = None,
-                 client: Optional[Any] = None):
+    def __init__(
+        self,
+        name: str,
+        prompt_template: str,
+        model: str = "gpt-4.1-nano",
+        role: str = "",
+        input_vars: Optional[List[str]] = None,
+        output_vars: Optional[List[str]] = None,
+        llm_client: Optional[LLMClient] = None,
+    ):
         self.name = name
         self.prompt_template = prompt_template
         self.model = model
         self.role = role or ""
         self.input_vars = input_vars or []
         self.output_vars = output_vars or []
-        self.client = client  # injected OpenAI client
+        self.llm_client = llm_client
 
     def describe(self) -> dict:
         return {
@@ -258,76 +261,46 @@ class Agent:
             "prompt_template": self.prompt_template
         }
 
-    def run(self, state: Dict[str, Any]) -> Any:
-        """
-        Generic run method:
-          - builds a variables dict from `state` using input_vars.
-          - formats prompt_template with those variables (missing variables replaced with empty strings).
-          - calls LLM and returns raw text output.
-        """
-        # Build local variables mapping: prefer explicit input_vars; if none declared, pass full state.
-        if not self.input_vars:
-            variables = dict(state)  # role-agnostic: agent can see entire shared state if it chooses
-        else:
-            variables = {}
-            for k in self.input_vars:
-                variables[k] = state.get(k, "")
+    def run(
+            self,
+            state: Dict[str, Any],
+            *,
+            structured_schema: Optional[Dict[str, Any]] = None,
+            stream: bool = False,
+    ) -> str:
+        if not self.llm_client:
+            raise RuntimeError("Agent has no LLMClient injected")
 
-        # Safe formatting: if prompt_template references keys not present, .format will fail.
-        # We'll use a fallback that ensures all placeholders replaced (by empty string).
+        # Build variable map
+        if self.input_vars:
+            variables = {k: state.get(k, "") for k in self.input_vars}
+        else:
+            variables = dict(state)
+
+        # Safe prompt formatting
         try:
             prompt = self.prompt_template.format(**variables)
         except KeyError:
-            # Fill missing keys with empty strings by constructing a SafeDict
             class SafeDict(dict):
-                def __missing__(self, key):
-                    return ""
+                def __missing__(self, key): return ""
+
             prompt = self.prompt_template.format_map(SafeDict(**variables))
 
-        # Call LLM using injected client
-        client = self.client
-        if client is None:
-            raise RuntimeError("No OpenAI client injected into Agent. Provide a client via MultiAgentEngine or Agent constructor.")
-
-        response = client.responses.create(
+        response: TextResponse = self.llm_client.create_text_response(
             model=self.model,
-            input=prompt
+            prompt=prompt,
+            response_format=structured_schema,
+            stream=stream,
         )
 
-        # The OpenAI python client used in your base code returned response.output_text previously.
-        # Here we attempt to get a reasonable textual representation.
-        raw_text = getattr(response, "output_text", None)
-        if raw_text is None:
-            # Some response shapes may have 'output' structured content; join if necessary
-            try:
-                # Try to extract textual output from response.output[0].content (best-effort)
-                raw_text = ""
-                if hasattr(response, "output") and isinstance(response.output, (list, tuple)):
-                    for block in response.output:
-                        if isinstance(block, dict) and 'content' in block:
-                            # content may be a list of dicts with 'text' or 'type'
-                            content = block['content']
-                            if isinstance(content, list):
-                                for c in content:
-                                    if isinstance(c, dict) and c.get('type') == 'output_text':
-                                        raw_text += c.get('text', '')
-                            elif isinstance(content, str):
-                                raw_text += content
-                elif hasattr(response, "text"):
-                    raw_text = response.text
-                else:
-                    raw_text = str(response)
-            except Exception:
-                raw_text = str(response)
-
-        return raw_text
+        return response.text
 
 
 # =======================
 # MultiAgentEngine with client injection
 # =======================
 class MultiAgentEngine:
-    def __init__(self, client: Any):
+    def __init__(self, llm_client: LLMClient):
         # agents: name -> Agent
         self.agents: Dict[str, Agent] = {}
         # shared structured state used by pipelines
@@ -335,13 +308,26 @@ class MultiAgentEngine:
         # memory: agent_name -> raw agent output (string or parsed)
         self.memory: Dict[str, Any] = {}
         # injected OpenAI client instance
-        self.client = client
+        self.llm_client = llm_client
 
-    def add_agent(self, name: str, prompt_template: str, model: str = "gpt-4.1-nano",
-                  role: str = "", input_vars: Optional[List[str]] = None,
-                  output_vars: Optional[List[str]] = None):
-        # ensure Agent has the engine's client
-        self.agents[name] = Agent(name, prompt_template, model, role, input_vars, output_vars, client=self.client)
+    def add_agent(
+            self,
+            name: str,
+            prompt_template: str,
+            model: str = "gpt-4.1-nano",
+            role: str = "",
+            input_vars: Optional[List[str]] = None,
+            output_vars: Optional[List[str]] = None,
+    ):
+        self.agents[name] = Agent(
+            name=name,
+            prompt_template=prompt_template,
+            model=model,
+            role=role,
+            input_vars=input_vars,
+            output_vars=output_vars,
+            llm_client=self.llm_client,
+        )
 
     def remove_agent(self, name: str):
         self.agents.pop(name, None)
@@ -384,7 +370,7 @@ class MultiAgentEngine:
             # Try to parse JSON if agent produced JSON and multiple outputs are expected
             parsed_output = None
             try:
-                parsed_output = json.loads(raw_output)
+                parsed_output = LLMClient.safe_json(raw_output)
             except Exception:
                 parsed_output = None
 
@@ -550,10 +536,11 @@ def app_start():
         apply_migrations(conn, migrations_dir=MIGRATIONS_PATH)
 
     # create OpenAI client (factory)
-    client = create_openai_client(OPENAI_API_KEY)
+    openai_client = create_openai_client(OPENAI_API_KEY)
+    llm_client = LLMClient(openai_client)
 
     # create engine with injected client
-    engine = MultiAgentEngine(client=client)
+    engine = MultiAgentEngine(llm_client=llm_client)
 
     # Ensure default agents exist in DB (only if table empty)
     bootstrap_default_agents(default_agents)
@@ -573,7 +560,7 @@ def app_start():
     # Save engine into session state
     st.session_state.engine = engine
     # Optionally keep client in session state for custom use
-    st.session_state.openai_client = client
+    st.session_state.llm_client = llm_client
 
 
 # Only start the app if we don't already have an engine in session state.
