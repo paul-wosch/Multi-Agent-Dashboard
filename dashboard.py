@@ -672,7 +672,7 @@ def render_run_sidebar():
         use_container_width=True
     )
 
-    with st.sidebar.expander("Advanced: Pipeline Editing"):
+    with st.sidebar.expander("Advanced: Pipeline Editing", expanded=True):
         available_agents = list(st.session_state.engine.agents.keys())
 
         if selected_pipeline != "<Ad-hoc>":
