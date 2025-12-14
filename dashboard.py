@@ -936,6 +936,20 @@ def render_history_mode():
         with st.expander(name):
             st.code(out)
 
+    export = {
+        "run_id": run_id,
+        "timestamp": ts,
+        "task_input": task,
+        "final_output": final,
+        "agents": {a[0]: a[1] for a in agents}
+    }
+
+    st.download_button(
+        "Download Run as JSON",
+        data=json.dumps(export, indent=2),
+        file_name=f"run_{run_id}.json",
+        mime="application/json"
+    )
 
 # ======================================================
 # DEV-TIME SAFETY CHECKS
