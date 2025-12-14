@@ -721,7 +721,7 @@ def render_agent_outputs(engine, steps):
                 parsed = json.loads(out)
                 st.json(parsed)
             except Exception:
-                st.markdown(out)
+                st.code(out)
 
 
 def render_graph_tab(steps):
