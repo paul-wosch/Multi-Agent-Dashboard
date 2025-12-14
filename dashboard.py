@@ -499,6 +499,28 @@ def reload_agents_into_engine():
         engine.add_agent(name, prompt, model, role, input_vars, output_vars)
 
 
+def export_pipeline_agents_as_json(pipeline_name: str, steps: List[str]) -> str:
+    """
+    Export all agents used in a pipeline as a JSON string.
+    """
+    engine = st.session_state.engine
+
+    agents_payload = []
+    for agent_name in steps:
+        agent = engine.agents.get(agent_name)
+        if not agent:
+            continue
+        agents_payload.append(agent.describe())
+
+    export = {
+        "pipeline": pipeline_name,
+        "exported_at": datetime.utcnow().isoformat(),
+        "agents": agents_payload,
+    }
+
+    return json.dumps(export, indent=2)
+
+
 # ======================================================
 # INITIALIZE DB AND PREPARE GUI
 # ======================================================
@@ -693,6 +715,22 @@ def render_run_sidebar():
                 save_pipeline_to_db(name.strip(), selected_steps)
                 st.success("Pipeline saved")
                 st.rerun()
+
+        st.divider()
+
+        if selected_pipeline != "<Ad-hoc>" and selected_steps:
+            agents_json = export_pipeline_agents_as_json(
+                selected_pipeline,
+                selected_steps
+            )
+
+            st.download_button(
+                label="⬇️ Download Pipeline Agents (JSON)",
+                data=agents_json,
+                file_name=f"{selected_pipeline}_agents.json",
+                mime="application/json",
+                use_container_width=True,
+            )
 
     return selected_pipeline, selected_steps, task, run_clicked
 
