@@ -331,23 +331,44 @@ class MultiAgentEngine:
         if name in self.agents:
             self.agents[name].prompt_template = new_prompt
 
+    def _log_or_raise(self, strict: bool, agent_name: str, message: str):
+        """
+        Internal helper for handling writeback contract violations.
+        """
+        if strict:
+            raise ValueError(message)
+        self.memory.setdefault("__warnings__", []).append(
+            f"[{agent_name}] {message}"
+        )
+
     def run_seq(
             self,
             steps: List[str],
             initial_input: Any,
             *,
             on_progress: Optional[callable] = None,
+            strict: bool = False,
     ) -> Any:
         """
-        Generic pipeline executor:
+        Sequential pipeline executor with explicit, safe state writeback rules.
+
         - initialize shared state with initial_input available under 'task' and 'input' keys
         - for each agent in steps, get declared input_vars, run agent with subset of state,
           then write back outputs to state using the agent's declared output_vars.
         - memory stores raw outputs keyed by agent name.
         - final output returned is state.get('final') if present, else the last agent's output.
+
+        Writeback contract:
+        - If agent.output_vars is declared:
+            * JSON dict → keys must match output_vars
+            * Non-JSON:
+                - len(output_vars) == 1 → assign raw text
+                - len(output_vars) > 1 → assign `{agent.name}__raw`
+        - If agent.output_vars is empty:
+            * Output written to state[agent.name]
         """
 
-        # Initialize shared state dictionary (CORE PRINCIPLE 2)
+        # Initialize shared state dictionary
         self.state = {}
         # Always keep the original user input under 'task' and 'input' for backward compatibility
         self.state['task'] = initial_input
@@ -367,54 +388,65 @@ class MultiAgentEngine:
                     agent_name=agent_name,
                 )
 
-            if agent_name not in self.agents:
+            agent = self.agents.get(agent_name)
+            if not agent:
                 # skip unknown agent but record a warning in memory
-                self.memory[agent_name] = f"[ERROR] Agent '{agent_name}' not registered."
+                msg = f"Agent '{agent_name}' not registered"
+                self.memory[agent_name] = msg
+                self._log_or_raise(strict, agent_name, msg)
                 continue
-
-            agent = self.agents[agent_name]
 
             # Run agent with generic state (Agent will pick only input_vars if it declares them)
             raw_output = agent.run(self.state)
-
-            # Try to parse JSON if agent produced JSON and multiple outputs are expected
-            parsed_output = None
-            try:
-                parsed_output = LLMClient.safe_json(raw_output)
-            except Exception:
-                parsed_output = None
-
             # Store raw output in memory
             self.memory[agent_name] = raw_output
+            last_output = raw_output
 
-            # Map outputs into shared state using output_vars
+            # Attempt JSON parse
+            try:
+                parsed = LLMClient.safe_json(raw_output)
+            except Exception:
+                parsed = None
+
+            # === WRITEBACK RULES ===
+
             if agent.output_vars:
-                # If parsed JSON dict and keys match output_vars -> map them
-                if parsed_output and isinstance(parsed_output, dict):
-                    for k in agent.output_vars:
-                        if k in parsed_output:
-                            self.state[k] = parsed_output[k]
+                # Case 1: structured JSON output
+                if isinstance(parsed, dict):
+                    for key in parsed.keys():
+                        if key not in agent.output_vars:
+                            self._log_or_raise(
+                                strict,
+                                agent_name,
+                                f"Unexpected output key '{key}' not declared in output_vars"
+                            )
+
+                    for var in agent.output_vars:
+                        if var in parsed:
+                            self.state[var] = parsed[var]
                         else:
-                            # fallback: if parsed_output has only one item and output_vars length == 1
-                            pass
+                            self._log_or_raise(
+                                strict,
+                                agent_name,
+                                f"Declared output_var '{var}' missing from JSON output"
+                            )
+
+                # Case 2: non-JSON output
                 else:
-                    # No JSON mapping: if single output var, assign the whole raw text to it.
                     if len(agent.output_vars) == 1:
                         self.state[agent.output_vars[0]] = raw_output
                     else:
-                        # multiple output vars but raw_text not JSON: put raw text under agent_name + first var
-                        # and also keep raw text in a generic key to not lose info.
-                        self.state[agent.output_vars[0]] = raw_output
-                        # Optionally: place prefixed keys to indicate raw content
-                        for idx, v in enumerate(agent.output_vars[1:], start=1):
-                            # leave subsequent variables empty to be filled by downstream steps
-                            if v not in self.state:
-                                self.state[v] = ""
-            else:
-                # Agent didn't declare output_vars: store under agent name key
-                self.state[agent.name] = raw_output
+                        raw_key = f"{agent.name}__raw"
+                        self.state[raw_key] = raw_output
+                        self._log_or_raise(
+                            strict,
+                            agent_name,
+                            f"Non-JSON output with multiple output_vars; stored under '{raw_key}'"
+                        )
 
-            last_output = raw_output
+            # Case 3: no declared output_vars
+            else:
+                self.state[agent.name] = raw_output
 
             # Progress: agent end
             if on_progress:
