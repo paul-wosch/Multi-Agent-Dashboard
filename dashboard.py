@@ -7,6 +7,7 @@ from datetime import datetime
 from config import OPENAI_API_KEY, DB_FILE_PATH, MIGRATIONS_PATH
 from db.db import get_conn
 from db.migrations import apply_migrations
+from utils import safe_format
 from llm_client import LLMClient, TextResponse
 from typing import List, Dict, Any, Tuple, Optional
 
@@ -278,13 +279,7 @@ class Agent:
             variables = dict(state)
 
         # Safe prompt formatting
-        try:
-            prompt = self.prompt_template.format(**variables)
-        except KeyError:
-            class SafeDict(dict):
-                def __missing__(self, key): return ""
-
-            prompt = self.prompt_template.format_map(SafeDict(**variables))
+        prompt = safe_format(self.prompt_template, variables)
 
         response: TextResponse = self.llm_client.create_text_response(
             model=self.model,
