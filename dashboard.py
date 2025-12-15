@@ -3,7 +3,7 @@ import streamlit as st
 from openai import OpenAI  # still imported for type / factory use
 import difflib
 import json
-from datetime import datetime
+from datetime import datetime, UTC
 from config import OPENAI_API_KEY, DB_FILE_PATH, MIGRATIONS_PATH
 from db.db import get_conn
 from db.migrations import apply_migrations
@@ -107,7 +107,7 @@ def save_run_to_db(task_input: str, final_output: str, memory_dict: Dict[str, An
     with get_conn(DB_PATH) as conn:
         c = conn.cursor()
 
-        ts = datetime.utcnow().isoformat()
+        ts = datetime.now(UTC).isoformat()
 
         c.execute("""
             INSERT INTO runs (timestamp, task_input, final_output)
@@ -174,7 +174,7 @@ def save_prompt_version(agent_name: str, prompt_text: str, metadata: Optional[di
         result = c.fetchone()[0]
         new_version = 1 if result is None else result + 1
 
-        ts = datetime.utcnow().isoformat()
+        ts = datetime.now(UTC).isoformat()
         metadata_json = json.dumps(metadata or {})
 
         c.execute("""
@@ -192,7 +192,7 @@ def save_pipeline_to_db(pipeline_name: str, steps: List[str], metadata: Optional
     with get_conn(DB_PATH) as conn:
         c = conn.cursor()
 
-        ts = datetime.utcnow().isoformat()
+        ts = datetime.now(UTC).isoformat()
         steps_json = json.dumps(steps)
         metadata_json = json.dumps(metadata or {})
 
@@ -533,7 +533,7 @@ def export_pipeline_agents_as_json(pipeline_name: str, steps: List[str]) -> str:
 
     export = {
         "pipeline": pipeline_name,
-        "exported_at": datetime.utcnow().isoformat(),
+        "exported_at": datetime.now(UTC).isoformat(),
         "agents": agents_payload,
     }
 
