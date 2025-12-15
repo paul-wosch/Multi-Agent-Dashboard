@@ -336,7 +336,13 @@ class MultiAgentEngine:
         if name in self.agents:
             self.agents[name].prompt_template = new_prompt
 
-    def run_seq(self, steps: List[str], initial_input: Any) -> Any:
+    def run_seq(
+            self,
+            steps: List[str],
+            initial_input: Any,
+            *,
+            on_progress: Optional[callable] = None,
+    ) -> Any:
         """
         Generic pipeline executor:
         - initialize shared state with initial_input available under 'task' and 'input' keys
@@ -355,8 +361,17 @@ class MultiAgentEngine:
         self.memory = {}
 
         last_output = None
+        num_agents = len(steps)
+        base = 100 / (2 * num_agents) if num_agents else 100
 
-        for agent_name in steps:
+        for i, agent_name in enumerate(steps):
+            # Progress: agent start
+            if on_progress:
+                on_progress(
+                    int(base * (2 * i + 1)),
+                    agent_name=agent_name,
+                )
+
             if agent_name not in self.agents:
                 # skip unknown agent but record a warning in memory
                 self.memory[agent_name] = f"[ERROR] Agent '{agent_name}' not registered."
@@ -406,9 +421,18 @@ class MultiAgentEngine:
 
             last_output = raw_output
 
-        # Return final output (prefer 'final' key if present)
-        return self.state.get('final', last_output)
+            # Progress: agent end
+            if on_progress:
+                on_progress(
+                    int(base * (2 * i + 2)),
+                    agent_name=agent_name,
+                )
 
+        # Safety: guarantee 100% even if rounding skipped it
+        if on_progress:
+            on_progress(100, agent_name=None)
+
+        return self.state.get("final", last_output)
 
     def get_output(self, agent_name: str) -> Any:
         return self.memory.get(agent_name, "")
@@ -818,11 +842,26 @@ def render_run_mode():
     pipeline, steps, task, run_clicked = render_run_sidebar()
 
     if run_clicked:
+        # Create progress UI *only when running*
+        progress_bar = st.progress(0)
+        progress_text = st.empty()
+
+        def update_progress(pct: int, agent_name: str | None = None):
+            progress_bar.progress(pct)
+            if agent_name:
+                progress_text.caption(f"Running {agent_name} — {pct}%")
+            else:
+                progress_text.caption(f"Pipeline progress: {pct}%")
+
         with st.spinner("Running pipeline…"):
             final = st.session_state.engine.run_seq(
                 steps=steps,
-                initial_input=task
+                initial_input=task,
+                on_progress=update_progress,
             )
+
+        progress_bar.progress(100)
+        progress_text.caption("Pipeline completed ✅")
 
         save_run_to_db(
             task,
