@@ -396,6 +396,16 @@ class MultiAgentEngine:
                 self._log_or_raise(strict, agent_name, msg)
                 continue
 
+            # === INPUT CONTRACT VALIDATION ===
+            if agent.input_vars:
+                for var in agent.input_vars:
+                    if var not in self.state or self.state.get(var) in ("", None):
+                        self._log_or_raise(
+                            strict,
+                            agent_name,
+                            f"Input var '{var}' is missing or empty when '{agent_name}' ran"
+                        )
+
             # Run agent with generic state (Agent will pick only input_vars if it declares them)
             raw_output = agent.run(self.state)
             # Store raw output in memory
