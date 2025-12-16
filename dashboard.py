@@ -540,7 +540,11 @@ def load_run_details(run_id: int):
         run = c.fetchone()
 
         c.execute(
-            "SELECT agent_name, output FROM agent_outputs WHERE run_id = ?",
+            """
+            SELECT agent_name, output, is_json, model
+            FROM agent_outputs
+            WHERE run_id = ?
+            """,
             (run_id,)
         )
         agents = c.fetchall()
@@ -1096,18 +1100,39 @@ def render_history_mode():
     st.code(task)
 
     with st.expander("Final Output"):
-        st.markdown(final)
+        try:
+            st.json(json.loads(final))
+        except Exception:
+            st.markdown(final)
 
-    for name, out in agents:
-        with st.expander(name):
-            st.code(out)
+    for name, output, is_json, model in agents:
+        header = f"{name}"
+        if model:
+            header += f" · {model}"
+
+        with st.expander(header):
+            if is_json:
+                try:
+                    st.json(json.loads(output))
+                except Exception:
+                    st.warning("⚠️ Output marked as JSON but failed to parse")
+                    st.code(output)
+            else:
+                st.markdown(output)
 
     export = {
         "run_id": run_id,
         "timestamp": ts,
         "task_input": task,
         "final_output": final,
-        "agents": {a[0]: a[1] for a in agents}
+        "agents": {
+            name: {
+                "output": output,
+                "is_json": bool(is_json),
+                "model": model,
+        }
+    for name, output, is_json, model in agents
+}
     }
 
     st.download_button(
