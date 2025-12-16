@@ -117,11 +117,36 @@ def save_run_to_db(task_input: str, final_output: str, memory_dict: Dict[str, An
         run_id = c.lastrowid
 
         for agent, output in memory_dict.items():
-            # store as text (string)
+            # Normalize output to string
+            if isinstance(output, str):
+                raw_text = output
+                is_json = 0
+            else:
+                raw_text = json.dumps(output)
+                is_json = 1
+
+            # Defensive JSON detection for string outputs
+            if isinstance(output, str):
+                try:
+                    json.loads(output)
+                    is_json = 1
+                except Exception:
+                    pass
+
+            # Best-effort model lookup (non-breaking)
+            model = None
+            engine = getattr(st.session_state, "engine", None)
+            if engine and agent in engine.agents:
+                model = engine.agents[agent].model
+
             c.execute("""
-                INSERT INTO agent_outputs (run_id, agent_name, output)
-                VALUES (?, ?, ?)
-            """, (run_id, agent, json.dumps(output) if not isinstance(output, str) else output))
+                      INSERT INTO agent_outputs (run_id,
+                                                 agent_name,
+                                                 output,
+                                                 is_json,
+                                                 model)
+                      VALUES (?, ?, ?, ?, ?)
+                      """, (run_id, agent, raw_text, is_json, model))
 
     return run_id
 

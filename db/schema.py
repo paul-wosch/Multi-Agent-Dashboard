@@ -18,6 +18,8 @@ SCHEMA = {
         "run_id": "INTEGER",
         "agent_name": "TEXT",
         "output": "TEXT",
+        "is_json": "INTEGER DEFAULT 0",
+        "model": "TEXT",
     },
 
     "agent_prompt_versions": {
