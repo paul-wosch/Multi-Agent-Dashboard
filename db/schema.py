@@ -11,6 +11,8 @@ SCHEMA = {
         "timestamp": "TEXT",
         "task_input": "TEXT",
         "final_output": "TEXT",
+        "final_is_json": "INTEGER DEFAULT 0",
+        "final_model": "TEXT",
     },
 
     "agent_outputs": {

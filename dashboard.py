@@ -109,10 +109,46 @@ def save_run_to_db(task_input: str, final_output: str, memory_dict: Dict[str, An
 
         ts = datetime.now(UTC).isoformat()
 
+        # ---- detect final output type ----
+        if isinstance(final_output, str):
+            final_text = final_output
+            final_is_json = 0
+            try:
+                json.loads(final_output)
+                final_is_json = 1
+            except Exception:
+                pass
+        else:
+            final_text = json.dumps(final_output)
+            final_is_json = 1
+
+        # ---- best-effort final model ----
+        final_model = None
+        engine = getattr(st.session_state, "engine", None)
+        if engine:
+            # final output comes from 'final' if present, else last agent
+            if "final" in engine.state:
+                final_agent = "finalizer"
+            else:
+                final_agent = next(reversed(engine.memory.keys()), None)
+
+            if final_agent and final_agent in engine.agents:
+                final_model = engine.agents[final_agent].model
+
         c.execute("""
-            INSERT INTO runs (timestamp, task_input, final_output)
-            VALUES (?, ?, ?)
-        """, (ts, task_input, final_output))
+                  INSERT INTO runs (timestamp,
+                                    task_input,
+                                    final_output,
+                                    final_is_json,
+                                    final_model)
+                  VALUES (?, ?, ?, ?, ?)
+                  """, (
+                      ts,
+                      task_input,
+                      final_text,
+                      final_is_json,
+                      final_model
+                  ))
 
         run_id = c.lastrowid
 
@@ -534,7 +570,11 @@ def load_run_details(run_id: int):
         c = conn.cursor()
 
         c.execute(
-            "SELECT timestamp, task_input, final_output FROM runs WHERE id = ?",
+            """
+            SELECT timestamp, task_input, final_output, final_is_json, final_model
+            FROM runs
+            WHERE id = ?
+            """,
             (run_id,)
         )
         run = c.fetchone()
@@ -1094,15 +1134,23 @@ def render_history_mode():
     run_id = options[selected]
     run, agents = load_run_details(run_id)
 
-    ts, task, final = run
+    ts, task, final, final_is_json, final_model = run
 
     st.subheader(f"Run {run_id}")
     st.code(task)
 
-    with st.expander("Final Output"):
-        try:
-            st.json(json.loads(final))
-        except Exception:
+    header = "Final Output"
+    if final_model:
+        header += f" · {final_model}"
+
+    with st.expander(header):
+        if final_is_json:
+            try:
+                st.json(json.loads(final))
+            except Exception:
+                st.warning("⚠️ Final output marked as JSON but failed to parse")
+                st.code(final)
+        else:
             st.markdown(final)
 
     for name, output, is_json, model in agents:
@@ -1124,15 +1172,19 @@ def render_history_mode():
         "run_id": run_id,
         "timestamp": ts,
         "task_input": task,
-        "final_output": final,
+        "final_output": {
+            "output": final,
+            "is_json": bool(final_is_json),
+            "model": final_model,
+            },
         "agents": {
             name: {
                 "output": output,
                 "is_json": bool(is_json),
                 "model": model,
+            }
+        for name, output, is_json, model in agents
         }
-    for name, output, is_json, model in agents
-}
     }
 
     st.download_button(
