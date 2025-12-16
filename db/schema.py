@@ -32,7 +32,6 @@ SCHEMA = {
     "agents": {
         "agent_name": "TEXT PRIMARY KEY",
         "model": "TEXT",
-        "temperature": "FLOAT",
         "prompt_template": "TEXT",
         "role": "TEXT",
         "input_vars": "TEXT",
