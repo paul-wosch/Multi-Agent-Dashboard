@@ -1,5 +1,12 @@
 import os
 from datetime import datetime
+import sys
+from pathlib import Path
+# Get the parent directory using pathlib
+parent_dir = Path(__file__).resolve().parent.parent
+# Add the parent directory to sys.path
+sys.path.append(str(parent_dir))
+# Import the module
 from config import MIGRATIONS_PATH
 
 migrations_dir = MIGRATIONS_PATH
