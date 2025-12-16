@@ -283,6 +283,76 @@ def delete_pipeline_from_db(pipeline_name: str):
         c.execute("DELETE FROM pipelines WHERE pipeline_name = ?", (pipeline_name,))
 
 
+def rename_agent_in_db(old_name: str, new_name: str):
+    """
+    Safely rename an agent across all related tables in a single transaction.
+    """
+    if old_name == new_name:
+        return
+
+    with get_conn(DB_PATH) as conn:
+        try:
+            conn.execute("BEGIN")
+
+            # Ensure target name does not already exist
+            exists = conn.execute(
+                "SELECT 1 FROM agents WHERE agent_name = ?",
+                (new_name,)
+            ).fetchone()
+            if exists:
+                raise ValueError(f"Agent '{new_name}' already exists")
+
+            # Update agents table
+            conn.execute(
+                "UPDATE agents SET agent_name = ? WHERE agent_name = ?",
+                (new_name, old_name),
+            )
+
+            # Update prompt versions
+            conn.execute(
+                "UPDATE agent_prompt_versions SET agent_name = ? WHERE agent_name = ?",
+                (new_name, old_name),
+            )
+
+            # Update historical outputs
+            conn.execute(
+                "UPDATE agent_outputs SET agent_name = ? WHERE agent_name = ?",
+                (new_name, old_name),
+            )
+
+            # Update pipelines (JSON steps)
+            rows = conn.execute(
+                "SELECT pipeline_name, steps_json FROM pipelines"
+            ).fetchall()
+
+            for pipeline_name, steps_json in rows:
+                if not steps_json:
+                    continue
+
+                steps = json.loads(steps_json)
+                updated = False
+
+                new_steps = []
+                for step in steps:
+                    if step == old_name:
+                        new_steps.append(new_name)
+                        updated = True
+                    else:
+                        new_steps.append(step)
+
+                if updated:
+                    conn.execute(
+                        "UPDATE pipelines SET steps_json = ? WHERE pipeline_name = ?",
+                        (json.dumps(new_steps), pipeline_name),
+                    )
+
+            conn.commit()
+
+        except Exception:
+            conn.rollback()
+            raise
+
+
 # =======================
 # OpenAI client factory
 # =======================
@@ -1077,14 +1147,20 @@ def render_agent_editor():
 
     with col_a:
         if st.button("💾 Save"):
+            old_name = agent["name"]
+
+            if not is_new and old_name and old_name != name:
+                rename_agent_in_db(old_name, name)
+
             save_agent_to_db(
                 name,
                 model,
                 prompt,
                 role,
                 [v.strip() for v in input_vars.splitlines() if v.strip()],
-                [v.strip() for v in output_vars.splitlines() if v.strip()]
+                [v.strip() for v in output_vars.splitlines() if v.strip()],
             )
+
             save_prompt_version(name, prompt)
             reload_agents_into_engine()
             st.success("Agent saved")
