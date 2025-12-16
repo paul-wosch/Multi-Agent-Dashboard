@@ -717,6 +717,12 @@ mode = st.radio(
     horizontal=True
 )
 
+strict_mode = st.sidebar.checkbox(
+    "Strict output validation",
+    value=False,
+    help="Fail fast on agent output mismatches"
+)
+
 st.divider()
 
 # ======================================================
@@ -786,6 +792,16 @@ def render_run_sidebar():
     return selected_pipeline, selected_steps, task, run_clicked
 
 
+def render_warnings(engine):
+    warnings = engine.memory.get("__warnings__", [])
+    if not warnings:
+        return
+
+    st.warning("⚠️ Pipeline Warnings")
+    for w in warnings:
+        st.markdown(f"- {w}")
+
+
 def render_final_output(engine):
     final = engine.state.get("final")
 
@@ -847,6 +863,7 @@ def render_compare_tab(engine, steps):
 def render_run_results(engine, steps):
     tabs = st.tabs([
         "🟢 Final Output",
+        "⚠️ Warnings",
         "📁 Agent Outputs",
         "🧩 Graph",
         "🔍 Compare"
@@ -856,12 +873,15 @@ def render_run_results(engine, steps):
         render_final_output(engine)
 
     with tabs[1]:
-        render_agent_outputs(engine, steps)
+        render_warnings(engine)
 
     with tabs[2]:
-        render_graph_tab(steps)
+        render_agent_outputs(engine, steps)
 
     with tabs[3]:
+        render_graph_tab(steps)
+
+    with tabs[4]:
         render_compare_tab(engine, steps)
 
 
@@ -885,6 +905,7 @@ def render_run_mode():
                 steps=steps,
                 initial_input=task,
                 on_progress=update_progress,
+                strict=strict_mode,
             )
 
         progress_bar.progress(100)
@@ -897,6 +918,12 @@ def render_run_mode():
         )
 
         st.success("Pipeline completed!")
+
+        # Inline warning banner
+        if "__warnings__" in st.session_state.engine.memory:
+            st.warning(
+                f"{len(st.session_state.engine.memory['__warnings__'])} warning(s) occurred during execution."
+            )
 
     if st.session_state.engine.memory:
         render_run_results(st.session_state.engine, steps)
