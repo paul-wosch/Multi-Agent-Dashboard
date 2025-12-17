@@ -114,6 +114,50 @@ Return the improved final answer only.
 
 
 # =======================
+# CACHE INVALIDATION HELPER
+# =======================
+
+def invalidate_caches(*names: str):
+    """
+    Centralized cache invalidation helper.
+    Allowed names:
+      - agents
+      - prompt_versions
+      - pipelines
+      - runs
+      - run_details
+      - all
+    """
+    if "all" in names:
+        load_agents_from_db.clear()
+        load_prompt_versions.clear()
+        load_pipelines_from_db.clear()
+        load_runs.clear()
+        load_run_details.clear()
+        return
+
+    for name in names:
+        if name == "agents":
+            load_agents_from_db.clear()
+        elif name == "prompt_versions":
+            load_prompt_versions.clear()
+        elif name == "pipelines":
+            load_pipelines_from_db.clear()
+        elif name == "runs":
+            load_runs.clear()
+        elif name == "run_details":
+            load_run_details.clear()
+
+
+def invalidate_agent_state():
+    invalidate_caches("agents", "prompt_versions", "pipelines")
+
+
+def invalidate_run_state():
+    invalidate_caches("runs", "run_details")
+
+
+# =======================
 # OpenAI client factory
 # =======================
 def create_openai_client(api_key: str):
@@ -635,7 +679,7 @@ def render_run_sidebar():
         if st.button("💾 Save Pipeline"):
             if name.strip():
                 save_pipeline_to_db(DB_PATH, name.strip(), selected_steps)
-                load_pipelines_from_db.clear() # Cache invalidation required
+                invalidate_agent_state()
                 st.success("Pipeline saved")
                 st.rerun()
 
@@ -783,9 +827,7 @@ def render_run_mode():
             final if isinstance(final, str) else json.dumps(final),
             st.session_state.engine.memory
         )
-        # Cache invalidation required
-        load_runs.clear()
-        load_run_details.clear()
+        invalidate_run_state()
 
         st.success("Pipeline completed!")
 
@@ -883,10 +925,7 @@ def render_agent_editor():
 
             if not is_new and old_name and old_name != name:
                 rename_agent_in_db(DB_PATH, old_name, name)
-                # Cache invalidation required
-                load_agents_from_db.clear()
-                load_prompt_versions.clear()
-                load_pipelines_from_db.clear()
+                invalidate_agent_state()
 
             save_agent_to_db(
                 DB_PATH,
@@ -898,12 +937,12 @@ def render_agent_editor():
                 [v.strip() for v in output_vars.splitlines() if v.strip()],
             )
 
-            load_agents_from_db.clear()     # Cache invalidation required
             # Only save new prompt version when prompt was actually changed
             # Ensures agent meta-data changes don't spam the prompt history
             if prompt != agent["prompt"]:
                 save_prompt_version(DB_PATH, name, prompt)
-                load_prompt_versions.clear()    # Cache invalidation required
+
+            invalidate_agent_state()
             reload_agents_into_engine()
             st.success("Agent saved")
             st.rerun()
@@ -919,7 +958,7 @@ def render_agent_editor():
                 agent["input_vars"],
                 agent["output_vars"]
             )
-            load_agents_from_db.clear()  # Cache invalidation required
+            invalidate_agent_state()
             reload_agents_into_engine()
             st.success("Duplicated")
             st.rerun()
@@ -927,9 +966,7 @@ def render_agent_editor():
     with col_c:
         if not is_new and st.button("🗑 Delete"):
             delete_agent(DB_PATH, name)
-            # Cache invalidation required
-            load_agents_from_db.clear()
-            load_prompt_versions.clear()
+            invalidate_agent_state()
             reload_agents_into_engine()
             st.warning("Deleted")
             st.rerun()
