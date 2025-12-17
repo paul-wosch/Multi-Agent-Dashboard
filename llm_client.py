@@ -70,6 +70,14 @@ class LLMClient:
                 if response_format is not None and "response_format" in self._capabilities:
                     kwargs["response_format"] = response_format
 
+                logger.debug(
+                    "LLM request: model=%s, prompt_len=%d, stream=%s, response_format=%s",
+                    model,
+                    len(prompt),
+                    stream,
+                    bool(response_format),
+                )
+
                 resp = self._client.responses.create(**kwargs)
 
                 text = self._extract_text(resp)
@@ -102,18 +110,22 @@ class LLMClient:
         """
         Best-effort extraction across SDK versions.
         """
-        if hasattr(response, "output_text") and response.output_text:
-            return response.output_text
+        try:
+            if hasattr(response, "output_text") and response.output_text:
+                return response.output_text
 
-        chunks = []
+            chunks = []
 
-        if hasattr(response, "output") and isinstance(response.output, list):
-            for block in response.output:
-                content = block.get("content") if isinstance(block, dict) else None
-                if isinstance(content, list):
-                    for c in content:
-                        if isinstance(c, dict) and c.get("type") == "output_text":
-                            chunks.append(c.get("text", ""))
+            if hasattr(response, "output") and isinstance(response.output, list):
+                for block in response.output:
+                    content = block.get("content") if isinstance(block, dict) else None
+                    if isinstance(content, list):
+                        for c in content:
+                            if isinstance(c, dict) and c.get("type") == "output_text":
+                                chunks.append(c.get("text", ""))
+        except Exception:
+            logger.exception("Failed to extract text from LLM response")
+            raise
 
         if chunks:
             return "".join(chunks)

@@ -4,7 +4,7 @@ from openai import OpenAI  # still imported for type / factory use
 import difflib
 import json
 from datetime import datetime, UTC
-from config import OPENAI_API_KEY, DB_FILE_PATH, MIGRATIONS_PATH
+from config import OPENAI_API_KEY, DB_FILE_PATH, MIGRATIONS_PATH, configure_logging
 from db.db import (
     init_db,
     load_agents_from_db,
@@ -24,6 +24,9 @@ from db.db import (
 from utils import safe_format
 from llm_client import LLMClient, TextResponse
 from typing import List, Dict, Any, Tuple, Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 # =======================
 # Configuration
@@ -205,6 +208,7 @@ class Agent:
             stream: bool = False,
     ) -> str:
         if not self.llm_client:
+            logger.error("Agent %s has no LLM client", self.name)
             raise RuntimeError("Agent has no LLMClient injected")
 
         # Build variable map
@@ -302,6 +306,7 @@ class MultiAgentEngine:
         - If agent.output_vars is empty:
             * Output written to state[agent.name]
         """
+        logger.info("Starting pipeline: %s", steps)
 
         # Initialize shared state dictionary
         self.state = {}
@@ -316,6 +321,7 @@ class MultiAgentEngine:
         base = 100 / (2 * num_agents) if num_agents else 100
 
         for i, agent_name in enumerate(steps):
+            logger.debug("Pipeline step start: %s", agent_name)
             # Progress: agent start
             if on_progress:
                 on_progress(
@@ -342,7 +348,11 @@ class MultiAgentEngine:
                         )
 
             # Run agent with generic state (Agent will pick only input_vars if it declares them)
-            raw_output = agent.run(self.state)
+            try:
+                raw_output = agent.run(self.state)
+            except Exception:
+                logger.exception("Agent %s execution failed", agent_name)
+                raise
             # Store raw output in memory
             self.memory[agent_name] = raw_output
             last_output = raw_output
@@ -358,6 +368,11 @@ class MultiAgentEngine:
             if agent.output_vars:
                 # Case 1: structured JSON output
                 if isinstance(parsed, dict):
+                    logger.debug(
+                        "Agent %s returned JSON keys: %s",
+                        agent_name,
+                        list(parsed.keys())
+                    )
                     for key in parsed.keys():
                         if key not in agent.output_vars:
                             self._log_or_raise(
@@ -542,6 +557,8 @@ def app_start():
     st.session_state.llm_client = llm_client
 
 
+configure_logging()
+
 # Only start the app if we don't already have an engine in session state.
 # This prevents double initialization during reruns.
 if "engine" not in st.session_state:
@@ -678,7 +695,11 @@ def render_run_sidebar():
 
         if st.button("💾 Save Pipeline"):
             if name.strip():
-                save_pipeline_to_db(DB_PATH, name.strip(), selected_steps)
+                try:
+                    save_pipeline_to_db(DB_PATH, name.strip(), selected_steps)
+                except Exception:
+                    logger.exception("Failed to persist pipeline")
+                    st.error("Failed to save pipeline to database")
                 invalidate_agent_state()
                 st.success("Pipeline saved")
                 st.rerun()
@@ -821,12 +842,16 @@ def render_run_mode():
         progress_bar.progress(100)
         progress_text.caption("Pipeline completed ✅")
 
-        save_run_to_db(
-            DB_PATH,
-            task,
-            final if isinstance(final, str) else json.dumps(final),
-            st.session_state.engine.memory
-        )
+        try:
+            save_run_to_db(
+                DB_PATH,
+                task,
+                final if isinstance(final, str) else json.dumps(final),
+                st.session_state.engine.memory
+            )
+        except Exception:
+            logger.exception("Failed to persist run")
+            st.error("Run completed but failed to save to database")
         invalidate_run_state()
 
         st.success("Pipeline completed!")
@@ -924,7 +949,11 @@ def render_agent_editor():
             old_name = agent["name"]
 
             if not is_new and old_name and old_name != name:
-                rename_agent_in_db(DB_PATH, old_name, name)
+                try:
+                    rename_agent_in_db(DB_PATH, old_name, name)
+                except Exception:
+                    logger.exception("Failed to persist rename")
+                    st.error("Rename completed but failed to save to database")
                 invalidate_agent_state()
 
             save_agent_to_db(
@@ -940,7 +969,11 @@ def render_agent_editor():
             # Only save new prompt version when prompt was actually changed
             # Ensures agent meta-data changes don't spam the prompt history
             if prompt != agent["prompt"]:
-                save_prompt_version(DB_PATH, name, prompt)
+                try:
+                    save_prompt_version(DB_PATH, name, prompt)
+                except Exception:
+                    logger.exception("Failed to persist new prompt version")
+                    st.error("New prompt version created but failed to save to database")
 
             invalidate_agent_state()
             reload_agents_into_engine()
@@ -949,15 +982,19 @@ def render_agent_editor():
 
     with col_b:
         if not is_new and st.button("📄 Duplicate"):
-            save_agent_to_db(
-                DB_PATH,
-                f"{name}_copy",
-                model,
-                prompt,
-                role,
-                agent["input_vars"],
-                agent["output_vars"]
-            )
+            try:
+                save_agent_to_db(
+                    DB_PATH,
+                    f"{name}_copy",
+                    model,
+                    prompt,
+                    role,
+                    agent["input_vars"],
+                    agent["output_vars"]
+                )
+            except Exception:
+                logger.exception("Failed to persist duplicated agent")
+                st.error("Agent duplicated but failed to save to database")
             invalidate_agent_state()
             reload_agents_into_engine()
             st.success("Duplicated")
@@ -965,7 +1002,11 @@ def render_agent_editor():
 
     with col_c:
         if not is_new and st.button("🗑 Delete"):
-            delete_agent(DB_PATH, name)
+            try:
+                delete_agent(DB_PATH, name)
+            except Exception:
+                logger.exception("Failed to persist agent delete")
+                st.error("Failed to delete agent from database")
             invalidate_agent_state()
             reload_agents_into_engine()
             st.warning("Deleted")

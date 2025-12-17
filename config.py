@@ -1,6 +1,7 @@
 """Provide global constants for the project."""
 from pathlib import Path
 from dotenv import dotenv_values
+import logging
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 
@@ -25,6 +26,18 @@ DOTENV_FILE = Path(".env")
 DOTENV_FILE_PATH = (PROJECT_ROOT / DOTENV_FILE).resolve()
 
 OPENAI_API_KEY = dotenv_values(DOTENV_FILE_PATH).get("OPENAI_API_KEY", None)
+
+LOG_LEVEL = dotenv_values(DOTENV_FILE_PATH).get("LOG_LEVEL", "INFO").upper()
+
+def configure_logging():
+    root = logging.getLogger()
+    if root.handlers:
+        return
+
+    logging.basicConfig(
+        level=LOG_LEVEL,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
 
 
 def main():
