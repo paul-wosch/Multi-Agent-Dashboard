@@ -9,7 +9,10 @@ def get_db_schema(conn: sqlite3.Connection):
     for (table,) in tables:
         if table == "sqlite_sequence":
             continue
+
         cols = conn.execute(f"PRAGMA table_info({table})").fetchall()
-        schema[table] = {c[1]: c[2] for c in cols}
+        schema[table] = {
+            "columns": {c[1]: c[2] for c in cols}
+        }
 
     return schema
