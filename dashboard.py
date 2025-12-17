@@ -5,8 +5,22 @@ import difflib
 import json
 from datetime import datetime, UTC
 from config import OPENAI_API_KEY, DB_FILE_PATH, MIGRATIONS_PATH
-from db.db import get_conn
-from db.migrations import apply_migrations
+from db.db import (
+    init_db,
+    load_agents_from_db,
+    load_pipelines_from_db,
+    load_runs,
+    load_run_details,
+    load_prompt_versions,
+    save_run_to_db,
+    save_agent_to_db,
+    save_prompt_version,
+    save_pipeline_to_db,
+    delete_pipeline_from_db,
+    rename_agent_in_db,
+    delete_agent
+)
+# from db.migrations import apply_migrations
 from utils import safe_format
 from llm_client import LLMClient, TextResponse
 from typing import List, Dict, Any, Tuple, Optional
@@ -97,260 +111,6 @@ Return the improved final answer only.
         "output_vars": ["final"]
     },
 }
-
-
-# =======================
-# Persistence Helpers
-# =======================
-
-def save_run_to_db(task_input: str, final_output: str, memory_dict: Dict[str, Any]) -> int:
-    with get_conn(DB_PATH) as conn:
-        c = conn.cursor()
-
-        ts = datetime.now(UTC).isoformat()
-
-        # ---- detect final output type ----
-        if isinstance(final_output, str):
-            final_text = final_output
-            final_is_json = 0
-            try:
-                json.loads(final_output)
-                final_is_json = 1
-            except Exception:
-                pass
-        else:
-            final_text = json.dumps(final_output)
-            final_is_json = 1
-
-        # ---- best-effort final model ----
-        final_model = None
-        engine = getattr(st.session_state, "engine", None)
-        if engine:
-            # final output comes from 'final' if present, else last agent
-            if "final" in engine.state:
-                final_agent = "finalizer"
-            else:
-                final_agent = next(reversed(engine.memory.keys()), None)
-
-            if final_agent and final_agent in engine.agents:
-                final_model = engine.agents[final_agent].model
-
-        c.execute("""
-                  INSERT INTO runs (timestamp,
-                                    task_input,
-                                    final_output,
-                                    final_is_json,
-                                    final_model)
-                  VALUES (?, ?, ?, ?, ?)
-                  """, (
-                      ts,
-                      task_input,
-                      final_text,
-                      final_is_json,
-                      final_model
-                  ))
-
-        run_id = c.lastrowid
-
-        for agent, output in memory_dict.items():
-            # Normalize output to string
-            if isinstance(output, str):
-                raw_text = output
-                is_json = 0
-            else:
-                raw_text = json.dumps(output)
-                is_json = 1
-
-            # Defensive JSON detection for string outputs
-            if isinstance(output, str):
-                try:
-                    json.loads(output)
-                    is_json = 1
-                except Exception:
-                    pass
-
-            # Best-effort model lookup (non-breaking)
-            model = None
-            engine = getattr(st.session_state, "engine", None)
-            if engine and agent in engine.agents:
-                model = engine.agents[agent].model
-
-            c.execute("""
-                      INSERT INTO agent_outputs (run_id,
-                                                 agent_name,
-                                                 output,
-                                                 is_json,
-                                                 model)
-                      VALUES (?, ?, ?, ?, ?)
-                      """, (run_id, agent, raw_text, is_json, model))
-
-    return run_id
-
-
-def load_agents_from_db() -> List[Tuple[str, str, str, Optional[str], Optional[str], Optional[str]]]:
-    """Returns rows: agent_name, model, prompt_template, role, input_vars_json, output_vars_json"""
-    with get_conn(DB_PATH) as conn:
-        c = conn.cursor()
-        c.execute("SELECT agent_name, model, prompt_template, role, input_vars, output_vars FROM agents")
-        rows = c.fetchall()
-        return rows
-
-
-def save_agent_to_db(agent_name: str, model: str, prompt_template: str,
-                     role: str = "", input_vars: Optional[List[str]] = None,
-                     output_vars: Optional[List[str]] = None):
-    """Saves agent metadata. input_vars/output_vars are stored as JSON arrays (strings) for flexibility."""
-
-    input_json = json.dumps(input_vars or [])
-    output_json = json.dumps(output_vars or [])
-
-    with get_conn(DB_PATH) as conn:
-        c = conn.cursor()
-        c.execute("""
-            INSERT OR REPLACE INTO agents (agent_name, model, prompt_template, role, input_vars, output_vars)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (agent_name, model, prompt_template, role, input_json, output_json))
-
-
-def load_prompt_versions(agent_name: str):
-    with get_conn(DB_PATH) as conn:
-        c = conn.cursor()
-
-        c.execute("""
-            SELECT id, version, prompt, metadata_json, timestamp
-            FROM agent_prompt_versions
-            WHERE agent_name = ?
-            ORDER BY version DESC
-        """, (agent_name,))
-
-        rows = c.fetchall()
-        return rows
-
-
-def save_prompt_version(agent_name: str, prompt_text: str, metadata: Optional[dict] = None) -> int:
-    with get_conn(DB_PATH) as conn:
-        c = conn.cursor()
-
-        c.execute("SELECT MAX(version) FROM agent_prompt_versions WHERE agent_name = ?", (agent_name,))
-        result = c.fetchone()[0]
-        new_version = 1 if result is None else result + 1
-
-        ts = datetime.now(UTC).isoformat()
-        metadata_json = json.dumps(metadata or {})
-
-        c.execute("""
-            INSERT INTO agent_prompt_versions (agent_name, version, prompt, metadata_json, timestamp)
-            VALUES (?, ?, ?, ?, ?)
-        """, (agent_name, new_version, prompt_text, metadata_json, ts))
-
-    return new_version
-
-
-# =======================
-# Pipeline persistence (save/load)
-# =======================
-def save_pipeline_to_db(pipeline_name: str, steps: List[str], metadata: Optional[dict] = None):
-    with get_conn(DB_PATH) as conn:
-        c = conn.cursor()
-
-        ts = datetime.now(UTC).isoformat()
-        steps_json = json.dumps(steps)
-        metadata_json = json.dumps(metadata or {})
-
-        c.execute("""
-            INSERT OR REPLACE INTO pipelines (pipeline_name, steps_json, metadata_json, timestamp)
-            VALUES (?, ?, ?, ?)
-        """, (pipeline_name, steps_json, metadata_json, ts))
-
-
-def load_pipelines_from_db() -> List[Tuple[str, List[str], dict, str]]:
-    with get_conn(DB_PATH) as conn:
-        c = conn.cursor()
-        c.execute("SELECT pipeline_name, steps_json, metadata_json, timestamp FROM pipelines ORDER BY pipeline_name")
-        rows = c.fetchall()
-
-    result = []
-    for name, steps_json, metadata_json, ts in rows:
-        steps = json.loads(steps_json) if steps_json else []
-        metadata = json.loads(metadata_json) if metadata_json else {}
-        result.append((name, steps, metadata, ts))
-    return result
-
-
-def delete_pipeline_from_db(pipeline_name: str):
-    with get_conn(DB_PATH) as conn:
-        c = conn.cursor()
-        c.execute("DELETE FROM pipelines WHERE pipeline_name = ?", (pipeline_name,))
-
-
-def rename_agent_in_db(old_name: str, new_name: str):
-    """
-    Safely rename an agent across all related tables in a single transaction.
-    """
-    if old_name == new_name:
-        return
-
-    with get_conn(DB_PATH) as conn:
-        try:
-            conn.execute("BEGIN")
-
-            # Ensure target name does not already exist
-            exists = conn.execute(
-                "SELECT 1 FROM agents WHERE agent_name = ?",
-                (new_name,)
-            ).fetchone()
-            if exists:
-                raise ValueError(f"Agent '{new_name}' already exists")
-
-            # Update agents table
-            conn.execute(
-                "UPDATE agents SET agent_name = ? WHERE agent_name = ?",
-                (new_name, old_name),
-            )
-
-            # Update prompt versions
-            conn.execute(
-                "UPDATE agent_prompt_versions SET agent_name = ? WHERE agent_name = ?",
-                (new_name, old_name),
-            )
-
-            # Update historical outputs
-            conn.execute(
-                "UPDATE agent_outputs SET agent_name = ? WHERE agent_name = ?",
-                (new_name, old_name),
-            )
-
-            # Update pipelines (JSON steps)
-            rows = conn.execute(
-                "SELECT pipeline_name, steps_json FROM pipelines"
-            ).fetchall()
-
-            for pipeline_name, steps_json in rows:
-                if not steps_json:
-                    continue
-
-                steps = json.loads(steps_json)
-                updated = False
-
-                new_steps = []
-                for step in steps:
-                    if step == old_name:
-                        new_steps.append(new_name)
-                        updated = True
-                    else:
-                        new_steps.append(step)
-
-                if updated:
-                    conn.execute(
-                        "UPDATE pipelines SET steps_json = ? WHERE pipeline_name = ?",
-                        (json.dumps(new_steps), pipeline_name),
-                    )
-
-            conn.commit()
-
-        except Exception:
-            conn.rollback()
-            raise
 
 
 # =======================
@@ -610,58 +370,6 @@ class MultiAgentEngine:
 # SHARED HELPERS (USED BY APP_START AND UI)
 # ======================================================
 
-def parse_agent_row(row):
-    """
-    Normalize agent DB row into a dict.
-    UI helper — no backend behavior change.
-    """
-    name, model, prompt, role, input_json, output_json = row
-    return {
-        "name": name,
-        "model": model,
-        "prompt": prompt,
-        "role": role or "",
-        "input_vars": json.loads(input_json) if input_json else [],
-        "output_vars": json.loads(output_json) if output_json else []
-    }
-
-
-def load_runs():
-    with get_conn(DB_PATH) as conn:
-        c = conn.cursor()
-        c.execute(
-            "SELECT id, timestamp, task_input FROM runs ORDER BY id DESC"
-        )
-        return c.fetchall()
-
-
-def load_run_details(run_id: int):
-    with get_conn(DB_PATH) as conn:
-        c = conn.cursor()
-
-        c.execute(
-            """
-            SELECT timestamp, task_input, final_output, final_is_json, final_model
-            FROM runs
-            WHERE id = ?
-            """,
-            (run_id,)
-        )
-        run = c.fetchone()
-
-        c.execute(
-            """
-            SELECT agent_name, output, is_json, model
-            FROM agent_outputs
-            WHERE run_id = ?
-            """,
-            (run_id,)
-        )
-        agents = c.fetchall()
-
-    return run, agents
-
-
 def render_agent_graph(steps: list[str]):
     dot = graphviz.Digraph()
     dot.attr(
@@ -692,11 +400,16 @@ def reload_agents_into_engine():
     engine = st.session_state.engine
     engine.agents.clear()
 
-    stored_agents = load_agents_from_db()
-    for name, model, prompt, role, input_json, output_json in stored_agents:
-        input_vars = json.loads(input_json) if input_json else []
-        output_vars = json.loads(output_json) if output_json else []
-        engine.add_agent(name, prompt, model, role, input_vars, output_vars)
+    stored_agents = load_agents_from_db(DB_PATH)
+    for agent in stored_agents:
+        engine.add_agent(
+            agent["agent_name"],
+            agent["prompt_template"],
+            agent["model"],
+            agent["role"],
+            agent["input_vars"],
+            agent["output_vars"],
+        )
 
 
 def export_pipeline_agents_as_json(pipeline_name: str, steps: List[str]) -> str:
@@ -727,11 +440,12 @@ def export_pipeline_agents_as_json(pipeline_name: str, steps: List[str]) -> str:
 
 # Initialize DB + bootstrap defaults if agents table empty and populate Streamlit session with engine
 def bootstrap_default_agents(defaults: Dict[str, dict]):
-    existing = load_agents_from_db()
+    existing = load_agents_from_db(DB_PATH)
     if existing:
         return
     for name, data in defaults.items():
         save_agent_to_db(
+            DB_PATH,
             name,
             data.get("model", "gpt-4.1-nano"),
             data.get("prompt_template", ""),
@@ -740,7 +454,7 @@ def bootstrap_default_agents(defaults: Dict[str, dict]):
             data.get("output_vars", [])
         )
         # also save a versioned prompt snapshot
-        save_prompt_version(name, data.get("prompt_template", ""), metadata={"role": data.get("role", "")})
+        save_prompt_version(DB_PATH, name, data.get("prompt_template", ""), metadata={"role": data.get("role", "")})
 
 
 def app_start():
@@ -753,9 +467,8 @@ def app_start():
     - loads agents from DB into the engine
     - stores engine into st.session_state
     """
-    # DB migrations
-    with get_conn(DB_PATH) as conn:
-        apply_migrations(conn, migrations_dir=MIGRATIONS_PATH)
+    # Initialize DB and apply migrations
+    init_db(DB_PATH)
 
     # create OpenAI client (factory)
     openai_client = create_openai_client(OPENAI_API_KEY)
@@ -768,15 +481,15 @@ def app_start():
     bootstrap_default_agents(default_agents)
 
     # Load agents from DB into engine
-    stored_agents = load_agents_from_db()
-    for name, model, prompt, role, input_json, output_json in stored_agents:
+    stored_agents = load_agents_from_db(DB_PATH)
+    for agent in stored_agents:
         engine.add_agent(
-            name,
-            prompt,
-            model,
-            role,
-            json.loads(input_json or "[]"),
-            json.loads(output_json or "[]"),
+            agent["agent_name"],
+            agent["prompt_template"],
+            agent["model"],
+            agent["role"],
+            agent["input_vars"],
+            agent["output_vars"],
         )
 
     # Save engine into session state
@@ -881,8 +594,8 @@ st.divider()
 def render_run_sidebar():
     st.sidebar.header("Run Configuration")
 
-    pipelines = load_pipelines_from_db()
-    pipeline_names = [p[0] for p in pipelines]
+    pipelines = load_pipelines_from_db(DB_PATH)
+    pipeline_names = [p["pipeline_name"] for p in pipelines]
 
     selected_pipeline = st.sidebar.selectbox(
         "Pipeline",
@@ -904,7 +617,10 @@ def render_run_sidebar():
         available_agents = list(st.session_state.engine.agents.keys())
 
         if selected_pipeline != "<Ad-hoc>":
-            steps = next(p[1] for p in pipelines if p[0] == selected_pipeline)
+            steps = next(
+                p["steps"] for p in pipelines
+                if p["pipeline_name"] == selected_pipeline
+            )
         else:
             steps = available_agents
 
@@ -918,7 +634,8 @@ def render_run_sidebar():
 
         if st.button("💾 Save Pipeline"):
             if name.strip():
-                save_pipeline_to_db(name.strip(), selected_steps)
+                save_pipeline_to_db(DB_PATH, name.strip(), selected_steps)
+                load_pipelines_from_db.clear() # Cache invalidation required
                 st.success("Pipeline saved")
                 st.rerun()
 
@@ -1061,10 +778,14 @@ def render_run_mode():
         progress_text.caption("Pipeline completed ✅")
 
         save_run_to_db(
+            DB_PATH,
             task,
             final if isinstance(final, str) else json.dumps(final),
             st.session_state.engine.memory
         )
+        # Cache invalidation required
+        load_runs.clear()
+        load_run_details.clear()
 
         st.success("Pipeline completed!")
 
@@ -1085,8 +806,18 @@ def render_run_mode():
 def render_agent_editor():
     st.header("🧠 Agent Editor")
 
-    agents_raw = load_agents_from_db()
-    agents = [parse_agent_row(a) for a in agents_raw]
+    agents_raw = load_agents_from_db(DB_PATH)
+    agents = [
+        {
+            "name": a["agent_name"],
+            "model": a["model"],
+            "role": a["role"],
+            "prompt": a["prompt_template"],
+            "input_vars": a["input_vars"],
+            "output_vars": a["output_vars"],
+        }
+        for a in agents_raw
+    ]
     names = [a["name"] for a in agents]
 
     selected = st.selectbox(
@@ -1135,11 +866,12 @@ def render_agent_editor():
 
     with tabs[3]:
         if not is_new:
-            versions = load_prompt_versions(agent["name"])
-            for _, vnum, vprompt, meta, ts in versions:
-                with st.expander(f"Version {vnum} — {ts}"):
-                    st.code(vprompt)
-                    st.json(json.loads(meta or "{}"))
+            versions = load_prompt_versions(DB_PATH, agent["name"])
+            for v in versions:
+                with st.expander(f"Version {v['version']} — {v['created_at']}"):
+                    st.code(v["prompt"])
+                    if v["metadata"]:
+                        st.json(v["metadata"])
 
     st.divider()
 
@@ -1150,9 +882,14 @@ def render_agent_editor():
             old_name = agent["name"]
 
             if not is_new and old_name and old_name != name:
-                rename_agent_in_db(old_name, name)
+                rename_agent_in_db(DB_PATH, old_name, name)
+                # Cache invalidation required
+                load_agents_from_db.clear()
+                load_prompt_versions.clear()
+                load_pipelines_from_db.clear()
 
             save_agent_to_db(
+                DB_PATH,
                 name,
                 model,
                 prompt,
@@ -1161,7 +898,12 @@ def render_agent_editor():
                 [v.strip() for v in output_vars.splitlines() if v.strip()],
             )
 
-            save_prompt_version(name, prompt)
+            load_agents_from_db.clear()     # Cache invalidation required
+            # Only save new prompt version when prompt was actually changed
+            # Ensures agent meta-data changes don't spam the prompt history
+            if prompt != agent["prompt"]:
+                save_prompt_version(DB_PATH, name, prompt)
+                load_prompt_versions.clear()    # Cache invalidation required
             reload_agents_into_engine()
             st.success("Agent saved")
             st.rerun()
@@ -1169,6 +911,7 @@ def render_agent_editor():
     with col_b:
         if not is_new and st.button("📄 Duplicate"):
             save_agent_to_db(
+                DB_PATH,
                 f"{name}_copy",
                 model,
                 prompt,
@@ -1176,14 +919,17 @@ def render_agent_editor():
                 agent["input_vars"],
                 agent["output_vars"]
             )
+            load_agents_from_db.clear()  # Cache invalidation required
             reload_agents_into_engine()
             st.success("Duplicated")
             st.rerun()
 
     with col_c:
         if not is_new and st.button("🗑 Delete"):
-            with get_conn(DB_PATH) as conn:
-                conn.execute("DELETE FROM agents WHERE agent_name = ?", (name,))
+            delete_agent(DB_PATH, name)
+            # Cache invalidation required
+            load_agents_from_db.clear()
+            load_prompt_versions.clear()
             reload_agents_into_engine()
             st.warning("Deleted")
             st.rerun()
@@ -1196,8 +942,12 @@ def render_agent_editor():
 def render_history_mode():
     st.header("📜 Past Runs")
 
-    runs = load_runs()
-    options = {f"Run {r[0]} — {r[1]}": r[0] for r in runs}
+    runs = load_runs(DB_PATH)
+
+    options = {
+        f"Run {r['id']} — {r['timestamp']}": r["id"]
+        for r in runs
+    }
 
     selected = st.selectbox(
         "Select Run",
@@ -1208,9 +958,13 @@ def render_history_mode():
         return
 
     run_id = options[selected]
-    run, agents = load_run_details(run_id)
+    run, agents = load_run_details(DB_PATH, run_id)
 
-    ts, task, final, final_is_json, final_model = run
+    ts = run["timestamp"]
+    task = run["task_input"]
+    final = run["final_output"]
+    final_is_json = run["final_is_json"]
+    final_model = run["final_model"]
 
     st.subheader(f"Run {run_id}")
     st.code(task)
@@ -1229,7 +983,11 @@ def render_history_mode():
         else:
             st.markdown(final)
 
-    for name, output, is_json, model in agents:
+    for a in agents:
+        name = a["agent_name"]
+        output = a["output"]
+        is_json = a["is_json"]
+        model = a["model"]
         header = f"{name}"
         if model:
             header += f" · {model}"
@@ -1254,12 +1012,12 @@ def render_history_mode():
             "model": final_model,
             },
         "agents": {
-            name: {
-                "output": output,
-                "is_json": bool(is_json),
-                "model": model,
+            a["agent_name"]: {
+                "output": a["output"],
+                "is_json": bool(a["is_json"]),
+                "model": a["model"],
             }
-        for name, output, is_json, model in agents
+            for a in agents
         }
     }
 
@@ -1275,7 +1033,6 @@ def render_history_mode():
 # ======================================================
 
 for fn in [
-    parse_agent_row,
     load_runs,
     load_run_details,
     render_agent_graph,
