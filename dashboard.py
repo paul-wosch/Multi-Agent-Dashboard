@@ -4,6 +4,7 @@ from openai import OpenAI  # still imported for type / factory use
 import difflib
 import json
 from datetime import datetime, UTC
+import time
 from config import OPENAI_API_KEY, DB_FILE_PATH, MIGRATIONS_PATH, configure_logging
 from db.db import (
     init_db,
@@ -24,6 +25,7 @@ from db.db import (
 from utils import safe_format
 from llm_client import LLMClient, TextResponse
 from typing import List, Dict, Any, Tuple, Optional
+from collections import deque
 import logging
 
 logger = logging.getLogger(__name__)
@@ -34,6 +36,14 @@ logger = logging.getLogger(__name__)
 DB_PATH = DB_FILE_PATH
 # NOTE: removed global OpenAI client creation and removed DB init/migration at import time.
 # Use app_start() to perform initialization when running the app.
+
+LOG_LEVEL_COLORS = {
+    "DEBUG": "#6c757d",     # gray
+    "INFO": "#198754",      # green
+    "WARNING": "#fd7e14",   # orange
+    "ERROR": "#dc3545",     # red
+    "CRITICAL": "#842029",  # dark red
+}
 
 # =======================
 # DEFAULT AGENTS (Backward-compatible examples)
@@ -114,6 +124,44 @@ Return the improved final answer only.
         "output_vars": ["final"]
     },
 }
+
+
+# =======================
+# LOG HANDLER CLASS
+# =======================
+
+class StreamlitLogHandler(logging.Handler):
+    """
+    Logging handler that stores recent log records in Streamlit session_state.
+    """
+
+    def __init__(self, capacity: int = 500):
+        super().__init__()
+        self.capacity = capacity
+
+    def emit(self, record: logging.LogRecord):
+        try:
+            entry = {
+                "time": (
+                        time.strftime(
+                            "%Y-%m-%d %H:%M:%S",
+                            time.localtime(record.created)
+                        )
+                        + f",{int(record.msecs):03d}"
+                ),
+                "level": record.levelname,
+                "logger": record.name,
+                "message": record.getMessage(),
+            }
+
+            logs = st.session_state.setdefault(
+                "_log_buffer",
+                deque(maxlen=self.capacity),
+            )
+            logs.append(entry)
+        except Exception:
+            # Never let logging break the app
+            pass
 
 
 # =======================
@@ -526,6 +574,12 @@ def app_start():
     - loads agents from DB into the engine
     - stores engine into st.session_state
     """
+    # Attach Streamlit log handler once per session
+    if "_log_handler_attached" not in st.session_state:
+        handler = StreamlitLogHandler(capacity=500)
+        logging.getLogger().addHandler(handler)
+        st.session_state["_log_handler_attached"] = True
+
     # Initialize DB and apply migrations
     init_db(DB_PATH)
 
@@ -633,10 +687,11 @@ st.caption("Design pipelines, run tasks, inspect agent behavior, and manage prom
 MODE_RUN = "▶️ Run Pipeline"
 MODE_AGENTS = "🧠 Manage Agents"
 MODE_HISTORY = "📜 History"
+MODE_LOGS = "🪵 Logs"
 
 mode = st.radio(
     "Mode",
-    [MODE_RUN, MODE_AGENTS, MODE_HISTORY],
+    [MODE_RUN, MODE_AGENTS, MODE_HISTORY, MODE_LOGS],
     horizontal=True
 )
 
@@ -1106,6 +1161,95 @@ def render_history_mode():
         mime="application/json"
     )
 
+
+# ======================================================
+# ---------- LOGS MODE ----------
+# ======================================================
+
+def render_logs_mode():
+    st.header("🪵 Application Logs")
+
+    logs = st.session_state.get("_log_buffer", [])
+
+    if not logs:
+        st.info("No logs yet.")
+        return
+
+    col1, col2 = st.columns([3, 1])
+
+    with col2:
+        level_filter = st.multiselect(
+            "Levels",
+            ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+            default=["INFO", "WARNING", "ERROR", "CRITICAL"],
+        )
+
+        def build_log_lines(logs, level_filter, search):
+            lines = []
+            for entry in logs:
+                if entry["level"] not in level_filter:
+                    continue
+                if search and search.lower() not in entry["message"].lower():
+                    continue
+
+                lines.append(
+                    f"{entry['time']} "
+                    f"[{entry['level']}] "
+                    f"{entry['logger']}: "
+                    f"{entry['message']}"
+                )
+            return "\n".join(lines)
+
+        search = st.text_input("Search")
+
+        if st.button("🧹 Clear logs"):
+            logs.clear()
+            st.rerun()
+
+        export_text = build_log_lines(
+            logs=list(logs),
+            level_filter=level_filter,
+            search=search,
+        )
+
+        st.download_button(
+            label="⬇️ Download logs",
+            data=export_text,
+            file_name="application.log",
+            mime="text/plain",
+            disabled=not bool(export_text),
+        )
+
+    with col1:
+        for entry in reversed(logs):
+            if entry["level"] not in level_filter:
+                continue
+            if search and search.lower() not in entry["message"].lower():
+                continue
+
+            level = entry["level"]
+            color = LOG_LEVEL_COLORS.get(level, "#000000")
+
+            prefix = f"{entry['time']} "
+            level_token = f"[{level}]"
+            suffix = f" {entry['logger']}: {entry['message']}"
+
+            st.markdown(
+                f"""
+            <pre style="
+                margin: 0;
+                padding: 6px 10px;
+                background-color: #f8f9fa;
+                border-radius: 4px;
+                font-family: monospace;
+                white-space: pre-wrap;
+            ">
+            {prefix}<span style="color:{color}; font-weight:bold;">{level_token}</span>{suffix}
+            </pre>
+            """,
+                unsafe_allow_html=True,
+            )
+
 # ======================================================
 # DEV-TIME SAFETY CHECKS
 # ======================================================
@@ -1131,3 +1275,6 @@ elif mode == MODE_AGENTS:
 
 elif mode == MODE_HISTORY:
     render_history_mode()
+
+elif mode == MODE_LOGS:
+    render_logs_mode()
