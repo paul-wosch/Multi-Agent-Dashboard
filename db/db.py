@@ -247,7 +247,7 @@ def save_run_to_db(
                     final_agent = next(reversed(engine.memory.keys()), None)
 
                 if final_agent and final_agent in engine.agents:
-                    final_model = engine.agents[final_agent].model
+                    final_model = engine.agents[final_agent].spec.model
 
             c.execute("""
                       INSERT INTO runs (timestamp,
@@ -287,7 +287,7 @@ def save_run_to_db(
                 model = None
                 engine = getattr(st.session_state, "engine", None)
                 if engine and agent in engine.agents:
-                    model = engine.agents[agent].model
+                    model = engine.agents[agent].spec.model
 
                 c.execute("""
                           INSERT INTO agent_outputs (run_id,

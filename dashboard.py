@@ -3,6 +3,7 @@ import streamlit as st
 from openai import OpenAI  # still imported for type / factory use
 import difflib
 import json
+from dataclasses import asdict
 from datetime import datetime, UTC
 import time
 from config import OPENAI_API_KEY, DB_FILE_PATH, MIGRATIONS_PATH, configure_logging
@@ -24,6 +25,7 @@ from db.db import (
 # from db.migrations import apply_migrations
 from utils import safe_format
 from llm_client import LLMClient, TextResponse
+from models import AgentSpec, AgentRuntime
 from typing import List, Dict, Any, Tuple, Optional
 from collections import deque
 import logging
@@ -217,74 +219,12 @@ def create_openai_client(api_key: str):
 
 
 # =======================
-# Agent class (self-describing) with injected client
-# =======================
-class Agent:
-    def __init__(
-        self,
-        name: str,
-        prompt_template: str,
-        model: str = "gpt-4.1-nano",
-        role: str = "",
-        input_vars: Optional[List[str]] = None,
-        output_vars: Optional[List[str]] = None,
-        llm_client: Optional[LLMClient] = None,
-    ):
-        self.name = name
-        self.prompt_template = prompt_template
-        self.model = model
-        self.role = role or ""
-        self.input_vars = input_vars or []
-        self.output_vars = output_vars or []
-        self.llm_client = llm_client
-
-    def describe(self) -> dict:
-        return {
-            "name": self.name,
-            "model": self.model,
-            "role": self.role,
-            "input_vars": list(self.input_vars),
-            "output_vars": list(self.output_vars),
-            "prompt_template": self.prompt_template
-        }
-
-    def run(
-            self,
-            state: Dict[str, Any],
-            *,
-            structured_schema: Optional[Dict[str, Any]] = None,
-            stream: bool = False,
-    ) -> str:
-        if not self.llm_client:
-            logger.error("Agent %s has no LLM client", self.name)
-            raise RuntimeError("Agent has no LLMClient injected")
-
-        # Build variable map
-        if self.input_vars:
-            variables = {k: state.get(k, "") for k in self.input_vars}
-        else:
-            variables = dict(state)
-
-        # Safe prompt formatting
-        prompt = safe_format(self.prompt_template, variables)
-
-        response: TextResponse = self.llm_client.create_text_response(
-            model=self.model,
-            prompt=prompt,
-            response_format=structured_schema,
-            stream=stream,
-        )
-
-        return response.text
-
-
-# =======================
 # MultiAgentEngine with client injection
 # =======================
 class MultiAgentEngine:
     def __init__(self, llm_client: LLMClient):
         # agents: name -> Agent
-        self.agents: Dict[str, Agent] = {}
+        self.agents: Dict[str, AgentRuntime] = {}
         # shared structured state used by pipelines
         self.state: Dict[str, Any] = {}
         # memory: agent_name -> raw agent output (string or parsed)
@@ -292,22 +232,9 @@ class MultiAgentEngine:
         # injected OpenAI client instance
         self.llm_client = llm_client
 
-    def add_agent(
-            self,
-            name: str,
-            prompt_template: str,
-            model: str = "gpt-4.1-nano",
-            role: str = "",
-            input_vars: Optional[List[str]] = None,
-            output_vars: Optional[List[str]] = None,
-    ):
-        self.agents[name] = Agent(
-            name=name,
-            prompt_template=prompt_template,
-            model=model,
-            role=role,
-            input_vars=input_vars,
-            output_vars=output_vars,
+    def add_agent(self, spec: AgentSpec):
+        self.agents[spec.name] = AgentRuntime(
+            spec=spec,
             llm_client=self.llm_client,
         )
 
@@ -316,7 +243,7 @@ class MultiAgentEngine:
 
     def update_agent_prompt(self, name: str, new_prompt: str):
         if name in self.agents:
-            self.agents[name].prompt_template = new_prompt
+            self.agents[name].spec.prompt_template = new_prompt
 
     def _log_or_raise(self, strict: bool, agent_name: str, message: str):
         """
@@ -346,12 +273,12 @@ class MultiAgentEngine:
         - final output returned is state.get('final') if present, else the last agent's output.
 
         Writeback contract:
-        - If agent.output_vars is declared:
+        - If agent.spec.output_vars is declared:
             * JSON dict → keys must match output_vars
             * Non-JSON:
                 - len(output_vars) == 1 → assign raw text
                 - len(output_vars) > 1 → assign `{agent.name}__raw`
-        - If agent.output_vars is empty:
+        - If agent.spec.output_vars is empty:
             * Output written to state[agent.name]
         """
         logger.info("Starting pipeline: %s", steps)
@@ -386,8 +313,8 @@ class MultiAgentEngine:
                 continue
 
             # === INPUT CONTRACT VALIDATION ===
-            if agent.input_vars:
-                for var in agent.input_vars:
+            if agent.spec.input_vars:
+                for var in agent.spec.input_vars:
                     if var not in self.state or self.state.get(var) in ("", None):
                         self._log_or_raise(
                             strict,
@@ -413,7 +340,7 @@ class MultiAgentEngine:
 
             # === WRITEBACK RULES ===
 
-            if agent.output_vars:
+            if agent.spec.output_vars:
                 # Case 1: structured JSON output
                 if isinstance(parsed, dict):
                     logger.debug(
@@ -422,14 +349,14 @@ class MultiAgentEngine:
                         list(parsed.keys())
                     )
                     for key in parsed.keys():
-                        if key not in agent.output_vars:
+                        if key not in agent.spec.output_vars:
                             self._log_or_raise(
                                 strict,
                                 agent_name,
                                 f"Unexpected output key '{key}' not declared in output_vars"
                             )
 
-                    for var in agent.output_vars:
+                    for var in agent.spec.output_vars:
                         if var in parsed:
                             self.state[var] = parsed[var]
                         else:
@@ -441,10 +368,10 @@ class MultiAgentEngine:
 
                 # Case 2: non-JSON output
                 else:
-                    if len(agent.output_vars) == 1:
-                        self.state[agent.output_vars[0]] = raw_output
+                    if len(agent.spec.output_vars) == 1:
+                        self.state[agent.spec.output_vars[0]] = raw_output
                     else:
-                        raw_key = f"{agent.name}__raw"
+                        raw_key = f"{agent.spec.name}__raw"
                         self.state[raw_key] = raw_output
                         self._log_or_raise(
                             strict,
@@ -454,7 +381,7 @@ class MultiAgentEngine:
 
             # Case 3: no declared output_vars
             else:
-                self.state[agent.name] = raw_output
+                self.state[agent.spec.name] = raw_output
 
             # Progress: agent end
             if on_progress:
@@ -489,7 +416,7 @@ def render_agent_graph(steps: list[str]):
 
     for agent in steps:
         if agent in st.session_state.engine.agents:
-            role = st.session_state.engine.agents[agent].role
+            role = st.session_state.engine.agents[agent].spec.role
             label = f"{agent}\n({role})" if role else agent
         else:
             label = agent
@@ -508,15 +435,16 @@ def reload_agents_into_engine():
     engine.agents.clear()
 
     stored_agents = load_agents_from_db(DB_PATH)
-    for agent in stored_agents:
-        engine.add_agent(
-            agent["agent_name"],
-            agent["prompt_template"],
-            agent["model"],
-            agent["role"],
-            agent["input_vars"],
-            agent["output_vars"],
+    for a in stored_agents:
+        spec = AgentSpec(
+            name=a["agent_name"],
+            model=a["model"],
+            prompt_template=a["prompt_template"],
+            role=a["role"],
+            input_vars=a["input_vars"],
+            output_vars=a["output_vars"],
         )
+        engine.add_agent(spec)
 
 
 def export_pipeline_agents_as_json(pipeline_name: str, steps: List[str]) -> str:
@@ -530,7 +458,7 @@ def export_pipeline_agents_as_json(pipeline_name: str, steps: List[str]) -> str:
         agent = engine.agents.get(agent_name)
         if not agent:
             continue
-        agents_payload.append(agent.describe())
+        agents_payload.append(asdict(agent.spec))
 
     export = {
         "pipeline": pipeline_name,
@@ -595,15 +523,16 @@ def app_start():
 
     # Load agents from DB into engine
     stored_agents = load_agents_from_db(DB_PATH)
-    for agent in stored_agents:
-        engine.add_agent(
-            agent["agent_name"],
-            agent["prompt_template"],
-            agent["model"],
-            agent["role"],
-            agent["input_vars"],
-            agent["output_vars"],
+    for a in stored_agents:
+        spec = AgentSpec(
+            name=a["agent_name"],
+            model=a["model"],
+            prompt_template=a["prompt_template"],
+            role=a["role"],
+            input_vars=a["input_vars"],
+            output_vars=a["output_vars"],
         )
+        engine.add_agent(spec)
 
     # Save engine into session state
     st.session_state.engine = engine
