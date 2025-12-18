@@ -22,9 +22,8 @@ from db.db import (
     rename_agent_in_db,
     delete_agent
 )
-# from db.migrations import apply_migrations
-from utils import safe_format
-from llm_client import LLMClient, TextResponse
+from engine import MultiAgentEngine, EngineResult
+from llm_client import LLMClient
 from models import AgentSpec, AgentRuntime
 from typing import List, Dict, Any, Tuple, Optional
 from collections import deque
@@ -218,188 +217,6 @@ def create_openai_client(api_key: str):
     return OpenAI(api_key=api_key)
 
 
-# =======================
-# MultiAgentEngine with client injection
-# =======================
-class MultiAgentEngine:
-    def __init__(self, llm_client: LLMClient):
-        # agents: name -> Agent
-        self.agents: Dict[str, AgentRuntime] = {}
-        # shared structured state used by pipelines
-        self.state: Dict[str, Any] = {}
-        # memory: agent_name -> raw agent output (string or parsed)
-        self.memory: Dict[str, Any] = {}
-        # injected OpenAI client instance
-        self.llm_client = llm_client
-
-    def add_agent(self, spec: AgentSpec):
-        self.agents[spec.name] = AgentRuntime(
-            spec=spec,
-            llm_client=self.llm_client,
-        )
-
-    def remove_agent(self, name: str):
-        self.agents.pop(name, None)
-
-    def update_agent_prompt(self, name: str, new_prompt: str):
-        if name in self.agents:
-            self.agents[name].spec.prompt_template = new_prompt
-
-    def _log_or_raise(self, strict: bool, agent_name: str, message: str):
-        """
-        Internal helper for handling writeback contract violations.
-        """
-        if strict:
-            raise ValueError(message)
-        self.memory.setdefault("__warnings__", []).append(
-            f"[{agent_name}] {message}"
-        )
-
-    def run_seq(
-            self,
-            steps: List[str],
-            initial_input: Any,
-            *,
-            on_progress: Optional[callable] = None,
-            strict: bool = False,
-    ) -> Any:
-        """
-        Sequential pipeline executor with explicit, safe state writeback rules.
-
-        - initialize shared state with initial_input available under 'task' and 'input' keys
-        - for each agent in steps, get declared input_vars, run agent with subset of state,
-          then write back outputs to state using the agent's declared output_vars.
-        - memory stores raw outputs keyed by agent name.
-        - final output returned is state.get('final') if present, else the last agent's output.
-
-        Writeback contract:
-        - If agent.spec.output_vars is declared:
-            * JSON dict → keys must match output_vars
-            * Non-JSON:
-                - len(output_vars) == 1 → assign raw text
-                - len(output_vars) > 1 → assign `{agent.name}__raw`
-        - If agent.spec.output_vars is empty:
-            * Output written to state[agent.name]
-        """
-        logger.info("Starting pipeline: %s", steps)
-
-        # Initialize shared state dictionary
-        self.state = {}
-        # Always keep the original user input under 'task' and 'input' for backward compatibility
-        self.state['task'] = initial_input
-        self.state['input'] = initial_input
-
-        self.memory = {}
-
-        last_output = None
-        num_agents = len(steps)
-        base = 100 / (2 * num_agents) if num_agents else 100
-
-        for i, agent_name in enumerate(steps):
-            logger.debug("Pipeline step start: %s", agent_name)
-            # Progress: agent start
-            if on_progress:
-                on_progress(
-                    int(base * (2 * i + 1)),
-                    agent_name=agent_name,
-                )
-
-            agent = self.agents.get(agent_name)
-            if not agent:
-                # skip unknown agent but record a warning in memory
-                msg = f"Agent '{agent_name}' not registered"
-                self.memory[agent_name] = msg
-                self._log_or_raise(strict, agent_name, msg)
-                continue
-
-            # === INPUT CONTRACT VALIDATION ===
-            if agent.spec.input_vars:
-                for var in agent.spec.input_vars:
-                    if var not in self.state or self.state.get(var) in ("", None):
-                        self._log_or_raise(
-                            strict,
-                            agent_name,
-                            f"Input var '{var}' is missing or empty when '{agent_name}' ran"
-                        )
-
-            # Run agent with generic state (Agent will pick only input_vars if it declares them)
-            try:
-                raw_output = agent.run(self.state)
-            except Exception:
-                logger.exception("Agent %s execution failed", agent_name)
-                raise
-            # Store raw output in memory
-            self.memory[agent_name] = raw_output
-            last_output = raw_output
-
-            # Attempt JSON parse
-            try:
-                parsed = LLMClient.safe_json(raw_output)
-            except Exception:
-                parsed = None
-
-            # === WRITEBACK RULES ===
-
-            if agent.spec.output_vars:
-                # Case 1: structured JSON output
-                if isinstance(parsed, dict):
-                    logger.debug(
-                        "Agent %s returned JSON keys: %s",
-                        agent_name,
-                        list(parsed.keys())
-                    )
-                    for key in parsed.keys():
-                        if key not in agent.spec.output_vars:
-                            self._log_or_raise(
-                                strict,
-                                agent_name,
-                                f"Unexpected output key '{key}' not declared in output_vars"
-                            )
-
-                    for var in agent.spec.output_vars:
-                        if var in parsed:
-                            self.state[var] = parsed[var]
-                        else:
-                            self._log_or_raise(
-                                strict,
-                                agent_name,
-                                f"Declared output_var '{var}' missing from JSON output"
-                            )
-
-                # Case 2: non-JSON output
-                else:
-                    if len(agent.spec.output_vars) == 1:
-                        self.state[agent.spec.output_vars[0]] = raw_output
-                    else:
-                        raw_key = f"{agent.spec.name}__raw"
-                        self.state[raw_key] = raw_output
-                        self._log_or_raise(
-                            strict,
-                            agent_name,
-                            f"Non-JSON output with multiple output_vars; stored under '{raw_key}'"
-                        )
-
-            # Case 3: no declared output_vars
-            else:
-                self.state[agent.spec.name] = raw_output
-
-            # Progress: agent end
-            if on_progress:
-                on_progress(
-                    int(base * (2 * i + 2)),
-                    agent_name=agent_name,
-                )
-
-        # Safety: guarantee 100% even if rounding skipped it
-        if on_progress:
-            on_progress(100, agent_name=None)
-
-        return self.state.get("final", last_output)
-
-    def get_output(self, agent_name: str) -> Any:
-        return self.memory.get(agent_name, "")
-
-
 # ======================================================
 # SHARED HELPERS (USED BY APP_START AND UI)
 # ======================================================
@@ -516,7 +333,10 @@ def app_start():
     llm_client = LLMClient(openai_client)
 
     # create engine with injected client
-    engine = MultiAgentEngine(llm_client=llm_client)
+    engine = MultiAgentEngine(
+        llm_client=llm_client
+    )
+    st.session_state.engine = engine
 
     # Ensure default agents exist in DB (only if table empty)
     bootstrap_default_agents(default_agents)
@@ -707,36 +527,33 @@ def render_run_sidebar():
     return selected_pipeline, selected_steps, task, run_clicked
 
 
-def render_warnings(engine):
-    warnings = engine.memory.get("__warnings__", [])
-    if not warnings:
+def render_warnings(result: EngineResult):
+    if not result.warnings:
         return
 
     st.warning("⚠️ Pipeline Warnings")
-    for w in warnings:
+    for w in result.warnings:
         st.markdown(f"- {w}")
 
 
-def render_final_output(engine):
-    final = engine.state.get("final")
-
-    if not final:
+def render_final_output(result: EngineResult):
+    if not result.final_output:
         st.info("No output yet.")
         return
 
     st.subheader("Final Output")
 
     try:
-        parsed = json.loads(final)
+        parsed = json.loads(result.final_output)
         st.json(parsed)
     except Exception:
-        st.markdown(final)
+        st.markdown(result.final_output)
 
 
-def render_agent_outputs(engine, steps):
+def render_agent_outputs(result: EngineResult, steps):
     for agent in steps:
         with st.expander(f"🔹 {agent}"):
-            out = engine.get_output(agent)
+            out = result.memory.get(agent, "")
             try:
                 parsed = json.loads(out)
                 st.json(parsed)
@@ -751,7 +568,7 @@ def render_graph_tab(steps):
     st.graphviz_chart(render_agent_graph(steps))
 
 
-def render_compare_tab(engine, steps):
+def render_compare_tab(result: EngineResult, steps):
     col1, col2 = st.columns(2)
 
     with col1:
@@ -761,8 +578,8 @@ def render_compare_tab(engine, steps):
         a2 = st.selectbox("Agent B", steps, key="cmp_b")
 
     if a1 != a2:
-        out1 = str(engine.get_output(a1) or "")
-        out2 = str(engine.get_output(a2) or "")
+        out1 = str(result.memory.get(a1, ""))
+        out2 = str(result.memory.get(a2, ""))
 
         diff = difflib.unified_diff(
             out1.splitlines(),
@@ -775,7 +592,7 @@ def render_compare_tab(engine, steps):
         st.code("\n".join(diff), language="diff")
 
 
-def render_run_results(engine, steps):
+def render_run_results(result: EngineResult, steps):
     tabs = st.tabs([
         "🟢 Final Output",
         "⚠️ Warnings",
@@ -785,19 +602,19 @@ def render_run_results(engine, steps):
     ])
 
     with tabs[0]:
-        render_final_output(engine)
+        render_final_output(result)
 
     with tabs[1]:
-        render_warnings(engine)
+        render_warnings(result)
 
     with tabs[2]:
-        render_agent_outputs(engine, steps)
+        render_agent_outputs(result, steps)
 
     with tabs[3]:
         render_graph_tab(steps)
 
     with tabs[4]:
-        render_compare_tab(engine, steps)
+        render_compare_tab(result, steps)
 
 
 def render_run_mode():
@@ -815,13 +632,18 @@ def render_run_mode():
             else:
                 progress_text.caption(f"Pipeline progress: {pct}%")
 
+        engine = st.session_state.engine
+        engine.on_progress = update_progress
+
         with st.spinner("Running pipeline…"):
-            final = st.session_state.engine.run_seq(
+            result: EngineResult = engine.run_seq(
                 steps=steps,
                 initial_input=task,
-                on_progress=update_progress,
                 strict=strict_mode,
             )
+
+            st.session_state.last_result = result
+            st.session_state.last_steps = steps
 
         progress_bar.progress(100)
         progress_text.caption("Pipeline completed ✅")
@@ -830,8 +652,12 @@ def render_run_mode():
             save_run_to_db(
                 DB_PATH,
                 task,
-                final if isinstance(final, str) else json.dumps(final),
-                st.session_state.engine.memory
+                (
+                    result.final_output
+                    if isinstance(result.final_output, str)
+                    else json.dumps(result.final_output)
+                ),
+                result.memory
             )
         except Exception:
             logger.exception("Failed to persist run")
@@ -846,8 +672,11 @@ def render_run_mode():
                 f"{len(st.session_state.engine.memory['__warnings__'])} warning(s) occurred during execution."
             )
 
-    if st.session_state.engine.memory:
-        render_run_results(st.session_state.engine, steps)
+    if "last_result" in st.session_state:
+        render_run_results(
+            st.session_state.last_result,
+            st.session_state.last_steps,
+        )
 
 
 # ======================================================
