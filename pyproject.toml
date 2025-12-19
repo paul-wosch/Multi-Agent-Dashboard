@@ -1,13 +1,22 @@
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "multi-agent-dashboard"
 version = "0.1.0"
+description = "Streamlit-based dashboard for building and running multi-agent pipelines"
+readme = "README.md"
+requires-python = ">=3.10"
+
+dependencies = [
+    "graphviz==0.21",
+    "openai==2.9.0",
+    "streamlit==1.52.1",
+]
 
 [tool.setuptools]
-package-dir = {"" = "src"}
+package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
