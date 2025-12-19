@@ -37,7 +37,7 @@ This step is **required** when using a `src/` layout.
 pip install -e .
 ```
 
-This makes the `multi_agent` package importable in Streamlit, tests, and scripts.
+This makes the `multi_agent_dashboard` package importable in Streamlit, tests, and scripts.
 
 ---
 
@@ -62,7 +62,7 @@ LOG_LEVEL=INFO
 From the project root:
 
 ```bash
-streamlit run src/multi_agent/ui/app.py
+streamlit run src/multi_agent_dashboard/ui/app.py
 ```
 
 Then open your browser at:
@@ -117,7 +117,7 @@ repo_root/
 ├── pyproject.toml               # Project metadata, dependencies, packaging config
 ├── README.md                    # Project documentation
 ├── src/
-│   └── multi_agent/             # Main Python package (src layout)
+│   └── multi_agent_dashboard/   # Main Python package (src layout)
 │       ├── __init__.py          # Package marker
 │       ├── config.py            # Global configuration, paths, logging setup
 │       ├── engine.py            # Core multi-agent orchestration engine (UI-agnostic)
@@ -132,7 +132,7 @@ repo_root/
 │           └── app.py           # Streamlit application (presentation + orchestration only)
 ├── data/
 │   ├── db/
-│   │   └── multi_agent_runs.db  # Auto-created SQLite database (not tracked)
+│   │   └── multi_agent_dashboard_runs.db  # Auto-created SQLite database (not tracked)
 │   └── migrations/
 │       ├── 000_create_base_tables.sql          # Initial schema
 │       ├── 001_add_agent_output_metadata.sql   # Schema evolution
@@ -148,7 +148,7 @@ repo_root/
 
 * The project uses a **`src/` layout** to avoid accidental imports from the working directory.
 * Always install the project with `pip install -e .` during development.
-* UI code is isolated under `multi_agent/ui`.
+* UI code is isolated under `multi_agent_dashboard/ui`.
 * Core logic (engine, models, DB) is UI-agnostic and safe for reuse in CLI tools or tests.
 
 ---
@@ -159,7 +159,7 @@ Contributions are welcome.
 
 Please:
 
-* Keep UI changes confined to `multi_agent/ui`
+* Keep UI changes confined to `multi_agent_dashboard/ui`
 * Avoid introducing `sys.path` manipulation
 * Include database migrations for schema changes
 * Preserve engine/UI separation
