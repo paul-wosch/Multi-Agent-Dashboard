@@ -5,8 +5,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Callable
 
-from models import AgentSpec, AgentRuntime
-from llm_client import LLMClient
+from multi_agent_dashboard.models import AgentSpec, AgentRuntime
+from multi_agent_dashboard.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
 

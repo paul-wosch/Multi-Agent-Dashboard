@@ -1,13 +1,18 @@
+# ui/app.py
 import graphviz
 import streamlit as st
-from openai import OpenAI  # still imported for type / factory use
+from openai import OpenAI  # type/factory only
 import difflib
 import json
 from dataclasses import asdict
 from datetime import datetime, UTC
 import time
-from config import OPENAI_API_KEY, DB_FILE_PATH, MIGRATIONS_PATH, configure_logging
-from db.db import (
+import logging
+from typing import List, Dict, Any, Tuple, Optional
+from collections import deque
+
+from multi_agent_dashboard.config import OPENAI_API_KEY, DB_FILE_PATH, configure_logging
+from multi_agent_dashboard.db.db import (
     init_db,
     load_agents_from_db,
     load_pipelines_from_db,
@@ -20,14 +25,12 @@ from db.db import (
     save_pipeline_to_db,
     delete_pipeline_from_db,
     rename_agent_in_db,
-    delete_agent
+    delete_agent,
 )
-from engine import MultiAgentEngine, EngineResult
-from llm_client import LLMClient
-from models import AgentSpec, AgentRuntime
-from typing import List, Dict, Any, Tuple, Optional
-from collections import deque
-import logging
+
+from multi_agent_dashboard.engine import MultiAgentEngine, EngineResult
+from multi_agent_dashboard.llm_client import LLMClient
+from multi_agent_dashboard.models import AgentSpec
 
 logger = logging.getLogger(__name__)
 

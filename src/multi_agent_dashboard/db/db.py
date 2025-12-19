@@ -6,20 +6,8 @@ from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, UTC
 from contextlib import contextmanager
 
-from db.migrations import apply_migrations
-
-# TODO: Remove sys.path manipulation once project is migrated
-#       to a standard Python package structure.
-import sys
-from pathlib import Path
-# Get the parent directory using pathlib
-parent_dir = Path(__file__).resolve().parent.parent
-# Add the parent directory to sys.path
-parent_str = str(parent_dir)
-if parent_str not in sys.path:
-    sys.path.append(parent_str)
-# Import the module
-from config import MIGRATIONS_PATH
+from multi_agent_dashboard.db.migrations import apply_migrations
+from multi_agent_dashboard.config import MIGRATIONS_PATH
 
 logger = logging.getLogger(__name__)
 

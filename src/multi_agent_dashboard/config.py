@@ -3,7 +3,7 @@ from pathlib import Path
 from dotenv import dotenv_values
 import logging
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 DB_FILE = Path("multi_agent_runs.db")
 
