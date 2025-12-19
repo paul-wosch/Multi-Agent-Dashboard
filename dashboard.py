@@ -128,6 +128,35 @@ Return the improved final answer only.
 
 
 # =======================
+# CACHED WRAPPERS
+# =======================
+
+@st.cache_data(ttl=60)
+def cached_load_agents(db_path):
+    return load_agents_from_db(db_path)
+
+
+@st.cache_data(ttl=60)
+def cached_load_pipelines(db_path):
+    return load_pipelines_from_db(db_path)
+
+
+@st.cache_data(ttl=30)
+def cached_load_runs(db_path):
+    return load_runs(db_path)
+
+
+@st.cache_data(ttl=30)
+def cached_load_run_details(db_path, run_id):
+    return load_run_details(db_path, run_id)
+
+
+@st.cache_data(ttl=60)
+def cached_load_prompt_versions(db_path, agent_name):
+    return load_prompt_versions(db_path, agent_name)
+
+
+# =======================
 # LOG HANDLER CLASS
 # =======================
 
@@ -181,24 +210,24 @@ def invalidate_caches(*names: str):
       - all
     """
     if "all" in names:
-        load_agents_from_db.clear()
-        load_prompt_versions.clear()
-        load_pipelines_from_db.clear()
-        load_runs.clear()
-        load_run_details.clear()
+        cached_load_agents.clear()
+        cached_load_prompt_versions.clear()
+        cached_load_pipelines.clear()
+        cached_load_runs.clear()
+        cached_load_run_details.clear()
         return
 
     for name in names:
         if name == "agents":
-            load_agents_from_db.clear()
+            cached_load_agents.clear()
         elif name == "prompt_versions":
-            load_prompt_versions.clear()
+            cached_load_prompt_versions.clear()
         elif name == "pipelines":
-            load_pipelines_from_db.clear()
+            cached_load_pipelines.clear()
         elif name == "runs":
-            load_runs.clear()
+            cached_load_runs.clear()
         elif name == "run_details":
-            load_run_details.clear()
+            cached_load_run_details.clear()
 
 
 def invalidate_agent_state():
@@ -251,7 +280,7 @@ def reload_agents_into_engine():
     engine = st.session_state.engine
     engine.agents.clear()
 
-    stored_agents = load_agents_from_db(DB_PATH)
+    stored_agents = cached_load_agents(DB_PATH)
     for a in stored_agents:
         spec = AgentSpec(
             name=a["agent_name"],
@@ -292,7 +321,7 @@ def export_pipeline_agents_as_json(pipeline_name: str, steps: List[str]) -> str:
 
 # Initialize DB + bootstrap defaults if agents table empty and populate Streamlit session with engine
 def bootstrap_default_agents(defaults: Dict[str, dict]):
-    existing = load_agents_from_db(DB_PATH)
+    existing = cached_load_agents(DB_PATH)
     if existing:
         return
     for name, data in defaults.items():
@@ -342,7 +371,7 @@ def app_start():
     bootstrap_default_agents(default_agents)
 
     # Load agents from DB into engine
-    stored_agents = load_agents_from_db(DB_PATH)
+    stored_agents = cached_load_agents(DB_PATH)
     for a in stored_agents:
         spec = AgentSpec(
             name=a["agent_name"],
@@ -459,7 +488,7 @@ st.divider()
 def render_run_sidebar():
     st.sidebar.header("Run Configuration")
 
-    pipelines = load_pipelines_from_db(DB_PATH)
+    pipelines = cached_load_pipelines(DB_PATH)
     pipeline_names = [p["pipeline_name"] for p in pipelines]
 
     selected_pipeline = st.sidebar.selectbox(
@@ -648,16 +677,25 @@ def render_run_mode():
         progress_bar.progress(100)
         progress_text.caption("Pipeline completed ✅")
 
+        agent_models = {
+            name: runtime.spec.model
+            for name, runtime in engine.agents.items()
+        }
+
+        final_model = (
+            agent_models.get(result.final_agent)
+            if result.final_agent
+            else None
+        )
+
         try:
             save_run_to_db(
                 DB_PATH,
                 task,
-                (
-                    result.final_output
-                    if isinstance(result.final_output, str)
-                    else json.dumps(result.final_output)
-                ),
-                result.memory
+                result.final_output,
+                result.memory,
+                agent_models=agent_models,
+                final_model=final_model,
             )
         except Exception:
             logger.exception("Failed to persist run")
@@ -686,7 +724,7 @@ def render_run_mode():
 def render_agent_editor():
     st.header("🧠 Agent Editor")
 
-    agents_raw = load_agents_from_db(DB_PATH)
+    agents_raw = cached_load_agents(DB_PATH)
     agents = [
         {
             "name": a["agent_name"],
@@ -746,7 +784,7 @@ def render_agent_editor():
 
     with tabs[3]:
         if not is_new:
-            versions = load_prompt_versions(DB_PATH, agent["name"])
+            versions = cached_load_prompt_versions(DB_PATH, agent["name"])
             for v in versions:
                 with st.expander(f"Version {v['version']} — {v['created_at']}"):
                     st.code(v["prompt"])
@@ -833,7 +871,7 @@ def render_agent_editor():
 def render_history_mode():
     st.header("📜 Past Runs")
 
-    runs = load_runs(DB_PATH)
+    runs = cached_load_runs(DB_PATH)
 
     options = {
         f"Run {r['id']} — {r['timestamp']}": r["id"]
@@ -849,7 +887,7 @@ def render_history_mode():
         return
 
     run_id = options[selected]
-    run, agents = load_run_details(DB_PATH, run_id)
+    run, agents = cached_load_run_details(DB_PATH, run_id)
 
     ts = run["timestamp"]
     task = run["task_input"]
@@ -1013,8 +1051,8 @@ def render_logs_mode():
 # ======================================================
 
 for fn in [
-    load_runs,
-    load_run_details,
+    cached_load_runs,
+    cached_load_run_details,
     render_agent_graph,
     reload_agents_into_engine,
 ]:

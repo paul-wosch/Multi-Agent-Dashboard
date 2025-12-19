@@ -1,10 +1,10 @@
 # db/db.py
 import json
-import streamlit as st
-from typing import List, Dict, Any, Tuple, Optional
+import logging
+import sqlite3
+from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, UTC
 from contextlib import contextmanager
-import sqlite3
 
 from db.migrations import apply_migrations
 
@@ -20,8 +20,6 @@ if parent_str not in sys.path:
     sys.path.append(parent_str)
 # Import the module
 from config import MIGRATIONS_PATH
-
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -74,11 +72,10 @@ def get_conn(path):
 
 
 # -----------------------
-# Cached READ operations
+# READ operations (Cached in UI)
 # -----------------------
 
-@st.cache_data(ttl=60)
-def load_agents_from_db(db_path: str):
+def load_agents_from_db(db_path: str) -> list[dict]:
     """Return rows: agent_name, model, prompt_template, role, input_vars_json, output_vars_json"""
     logger.debug("Loading agents from DB")
     try:
@@ -103,8 +100,7 @@ def load_agents_from_db(db_path: str):
     return agents
 
 
-@st.cache_data(ttl=60)
-def load_pipelines_from_db(db_path: str):
+def load_pipelines_from_db(db_path: str) -> list[dict]:
     logger.debug("Loading pipelines from DB")
     try:
         with get_conn(db_path) as conn:
@@ -130,8 +126,7 @@ def load_pipelines_from_db(db_path: str):
     return result
 
 
-@st.cache_data(ttl=30)
-def load_runs(db_path: str):
+def load_runs(db_path: str) -> list[dict]:
     logger.debug("Loading runs from DB")
     try:
         with get_conn(db_path) as conn:
@@ -145,8 +140,7 @@ def load_runs(db_path: str):
     return [dict(row) for row in rows]
 
 
-@st.cache_data(ttl=30)
-def load_run_details(db_path: str, run_id: int):
+def load_run_details(db_path: str, run_id: int) -> Tuple[dict | None, list[dict]]:
     logger.debug("Loading details for run %s from DB", run_id)
     try:
         with get_conn(db_path) as conn:
@@ -175,7 +169,6 @@ def load_run_details(db_path: str, run_id: int):
     )
 
 
-@st.cache_data(ttl=60)
 def load_prompt_versions(db_path: str, agent_name: str):
     logger.debug("Loading prompt versions for %s from DB", agent_name)
     try:
@@ -207,101 +200,77 @@ def load_prompt_versions(db_path: str, agent_name: str):
 
 
 # -----------------------
-# WRITE operations (uncached)
+# WRITE operations
 # -----------------------
 
 def save_run_to_db(
-        db_path: str,
-        task_input: str,
-        final_output: str,
-        memory_dict: Dict[str, Any]
-    ) -> int:
+    db_path: str,
+    task_input: str,
+    final_output: str,
+    memory_dict: Dict[str, Any],
+    *,
+    agent_models: Dict[str, str] | None = None,
+    final_model: str | None = None,
+) -> int:
+    ts = datetime.now(UTC).isoformat()
+    agent_models = agent_models or {}
+
+    if isinstance(final_output, str):
+        final_text = final_output
+        try:
+            json.loads(final_output)
+            final_is_json = 1
+        except Exception:
+            final_is_json = 0
+    else:
+        final_text = json.dumps(final_output)
+        final_is_json = 1
+
     logger.info("Saving run to DB")
     try:
         with get_conn(db_path) as conn:
             c = conn.cursor()
 
-            ts = datetime.now(UTC).isoformat()
-
-            # ---- detect final output type ----
-            if isinstance(final_output, str):
-                final_text = final_output
-                final_is_json = 0
-                try:
-                    json.loads(final_output)
-                    final_is_json = 1
-                except Exception:
-                    pass
-            else:
-                final_text = json.dumps(final_output)
-                final_is_json = 1
-
-            # ---- best-effort final model ----
-            final_model = None
-            engine = getattr(st.session_state, "engine", None)
-            if engine:
-                # final output comes from 'final' if present, else last agent
-                if "final" in engine.state:
-                    final_agent = "finalizer"
-                else:
-                    final_agent = next(reversed(engine.memory.keys()), None)
-
-                if final_agent and final_agent in engine.agents:
-                    final_model = engine.agents[final_agent].spec.model
-
-            c.execute("""
-                      INSERT INTO runs (timestamp,
-                                        task_input,
-                                        final_output,
-                                        final_is_json,
-                                        final_model)
-                      VALUES (?, ?, ?, ?, ?)
-                      """, (
-                          ts,
-                          task_input,
-                          final_text,
-                          final_is_json,
-                          final_model
-                      ))
-
+            c.execute(
+                """
+                INSERT INTO runs (timestamp, task_input, final_output, final_is_json, final_model)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (ts, task_input, final_text, final_is_json, final_model),
+            )
             run_id = c.lastrowid
 
             for agent, output in memory_dict.items():
-                # Normalize output to string
                 if isinstance(output, str):
-                    raw_text = output
-                    is_json = 0
-                else:
-                    raw_text = json.dumps(output)
-                    is_json = 1
-
-                # Defensive JSON detection for string outputs
-                if isinstance(output, str):
+                    raw = output
                     try:
                         json.loads(output)
                         is_json = 1
                     except Exception:
-                        pass
+                        is_json = 0
+                else:
+                    raw = json.dumps(output)
+                    is_json = 1
 
-                # Best-effort model lookup (non-breaking)
-                model = None
-                engine = getattr(st.session_state, "engine", None)
-                if engine and agent in engine.agents:
-                    model = engine.agents[agent].spec.model
-
-                c.execute("""
-                          INSERT INTO agent_outputs (run_id,
-                                                     agent_name,
-                                                     output,
-                                                     is_json,
-                                                     model)
-                          VALUES (?, ?, ?, ?, ?)
-                          """, (run_id, agent, raw_text, is_json, model))
+                c.execute(
+                    """
+                    INSERT INTO agent_outputs (run_id, agent_name, output, is_json, model)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        run_id,
+                        agent,
+                        raw,
+                        is_json,
+                        agent_models.get(agent),
+                    ),
+                )
     except Exception:
         logger.exception("Failed to save run to DB")
         raise
 
     return run_id
+
 
 
 def save_agent_to_db(

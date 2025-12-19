@@ -24,6 +24,7 @@ class EngineResult:
     state: Dict[str, Any]
     memory: Dict[str, Any]
     warnings: List[str] = field(default_factory=list)
+    final_agent: Optional[str] = None  # runtime-only
 
 
 # =========================
@@ -93,6 +94,7 @@ class MultiAgentEngine:
         steps: List[str],
         initial_input: Any,
         strict: bool = False,
+        last_agent: Optional[str] = None,
     ) -> EngineResult:
         """
         Execute agents sequentially.
@@ -125,6 +127,9 @@ class MultiAgentEngine:
             self._progress(start_pct, agent_name)
 
             agent = self.agents.get(agent_name)
+
+            last_agent = agent_name
+
             if not agent:
                 msg = f"Agent '{agent_name}' is not registered"
                 if strict:
@@ -199,4 +204,7 @@ class MultiAgentEngine:
             state=dict(self.state),
             memory=dict(self.memory),
             warnings=list(self._warnings),
+            final_agent=(
+                "final" in self.state and last_agent
+            ) or last_agent
         )
