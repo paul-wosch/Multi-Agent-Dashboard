@@ -10,6 +10,33 @@ from multi_agent_dashboard.db.infra.core import get_conn, safe_json_loads
 logger = logging.getLogger(__name__)
 
 
+class AgentDAO:
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+
+    # ---- reads ----
+
+    def list(self):
+        return load_agents_from_db(self.db_path)
+
+    def prompt_versions(self, agent_name: str):
+        return load_prompt_versions(self.db_path, agent_name)
+
+    # ---- writes ----
+
+    def save(self, *args, **kwargs):
+        return save_agent_to_db(self.db_path, *args, **kwargs)
+
+    def save_prompt(self, *args, **kwargs):
+        return save_prompt_version(self.db_path, *args, **kwargs)
+
+    def rename(self, *args, **kwargs):
+        return rename_agent_in_db(self.db_path, *args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        return delete_agent(self.db_path, *args, **kwargs)
+
+
 # -----------------------
 # READ operations
 # -----------------------

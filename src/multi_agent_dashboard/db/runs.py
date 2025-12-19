@@ -10,6 +10,24 @@ from multi_agent_dashboard.db.infra.core import get_conn
 logger = logging.getLogger(__name__)
 
 
+class RunDAO:
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+
+    # ---- reads ----
+
+    def list(self):
+        return load_runs(self.db_path)
+
+    def get(self, run_id: int):
+        return load_run_details(self.db_path, run_id)
+
+    # ---- writes ----
+
+    def save(self, *args, **kwargs):
+        return save_run_to_db(self.db_path, *args, **kwargs)
+
+
 # -----------------------
 # READ operations
 # -----------------------

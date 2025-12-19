@@ -10,6 +10,24 @@ from multi_agent_dashboard.db.infra.core import get_conn, safe_json_loads
 logger = logging.getLogger(__name__)
 
 
+class PipelineDAO:
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+
+    # ---- reads ----
+
+    def list(self):
+        return load_pipelines_from_db(self.db_path)
+
+    # ---- writes ----
+
+    def save(self, *args, **kwargs):
+        return save_pipeline_to_db(self.db_path, *args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        return delete_pipeline_from_db(self.db_path, *args, **kwargs)
+
+
 # -----------------------
 # READ operations
 # -----------------------
