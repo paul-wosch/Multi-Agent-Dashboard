@@ -14,6 +14,7 @@ with agent_dao(db_path) as dao:
 """
 import json
 import logging
+import warnings
 from datetime import datetime, UTC
 from typing import List, Optional
 from contextlib import contextmanager
@@ -275,24 +276,48 @@ def agent_dao(db_path: str):
 # -----------------------
 
 def load_agents_from_db(db_path: str) -> list[dict]:
+    warnings.warn(
+        "load_agents_from_db is deprecated; use AgentDAO.list",
+        DeprecationWarning,
+    )
     return AgentDAO(db_path=db_path).list()
 
 
 def load_prompt_versions(db_path: str, agent_name: str):
+    warnings.warn(
+        "load_prompt_versions is deprecated; use AgentDAO.load_prompt_versions",
+        DeprecationWarning,
+    )
     return AgentDAO(db_path=db_path).load_prompt_versions(agent_name)
 
 
 def save_agent_to_db(db_path: str, *args, **kwargs):
+    warnings.warn(
+        "save_agent_to_db is deprecated; use AgentDAO.save",
+        DeprecationWarning,
+    )
     return AgentDAO(db_path=db_path).save(*args, **kwargs)
 
 
 def save_prompt_version(db_path: str, *args, **kwargs):
+    warnings.warn(
+        "save_prompt_version is deprecated; use AgentDAO.save_prompt_version",
+        DeprecationWarning,
+    )
     return AgentDAO(db_path=db_path).save_prompt_version(*args, **kwargs)
 
 
 def rename_agent_in_db(db_path: str, *args, **kwargs):
+    warnings.warn(
+        "rename_agent_in_db is deprecated; use AgentDAO.rename",
+        DeprecationWarning,
+    )
     return AgentDAO(db_path=db_path).rename(*args, **kwargs)
 
 
 def delete_agent(db_path: str, *args, **kwargs):
+    warnings.warn(
+        "delete_agent is deprecated; use AgentDAO.delete",
+        DeprecationWarning,
+    )
     return AgentDAO(db_path=db_path).delete(*args, **kwargs)

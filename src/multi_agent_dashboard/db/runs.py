@@ -14,6 +14,7 @@ with run_dao(db_path) as dao:
 """
 import json
 import logging
+import warnings
 from datetime import datetime, UTC
 from typing import Dict, Any, Tuple, Optional
 from contextlib import contextmanager
@@ -186,12 +187,24 @@ def run_dao(db_path: str):
 # -----------------------
 
 def load_runs(db_path: str) -> list[dict]:
+    warnings.warn(
+        "load_runs is deprecated; use RunDAO.list",
+        DeprecationWarning,
+    )
     return RunDAO(db_path=db_path).list()
 
 
 def load_run_details(db_path: str, run_id: int):
+    warnings.warn(
+        "load_run_details is deprecated; use RunDAO.get",
+        DeprecationWarning,
+    )
     return RunDAO(db_path=db_path).get(run_id)
 
 
 def save_run_to_db(db_path: str, *args, **kwargs) -> int:
+    warnings.warn(
+        "save_run_to_db is deprecated; use RunDAO.save",
+        DeprecationWarning,
+    )
     return RunDAO(db_path=db_path).save(*args, **kwargs)

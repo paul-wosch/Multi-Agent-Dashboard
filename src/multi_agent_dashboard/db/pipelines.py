@@ -13,6 +13,7 @@ with pipeline_dao(db_path) as dao:
 """
 import json
 import logging
+import warnings
 from datetime import datetime, UTC
 from typing import List, Optional
 from contextlib import contextmanager
@@ -138,6 +139,10 @@ def pipeline_dao(db_path: str):
 # -----------------------
 
 def load_pipelines_from_db(db_path: str) -> list[dict]:
+    warnings.warn(
+        "load_pipelines_from_db is deprecated; use PipelineDAO.list",
+        DeprecationWarning,
+    )
     return PipelineDAO(db_path=db_path).list()
 
 
@@ -147,8 +152,16 @@ def save_pipeline_to_db(
     steps: List[str],
     metadata: Optional[dict] = None,
     ):
+    warnings.warn(
+        "save_pipeline_to_db is deprecated; use PipelineDAO.save",
+        DeprecationWarning,
+    )
     return PipelineDAO(db_path=db_path).save(pipeline_name, steps, metadata)
 
 
 def delete_pipeline_from_db(db_path: str, pipeline_name: str):
+    warnings.warn(
+        "delete_pipeline_from_db is deprecated; use PipelineDAO.delete",
+        DeprecationWarning,
+    )
     return PipelineDAO(db_path=db_path).delete(pipeline_name)
