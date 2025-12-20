@@ -2,6 +2,7 @@
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 
+from multi_agent_dashboard.utils import safe_format
 
 # -------------------------
 # Agent domain models
@@ -37,8 +38,6 @@ class AgentRuntime:
         structured_schema: Optional[Dict[str, Any]] = None,
         stream: bool = False,
     ) -> str:
-        from utils import safe_format  # local import to keep domain clean
-
         # Build variable map
         if self.spec.input_vars:
             variables = {k: state.get(k, "") for k in self.spec.input_vars}
