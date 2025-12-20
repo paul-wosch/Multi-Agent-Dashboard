@@ -17,6 +17,7 @@ from multi_agent_dashboard.db.db import init_db
 from multi_agent_dashboard.db.runs import RunDAO
 from multi_agent_dashboard.db.agents import AgentDAO
 from multi_agent_dashboard.db.pipelines import PipelineDAO
+from multi_agent_dashboard.db.services import RunService, AgentService, PipelineService
 
 from multi_agent_dashboard.engine import MultiAgentEngine, EngineResult
 from multi_agent_dashboard.llm_client import LLMClient
@@ -28,8 +29,10 @@ logger = logging.getLogger(__name__)
 # Configuration
 # =======================
 DB_PATH = DB_FILE_PATH
-# NOTE: removed global OpenAI client creation and removed DB init/migration at import time.
-# Use app_start() to perform initialization when running the app.
+
+pipeline_svc = PipelineService(DB_PATH)
+agent_svc = AgentService(DB_PATH)
+run_svc = RunService(DB_PATH)
 
 LOG_LEVEL_COLORS = {
     "DEBUG": "#6c757d",     # gray
@@ -125,29 +128,24 @@ Return the improved final answer only.
 # =======================
 
 @st.cache_data(ttl=60)
-def cached_load_agents(db_path: str):
-    return AgentDAO(db_path).list()
-
-
-@st.cache_data(ttl=60)
-def cached_load_pipelines(db_path: str):
-    return PipelineDAO(db_path).list()
-
-
-@st.cache_data(ttl=30)
-def cached_load_runs(db_path: str):
-    return RunDAO(db_path).list()
-
-
-@st.cache_data(ttl=30)
-def cached_load_run_details(db_path: str, run_id: int):
-    return RunDAO(db_path).get(run_id)
-
+def cached_load_agents():
+    return agent_svc.list_agents()
 
 @st.cache_data(ttl=60)
-def cached_load_prompt_versions(db_path: str, agent_name: str):
-    return AgentDAO(db_path).load_prompt_versions(agent_name)
+def cached_load_pipelines():
+    return pipeline_svc.list_pipelines()
 
+@st.cache_data(ttl=30)
+def cached_load_runs():
+    return run_svc.list_runs()
+
+@st.cache_data(ttl=30)
+def cached_load_run_details(run_id: int):
+    return run_svc.get_run_details(run_id)
+
+@st.cache_data(ttl=60)
+def cached_load_prompt_versions(agent_name: str):
+    return agent_svc.load_prompt_versions(agent_name)
 
 # =======================
 # LOG HANDLER CLASS
@@ -273,7 +271,7 @@ def reload_agents_into_engine():
     engine = st.session_state.engine
     engine.agents.clear()
 
-    stored_agents = cached_load_agents(DB_PATH)
+    stored_agents = cached_load_agents()
     for a in stored_agents:
         spec = AgentSpec(
             name=a["agent_name"],
@@ -314,11 +312,11 @@ def export_pipeline_agents_as_json(pipeline_name: str, steps: List[str]) -> str:
 
 # Initialize DB + bootstrap defaults if agents table empty and populate Streamlit session with engine
 def bootstrap_default_agents(defaults: Dict[str, dict]):
-    existing = cached_load_agents(DB_PATH)
+    existing = cached_load_agents()
     if existing:
         return
     for name, data in defaults.items():
-        AgentDAO(DB_PATH).save(
+        agent_svc.save_agent(
             name,
             data.get("model", "gpt-4.1-nano"),
             data.get("prompt_template", ""),
@@ -327,7 +325,7 @@ def bootstrap_default_agents(defaults: Dict[str, dict]):
             data.get("output_vars", [])
         )
         # also save a versioned prompt snapshot
-        AgentDAO(DB_PATH).save_prompt_version(
+        agent_svc.save_prompt_version(
             name,
             data.get("prompt_template", ""),
             metadata={"role": data.get("role", "")}
@@ -367,7 +365,7 @@ def app_start():
     bootstrap_default_agents(default_agents)
 
     # Load agents from DB into engine
-    stored_agents = cached_load_agents(DB_PATH)
+    stored_agents = cached_load_agents()
     for a in stored_agents:
         spec = AgentSpec(
             name=a["agent_name"],
@@ -484,7 +482,7 @@ st.divider()
 def render_run_sidebar():
     st.sidebar.header("Run Configuration")
 
-    pipelines = cached_load_pipelines(DB_PATH)
+    pipelines = cached_load_pipelines()
     pipeline_names = [p["pipeline_name"] for p in pipelines]
 
     selected_pipeline = st.sidebar.selectbox(
@@ -525,7 +523,7 @@ def render_run_sidebar():
         if st.button("💾 Save Pipeline"):
             if name.strip():
                 try:
-                    PipelineDAO(DB_PATH).save(name.strip(), selected_steps)
+                    pipeline_svc.save_pipeline(name.strip(), selected_steps)
                 except Exception:
                     logger.exception("Failed to persist pipeline")
                     st.error("Failed to save pipeline to database")
@@ -685,7 +683,7 @@ def render_run_mode():
         )
 
         try:
-            RunDAO(DB_PATH).save(
+            run_svc.save_run(
                 task,
                 result.final_output,
                 result.memory,
@@ -719,7 +717,7 @@ def render_run_mode():
 def render_agent_editor():
     st.header("🧠 Agent Editor")
 
-    agents_raw = cached_load_agents(DB_PATH)
+    agents_raw = cached_load_agents()
     agents = [
         {
             "name": a["agent_name"],
@@ -779,7 +777,7 @@ def render_agent_editor():
 
     with tabs[3]:
         if not is_new:
-            versions = cached_load_prompt_versions(DB_PATH, agent["name"])
+            versions = cached_load_prompt_versions(agent["name"])
             for v in versions:
                 with st.expander(f"Version {v['version']} — {v['created_at']}"):
                     st.code(v["prompt"])
@@ -796,13 +794,13 @@ def render_agent_editor():
 
             if not is_new and old_name and old_name != name:
                 try:
-                    AgentDAO(DB_PATH).rename(old_name, name)
+                    agent_svc.rename_agent(old_name, name)
                 except Exception:
                     logger.exception("Failed to persist rename")
                     st.error("Rename completed but failed to save to database")
                 invalidate_agent_state()
 
-            AgentDAO(DB_PATH).save(
+            agent_svc.save_agent(
                 name,
                 model,
                 prompt,
@@ -815,7 +813,7 @@ def render_agent_editor():
             # Ensures agent meta-data changes don't spam the prompt history
             if prompt != agent["prompt"]:
                 try:
-                    AgentDAO(DB_PATH).save_prompt_version(name, prompt)
+                    agent_svc.save_prompt_version(name, prompt)
                 except Exception:
                     logger.exception("Failed to persist new prompt version")
                     st.error("New prompt version created but failed to save to database")
@@ -828,7 +826,7 @@ def render_agent_editor():
     with col_b:
         if not is_new and st.button("📄 Duplicate"):
             try:
-                AgentDAO(DB_PATH).save(
+                agent_svc.save_agent(
                     f"{name}_copy",
                     model,
                     prompt,
@@ -847,7 +845,7 @@ def render_agent_editor():
     with col_c:
         if not is_new and st.button("🗑 Delete"):
             try:
-                AgentDAO(DB_PATH).delete(name)
+                agent_svc.delete_agent(name)
             except Exception:
                 logger.exception("Failed to persist agent delete")
                 st.error("Failed to delete agent from database")
@@ -864,7 +862,7 @@ def render_agent_editor():
 def render_history_mode():
     st.header("📜 Past Runs")
 
-    runs = cached_load_runs(DB_PATH)
+    runs = cached_load_runs()
 
     options = {
         f"Run {r['id']} — {r['timestamp']}": r["id"]
@@ -880,7 +878,7 @@ def render_history_mode():
         return
 
     run_id = options[selected]
-    run, agents = cached_load_run_details(DB_PATH, run_id)
+    run, agents = cached_load_run_details(run_id)
 
     ts = run["timestamp"]
     task = run["task_input"]
