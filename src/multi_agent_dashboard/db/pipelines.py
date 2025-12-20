@@ -1,8 +1,21 @@
-# db/pipelines.py
+"""db/pipelines.py
+
+Construction modes:
+
+- PipelineDAO(db_path="...")
+- PipelineDAO(conn=sqlite3.Connection)
+
+Support for atomic multi-step operations:
+
+with pipeline_dao(db_path) as dao:
+    dao.save("analysis", ["planner", "executor"])
+    dao.save("final", ["planner", "executor", "finalizer"])
+"""
 import json
 import logging
 from datetime import datetime, UTC
 from typing import List, Optional
+from contextlib import contextmanager
 
 from multi_agent_dashboard.db.infra.core import get_conn, safe_json_loads
 
@@ -10,8 +23,29 @@ logger = logging.getLogger(__name__)
 
 
 class PipelineDAO:
-    def __init__(self, db_path: str):
-        self.db_path = db_path
+    def __init__(self, db_path: Optional[str] = None, conn=None):
+        if conn is None and db_path is None:
+            raise ValueError("PipelineDAO requires either db_path or conn")
+
+        self._db_path = db_path
+        self._conn = conn
+
+    # -----------------------
+    # internal helpers
+    # -----------------------
+
+    @contextmanager
+    def _connection(self):
+        """
+        Yield a connection.
+        If DAO was constructed with a connection, reuse it.
+        Otherwise, open a new one.
+        """
+        if self._conn is not None:
+            yield self._conn
+        else:
+            with get_conn(self._db_path) as conn:
+                yield conn
 
     # -----------------------
     # READ operations
@@ -20,7 +54,7 @@ class PipelineDAO:
     def list(self) -> list[dict]:
         logger.debug("Loading pipelines from DB")
         try:
-            with get_conn(self.db_path) as conn:
+            with self._connection() as conn:
                 rows = conn.execute(
                     """
                     SELECT pipeline_name, steps_json, metadata_json, timestamp
@@ -56,7 +90,7 @@ class PipelineDAO:
     ) -> None:
         logger.info("Saving pipeline %s to DB", pipeline_name)
         try:
-            with get_conn(self.db_path) as conn:
+            with self._connection() as conn:
                 ts = datetime.now(UTC).isoformat()
                 steps_json = json.dumps(steps)
                 metadata_json = json.dumps(metadata or {})
@@ -76,7 +110,7 @@ class PipelineDAO:
     def delete(self, pipeline_name: str) -> None:
         logger.info("Deleting pipeline %s from DB", pipeline_name)
         try:
-            with get_conn(self.db_path) as conn:
+            with self._connection() as conn:
                 conn.execute(
                     "DELETE FROM pipelines WHERE pipeline_name = ?",
                     (pipeline_name,),
@@ -87,11 +121,24 @@ class PipelineDAO:
 
 
 # -----------------------
+# Transaction-scoped DAO
+# -----------------------
+
+@contextmanager
+def pipeline_dao(db_path: str):
+    """
+    Yield a PipelineDAO bound to a single transaction.
+    """
+    with get_conn(db_path) as conn:
+        yield PipelineDAO(conn=conn)
+
+
+# -----------------------
 # Compatibility wrappers
 # -----------------------
 
 def load_pipelines_from_db(db_path: str) -> list[dict]:
-    return PipelineDAO(db_path).list()
+    return PipelineDAO(db_path=db_path).list()
 
 
 def save_pipeline_to_db(
@@ -99,9 +146,9 @@ def save_pipeline_to_db(
     pipeline_name: str,
     steps: List[str],
     metadata: Optional[dict] = None,
-):
-    return PipelineDAO(db_path).save(pipeline_name, steps, metadata)
+    ):
+    return PipelineDAO(db_path=db_path).save(pipeline_name, steps, metadata)
 
 
 def delete_pipeline_from_db(db_path: str, pipeline_name: str):
-    return PipelineDAO(db_path).delete(pipeline_name)
+    return PipelineDAO(db_path=db_path).delete(pipeline_name)

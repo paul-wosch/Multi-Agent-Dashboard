@@ -1,8 +1,22 @@
-# db/runs.py
+"""db/runs.py
+
+Construction modes:
+
+- RunDAO(db_path="...")
+- RunDAO(conn=sqlite3.Connection)
+
+Support for atomic multi-step operations:
+
+with run_dao(db_path) as dao:
+    run_id = dao.save(...)
+    dao.add_tags(run_id, ...)
+    dao.attach_metadata(run_id, ...)
+"""
 import json
 import logging
 from datetime import datetime, UTC
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
+from contextlib import contextmanager
 
 from multi_agent_dashboard.db.infra.core import get_conn
 
@@ -10,8 +24,29 @@ logger = logging.getLogger(__name__)
 
 
 class RunDAO:
-    def __init__(self, db_path: str):
-        self.db_path = db_path
+    def __init__(self, db_path: Optional[str] = None, conn=None):
+        if conn is None and db_path is None:
+            raise ValueError("RunDAO requires either db_path or conn")
+
+        self._db_path = db_path
+        self._conn = conn
+
+    # -----------------------
+    # internal helpers
+    # -----------------------
+
+    @contextmanager
+    def _connection(self):
+        """
+        Yield a connection.
+        If DAO was constructed with a connection, reuse it.
+        Otherwise, open a new one.
+        """
+        if self._conn is not None:
+            yield self._conn
+        else:
+            with get_conn(self._db_path) as conn:
+                yield conn
 
     # -----------------------
     # READ operations
@@ -20,7 +55,7 @@ class RunDAO:
     def list(self) -> list[dict]:
         logger.debug("Loading runs from DB")
         try:
-            with get_conn(self.db_path) as conn:
+            with self._connection() as conn:
                 rows = conn.execute(
                     "SELECT id, timestamp, task_input FROM runs ORDER BY id DESC"
                 ).fetchall()
@@ -33,7 +68,7 @@ class RunDAO:
     def get(self, run_id: int) -> Tuple[dict | None, list[dict]]:
         logger.debug("Loading details for run %s from DB", run_id)
         try:
-            with get_conn(self.db_path) as conn:
+            with self._connection() as conn:
                 run = conn.execute(
                     """
                     SELECT timestamp, task_input, final_output, final_is_json, final_model
@@ -87,7 +122,7 @@ class RunDAO:
 
         logger.info("Saving run to DB")
         try:
-            with get_conn(self.db_path) as conn:
+            with self._connection() as conn:
                 c = conn.cursor()
 
                 c.execute(
@@ -134,16 +169,29 @@ class RunDAO:
 
 
 # -----------------------
+# Transaction-scoped DAO
+# -----------------------
+
+@contextmanager
+def run_dao(db_path: str):
+    """
+    Yield a RunDAO bound to a single transaction.
+    """
+    with get_conn(db_path) as conn:
+        yield RunDAO(conn=conn)
+
+
+# -----------------------
 # Compatibility wrappers
 # -----------------------
 
 def load_runs(db_path: str) -> list[dict]:
-    return RunDAO(db_path).list()
+    return RunDAO(db_path=db_path).list()
 
 
 def load_run_details(db_path: str, run_id: int):
-    return RunDAO(db_path).get(run_id)
+    return RunDAO(db_path=db_path).get(run_id)
 
 
 def save_run_to_db(db_path: str, *args, **kwargs) -> int:
-    return RunDAO(db_path).save(*args, **kwargs)
+    return RunDAO(db_path=db_path).save(*args, **kwargs)

@@ -1,8 +1,22 @@
-# db/agents.py
+"""db/agents.py
+
+Construction modes:
+
+- AgentDAO(db_path="...")
+- AgentDAO(conn=sqlite3.Connection)
+
+Support for atomic multi-step operations:
+
+with agent_dao(db_path) as dao:
+    dao.save(...)
+    dao.save_prompt_version(...)
+    dao.rename(...)
+"""
 import json
 import logging
 from datetime import datetime, UTC
 from typing import List, Optional
+from contextlib import contextmanager
 
 from multi_agent_dashboard.db.infra.core import get_conn, safe_json_loads
 
@@ -10,8 +24,29 @@ logger = logging.getLogger(__name__)
 
 
 class AgentDAO:
-    def __init__(self, db_path: str):
-        self.db_path = db_path
+    def __init__(self, db_path: Optional[str] = None, conn=None):
+        if conn is None and db_path is None:
+            raise ValueError("AgentDAO requires either db_path or conn")
+
+        self._db_path = db_path
+        self._conn = conn
+
+    # -----------------------
+    # internal helpers
+    # -----------------------
+
+    @contextmanager
+    def _connection(self):
+        """
+        Yield a connection.
+        If DAO was constructed with a connection, reuse it.
+        Otherwise, open a new one.
+        """
+        if self._conn is not None:
+            yield self._conn
+        else:
+            with get_conn(self._db_path) as conn:
+                yield conn
 
     # -----------------------
     # READ operations
@@ -20,7 +55,7 @@ class AgentDAO:
     def list(self) -> list[dict]:
         logger.debug("Loading agents from DB")
         try:
-            with get_conn(self.db_path) as conn:
+            with self._connection() as conn:
                 rows = conn.execute(
                     """
                     SELECT agent_name, model, prompt_template, role, input_vars, output_vars
@@ -48,7 +83,7 @@ class AgentDAO:
     def load_prompt_versions(self, agent_name: str) -> list[dict]:
         logger.debug("Loading prompt versions for %s from DB", agent_name)
         try:
-            with get_conn(self.db_path) as conn:
+            with self._connection() as conn:
                 rows = conn.execute(
                     """
                     SELECT id, version, prompt, metadata_json, timestamp
@@ -93,7 +128,7 @@ class AgentDAO:
 
         logger.info("Saving agent %s to DB", agent_name)
         try:
-            with get_conn(self.db_path) as conn:
+            with self._connection() as conn:
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO agents
@@ -121,7 +156,7 @@ class AgentDAO:
     ) -> int:
         logger.info("Saving prompt version for %s to DB", agent_name)
         try:
-            with get_conn(self.db_path) as conn:
+            with self._connection() as conn:
                 row = conn.execute(
                     "SELECT MAX(version) FROM agent_prompt_versions WHERE agent_name = ?",
                     (agent_name,),
@@ -158,8 +193,7 @@ class AgentDAO:
 
         logger.info("Renaming agent %s in DB", old_name)
         try:
-            with get_conn(self.db_path) as conn:
-                # Ensure target name does not already exist
+            with self._connection() as conn:
                 exists = conn.execute(
                     "SELECT 1 FROM agents WHERE agent_name = ?",
                     (new_name,),
@@ -213,7 +247,7 @@ class AgentDAO:
     def delete(self, agent_name: str) -> None:
         logger.info("Deleting agent %s from DB", agent_name)
         try:
-            with get_conn(self.db_path) as conn:
+            with self._connection() as conn:
                 conn.execute(
                     "DELETE FROM agents WHERE agent_name = ?",
                     (agent_name,),
@@ -224,28 +258,41 @@ class AgentDAO:
 
 
 # -----------------------
+# Transaction-scoped DAO
+# -----------------------
+
+@contextmanager
+def agent_dao(db_path: str):
+    """
+    Yield an AgentDAO bound to a single transaction.
+    """
+    with get_conn(db_path) as conn:
+        yield AgentDAO(conn=conn)
+
+
+# -----------------------
 # Compatibility wrappers
 # -----------------------
 
 def load_agents_from_db(db_path: str) -> list[dict]:
-    return AgentDAO(db_path).list()
+    return AgentDAO(db_path=db_path).list()
 
 
 def load_prompt_versions(db_path: str, agent_name: str):
-    return AgentDAO(db_path).load_prompt_versions(agent_name)
+    return AgentDAO(db_path=db_path).load_prompt_versions(agent_name)
 
 
 def save_agent_to_db(db_path: str, *args, **kwargs):
-    return AgentDAO(db_path).save(*args, **kwargs)
+    return AgentDAO(db_path=db_path).save(*args, **kwargs)
 
 
 def save_prompt_version(db_path: str, *args, **kwargs):
-    return AgentDAO(db_path).save_prompt_version(*args, **kwargs)
+    return AgentDAO(db_path=db_path).save_prompt_version(*args, **kwargs)
 
 
 def rename_agent_in_db(db_path: str, *args, **kwargs):
-    return AgentDAO(db_path).rename(*args, **kwargs)
+    return AgentDAO(db_path=db_path).rename(*args, **kwargs)
 
 
 def delete_agent(db_path: str, *args, **kwargs):
-    return AgentDAO(db_path).delete(*args, **kwargs)
+    return AgentDAO(db_path=db_path).delete(*args, **kwargs)
