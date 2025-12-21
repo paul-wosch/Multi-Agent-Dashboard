@@ -126,7 +126,20 @@ repo_root/
 │       ├── utils.py             # Shared utilities (safe prompt formatting, helpers)
 │       ├── db/
 │       │   ├── __init__.py      # Database subpackage
-│       │   └── db.py            # SQLite access layer (CRUD, migrations, persistence)
+│       │   ├── agents.py
+│       │   ├── db.py            # SQLite access layer (CRUD, migrations, persistence)
+│       │   ├── infra
+│       │   │   ├── __init__.py
+│       │   │   ├── core.py
+│       │   │   ├── generate_migration.py
+│       │   │   ├── migrations.py
+│       │   │   ├── schema.py
+│       │   │   ├── schema_diff.py
+│       │   │   ├── schema_diff_constraints.py
+│       │   │   └── sqlite_rebuild.py
+│       │   ├── pipelines.py
+│       │   ├── runs.py
+│       │   └── services.py
 │       └── ui/
 │           ├── __init__.py      # UI subpackage
 │           └── app.py           # Streamlit application (presentation + orchestration only)
