@@ -794,29 +794,27 @@ def render_agent_editor():
 
             if not is_new and old_name and old_name != name:
                 try:
-                    agent_svc.rename_agent(old_name, name)
+                    agent_svc.rename_agent_atomic(old_name, name)
                 except Exception:
                     logger.exception("Failed to persist rename")
                     st.error("Rename completed but failed to save to database")
                 invalidate_agent_state()
 
-            agent_svc.save_agent(
+            # Only save new prompt version when prompt was actually changed
+            # Ensures agent meta-data changes don't spam the prompt history
+            # TODO: evaluate where to re-add logging logic for save_prompt_version
+            #   formerly wrapped in a try except block
+            #   logger.exception("Failed to persist new prompt version")
+            #   st.error("New prompt version created but failed to save to database")
+            agent_svc.save_agent_atomic(
                 name,
                 model,
                 prompt,
                 role,
                 [v.strip() for v in input_vars.splitlines() if v.strip()],
                 [v.strip() for v in output_vars.splitlines() if v.strip()],
+                save_prompt_version=(prompt != agent["prompt"]),
             )
-
-            # Only save new prompt version when prompt was actually changed
-            # Ensures agent meta-data changes don't spam the prompt history
-            if prompt != agent["prompt"]:
-                try:
-                    agent_svc.save_prompt_version(name, prompt)
-                except Exception:
-                    logger.exception("Failed to persist new prompt version")
-                    st.error("New prompt version created but failed to save to database")
 
             invalidate_agent_state()
             reload_agents_into_engine()
@@ -845,7 +843,7 @@ def render_agent_editor():
     with col_c:
         if not is_new and st.button("🗑 Delete"):
             try:
-                agent_svc.delete_agent(name)
+                agent_svc.delete_agent_atomic(name)
             except Exception:
                 logger.exception("Failed to persist agent delete")
                 st.error("Failed to delete agent from database")

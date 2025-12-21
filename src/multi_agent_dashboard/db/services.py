@@ -73,6 +73,46 @@ class AgentService:
     def load_prompt_versions(self, agent_name: str) -> List[dict]:
         return AgentDAO(self.db_path).load_prompt_versions(agent_name)
 
+    def save_agent_atomic(
+            self,
+            name: str,
+            model: str,
+            prompt: str,
+            role: str,
+            input_vars: list[str],
+            output_vars: list[str],
+            *,
+            save_prompt_version: bool = True,
+            metadata: dict | None = None,
+    ) -> None:
+        """Atomically save agent metadata and optionally create a prompt version."""
+        with agent_dao(self.db_path) as dao:
+            dao.save(
+                name,
+                model,
+                prompt,
+                role,
+                input_vars,
+                output_vars,
+            )
+
+            if save_prompt_version:
+                dao.save_prompt_version(
+                    name,
+                    prompt,
+                    metadata,
+                )
+
+    def rename_agent_atomic(self, old_name: str, new_name: str) -> None:
+        """Atomically rename an agent."""
+        with agent_dao(self.db_path) as dao:
+            dao.rename(old_name, new_name)
+
+    def delete_agent_atomic(self, name: str) -> None:
+        """Atomically delete an agent."""
+        with agent_dao(self.db_path) as dao:
+            dao.delete(name)
+
 
 # -----------------------
 # Pipeline Service
