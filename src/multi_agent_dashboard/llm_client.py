@@ -1,6 +1,5 @@
 # llm_client.py
 import io
-import base64
 import time
 import logging
 import json
@@ -15,14 +14,6 @@ __all__ = [
     "TextResponse",
     "LLMError",
 ]
-
-TEXT_MIME_TYPES = {
-    "text/plain",
-    "text/markdown",
-    "text/csv",
-    "application/json",
-}
-
 
 # =========================
 # Public data structures
@@ -196,54 +187,44 @@ class LLMClient:
             prompt: str,
             files: List[Dict[str, Any]],
     ) -> list[dict]:
-        """ Build OpenAI Responses API-compatible input payload."""
+        """
+        Build OpenAI Responses API-compatible input payload.
+        Automatically inlines any text file and uploads binary files.
+        """
         content: list[dict] = [
-            {
-                "type": "input_text",
-                "text": prompt,
-            }
+            {"type": "input_text", "text": prompt}
         ]
 
         for f in files:
-            mime = f.get("mime_type", "")
+            file_content = f["content"]
+            filename = f["filename"]
 
-            # ✅ INLINE TEXT FILES
-            if mime in TEXT_MIME_TYPES:
-                try:
-                    text = f["content"].decode("utf-8", errors="replace")
-                except Exception:
-                    text = ""
+            # Attempt to decode as UTF-8 to determine if it's text
+            try:
+                text = file_content.decode("utf-8")
+                is_text = True
+            except UnicodeDecodeError:
+                # Not valid UTF-8 → treat as binary
+                text = ""
+                is_text = False
 
-                content.append(
-                    {
-                        "type": "input_text",
-                        "text": f"\n\n--- FILE: {f['filename']} ---\n{text}",
-                    }
-                )
-                continue
-
-            # ✅ UPLOAD BINARY FILES (PDF, images, audio)
-            file_obj = io.BytesIO(f["content"])
-            file_obj.name = f["filename"]
-
-            uploaded = self._client.files.create(
-                file=file_obj,
-                purpose="assistants",
-            )
-
-            content.append(
-                {
+            # Inline text files
+            if is_text:
+                content.append({
+                    "type": "input_text",
+                    "text": f"\n\n--- FILE: {filename} ---\n{text}",
+                })
+            else:
+                # Upload binary files
+                file_obj = io.BytesIO(file_content)
+                file_obj.name = filename
+                uploaded = self._client.files.create(file=file_obj, purpose="assistants")
+                content.append({
                     "type": "input_file",
-                    "file_id": uploaded.id,
-                }
-            )
+                    "file_id": uploaded.id
+                })
 
-        return [
-            {
-                "role": "user",
-                "content": content,
-            }
-        ]
+        return [{"role": "user", "content": content}]
 
     # -------------------------
     # Response normalization
