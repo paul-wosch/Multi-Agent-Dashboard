@@ -4,6 +4,7 @@ import streamlit as st
 from openai import OpenAI  # type/factory only
 import difflib
 import json
+import inspect
 from dataclasses import asdict
 from datetime import datetime, UTC
 import time
@@ -41,6 +42,9 @@ LOG_LEVEL_COLORS = {
     "ERROR": "#dc3545",     # red
     "CRITICAL": "#842029",  # dark red
 }
+
+MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
+MAX_TOTAL_SIZE = 20 * 1024 * 1024  # 20 MB
 
 # =======================
 # DEFAULT AGENTS (Backward-compatible examples)
@@ -240,6 +244,16 @@ def create_openai_client(api_key: str):
 # ======================================================
 # SHARED HELPERS (USED BY APP_START AND UI)
 # ======================================================
+
+def pipeline_requires_files(engine, steps) -> bool:
+    for name in steps:
+        agent = engine.agents.get(name)
+        if not agent:
+            continue
+        if "files" in agent.spec.input_vars:
+            return True
+    return False
+
 
 def render_agent_graph(steps: list[str]):
     dot = graphviz.Digraph()
@@ -482,6 +496,9 @@ st.divider()
 def render_run_sidebar():
     st.sidebar.header("Run Configuration")
 
+    # -------------------------
+    # Load pipelines
+    # -------------------------
     pipelines = cached_load_pipelines()
     pipeline_names = [p["pipeline_name"] for p in pipelines]
 
@@ -490,18 +507,91 @@ def render_run_sidebar():
         ["<Ad-hoc>"] + pipeline_names
     )
 
+    # -------------------------
+    # Task input
+    # -------------------------
     task = st.sidebar.text_area(
         "Task",
         placeholder="Describe the task you want the agents to solve…",
         height=120
     )
 
+    # -------------------------
+    # Resolve base steps
+    # -------------------------
+    engine = st.session_state.engine
+    available_agents = list(engine.agents.keys())
+
+    if selected_pipeline != "<Ad-hoc>":
+        base_steps = next(
+            p["steps"] for p in pipelines
+            if p["pipeline_name"] == selected_pipeline
+        )
+    else:
+        base_steps = available_agents
+
+    # -------------------------
+    # Agent selection (SOURCE OF TRUTH)
+    # -------------------------
+    selected_steps = st.sidebar.multiselect(
+        "Agents (execution order)",
+        available_agents,
+        default=base_steps
+    )
+
+    # -------------------------
+    # Detect file requirement (from selected steps!)
+    # -------------------------
+    requires_files = pipeline_requires_files(
+        engine,
+        selected_steps,
+    )
+
+    # -------------------------
+    # File attachment section
+    # -------------------------
+    files_payload = None
+
+    if requires_files:
+        with st.sidebar.expander("📎 Attach files", expanded=True):
+            uploaded_files = st.file_uploader(
+                "Upload files",
+                accept_multiple_files=True,
+                type=["txt", "pdf", "csv", "md", "json", "log", "py"],
+            )
+
+            files_payload = []
+            total_size = 0
+
+            for f in uploaded_files or []:
+                if f.size > MAX_FILE_SIZE:
+                    st.error(f"{f.name} exceeds 5MB limit")
+                    return
+
+                total_size += f.size
+                if total_size > MAX_TOTAL_SIZE:
+                    st.error("Total file size exceeds 20MB")
+                    return
+
+                files_payload.append({
+                    "filename": f.name,
+                    "content": f.read(),
+                    "mime_type": f.type,
+                })
+
+    # -------------------------
+    # Run button
+    # -------------------------
     run_clicked = st.sidebar.button(
         "🚀 Run Pipeline",
         use_container_width=True
     )
 
-    with st.sidebar.expander("Advanced: Pipeline Editing", expanded=True):
+    # -------------------------
+    # Advanced: Pipeline editing
+    # -------------------------
+    with st.sidebar.expander("Advanced", expanded=False):
+        """
         available_agents = list(st.session_state.engine.agents.keys())
 
         if selected_pipeline != "<Ad-hoc>":
@@ -515,9 +605,9 @@ def render_run_sidebar():
         selected_steps = st.multiselect(
             "Agents (execution order)",
             available_agents,
-            default=steps
+            default=active_steps,
         )
-
+        """
         name = st.text_input("Save as Pipeline")
 
         if st.button("💾 Save Pipeline"):
@@ -547,7 +637,16 @@ def render_run_sidebar():
                 use_container_width=True,
             )
 
-    return selected_pipeline, selected_steps, task, run_clicked
+    # -------------------------
+    # Return values
+    # -------------------------
+    return (
+        selected_pipeline,
+        selected_steps,
+        task,
+        run_clicked,
+        files_payload,
+    )
 
 
 def render_warnings(result: EngineResult):
@@ -641,7 +740,7 @@ def render_run_results(result: EngineResult, steps):
 
 
 def render_run_mode():
-    pipeline, steps, task, run_clicked = render_run_sidebar()
+    pipeline, steps, task, run_clicked, files_payload = render_run_sidebar()
 
     if run_clicked:
         # Create progress UI *only when running*
@@ -663,6 +762,7 @@ def render_run_mode():
                 steps=steps,
                 initial_input=task,
                 strict=strict_mode,
+                files=files_payload if files_payload else None,
             )
 
             st.session_state.last_result = result
@@ -1035,6 +1135,7 @@ def render_logs_mode():
                 unsafe_allow_html=True,
             )
 
+
 # ======================================================
 # DEV-TIME SAFETY CHECKS
 # ======================================================
@@ -1046,7 +1147,6 @@ for fn in [
     reload_agents_into_engine,
 ]:
     assert callable(fn), f"{fn.__name__} is not defined"
-
 
 # ======================================================
 # MODE ROUTER

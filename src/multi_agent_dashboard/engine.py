@@ -1,6 +1,7 @@
 # engine.py
 from __future__ import annotations
 
+import inspect
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Callable
@@ -95,6 +96,7 @@ class MultiAgentEngine:
         initial_input: Any,
         strict: bool = False,
         last_agent: Optional[str] = None,
+        files: Optional[List[Dict[str, Any]]] = None,
     ) -> EngineResult:
         """
         Execute agents sequentially.
@@ -114,6 +116,10 @@ class MultiAgentEngine:
         }
         self.memory = {}
         self._warnings = []
+
+        # Store initial files in state so all agents can access
+        if files:
+            self.state["files"] = files
 
         last_output: Any = None
         # ---- Progress bar: initialize ----
@@ -140,6 +146,16 @@ class MultiAgentEngine:
 
             # ---- Input validation ----
             for var in agent.spec.input_vars:
+                if var == "files":
+                    # Special-case: files in input validation
+                    # files are injected once and may be an empty list; presence is enough
+                    if "files" not in self.state:
+                        msg = f"[{agent_name}] Missing input var 'files'"
+                        if strict:
+                            raise ValueError(msg)
+                        self._warn(msg)
+                    continue
+
                 if var not in self.state or self.state[var] in ("", None):
                     msg = f"[{agent_name}] Missing input var '{var}'"
                     if strict:
@@ -148,10 +164,16 @@ class MultiAgentEngine:
 
             # ---- Execute agent ----
             try:
-                raw_output = agent.run(self.state)
+                run_kwargs = {}
+                if "files" in inspect.signature(agent.run).parameters:
+                    run_kwargs["files"] = self.state.get("files")
+                raw_output = agent.run(self.state, **run_kwargs)
             except Exception as e:
-                logger.exception("Agent '%s' failed", agent_name)
-                raise RuntimeError(f"Agent '{agent_name}' failed") from e
+                # Enabled 'real error' display during development
+                # logger.exception("Agent '%s' failed", agent_name)
+                # raise RuntimeError(f"Agent '{agent_name}' failed") from e
+                logger.exception("Agent '%s' failed with real error:", agent_name)
+                raise
 
             self.memory[agent_name] = raw_output
             last_output = raw_output
@@ -208,3 +230,15 @@ class MultiAgentEngine:
                 "final" in self.state and last_agent
             ) or last_agent
         )
+
+
+# =========================
+# File Detection Helper
+# =========================
+
+def agent_requires_files(agent_runtime) -> bool:
+    try:
+        sig = inspect.signature(agent_runtime.run)
+        return "files" in sig.parameters
+    except Exception:
+        return False

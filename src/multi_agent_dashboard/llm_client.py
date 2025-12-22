@@ -1,9 +1,11 @@
 # llm_client.py
+import io
+import base64
 import time
 import logging
 import json
 import inspect
-from typing import Any, Dict, Optional, Callable
+from typing import Any, Dict, List, Optional, Callable
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -13,6 +15,13 @@ __all__ = [
     "TextResponse",
     "LLMError",
 ]
+
+TEXT_MIME_TYPES = {
+    "text/plain",
+    "text/markdown",
+    "text/csv",
+    "application/json",
+}
 
 
 # =========================
@@ -85,6 +94,7 @@ class LLMClient:
         *,
         response_format: Optional[Dict[str, Any]] = None,
         stream: bool = False,
+        files: Optional[List[Dict[str, Any]]] = None,
     ) -> TextResponse:
         """
         Execute a text-generation request and return a normalized response.
@@ -95,8 +105,12 @@ class LLMClient:
             try:
                 kwargs = {
                     "model": model,
-                    "input": prompt,
                 }
+
+                if files:
+                    kwargs["input"] = self._build_input_with_files(prompt, files)
+                else:
+                    kwargs["input"] = prompt
 
                 if stream and "stream" in self._capabilities:
                     kwargs["stream"] = True
@@ -158,6 +172,78 @@ class LLMClient:
             return set(sig.parameters.keys())
         except Exception:
             return set()
+
+    # -------------------------
+    # FILE HANDLING HELPERS
+    # -------------------------
+
+    def _upload_file(self, f: Dict[str, Any]) -> str:
+        """
+        Upload a file to OpenAI and return its file_id.
+        """
+        file_obj = io.BytesIO(f["content"])
+        file_obj.name = f["filename"]  # IMPORTANT: SDK reads filename from here
+
+        uploaded = self._client.files.create(
+            file=file_obj,
+            purpose="assistants",
+        )
+
+        return uploaded.id
+
+    def _build_input_with_files(
+            self,
+            prompt: str,
+            files: List[Dict[str, Any]],
+    ) -> list[dict]:
+        """ Build OpenAI Responses API-compatible input payload."""
+        content: list[dict] = [
+            {
+                "type": "input_text",
+                "text": prompt,
+            }
+        ]
+
+        for f in files:
+            mime = f.get("mime_type", "")
+
+            # ✅ INLINE TEXT FILES
+            if mime in TEXT_MIME_TYPES:
+                try:
+                    text = f["content"].decode("utf-8", errors="replace")
+                except Exception:
+                    text = ""
+
+                content.append(
+                    {
+                        "type": "input_text",
+                        "text": f"\n\n--- FILE: {f['filename']} ---\n{text}",
+                    }
+                )
+                continue
+
+            # ✅ UPLOAD BINARY FILES (PDF, images, audio)
+            file_obj = io.BytesIO(f["content"])
+            file_obj.name = f["filename"]
+
+            uploaded = self._client.files.create(
+                file=file_obj,
+                purpose="assistants",
+            )
+
+            content.append(
+                {
+                    "type": "input_file",
+                    "file_id": uploaded.id,
+                }
+            )
+
+        return [
+            {
+                "role": "user",
+                "content": content,
+            }
+        ]
 
     # -------------------------
     # Response normalization
