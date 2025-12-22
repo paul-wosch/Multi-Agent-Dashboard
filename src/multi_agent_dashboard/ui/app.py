@@ -677,7 +677,18 @@ def render_final_output(result: EngineResult):
         parsed = json.loads(result.final_output)
         st.json(parsed)
     except Exception:
-        st.markdown(result.final_output)
+        # JSON detection failed – enable markdown/code toggle
+        view = st.radio(
+            "View as",
+            ["Markdown", "Code"],
+            horizontal=True,
+            key="run_final_view"
+        )
+        if view == "Markdown":
+            st.markdown(result.final_output)
+        else:
+            st.code(result.final_output)
+
 
 
 def render_agent_outputs(result: EngineResult, steps):
@@ -688,7 +699,17 @@ def render_agent_outputs(result: EngineResult, steps):
                 parsed = json.loads(out)
                 st.json(parsed)
             except Exception:
-                st.code(out)
+                # JSON detection failed – enable markdown/code toggle
+                view = st.radio(
+                    "View as",
+                    ["Markdown", "Code"],
+                    horizontal=True,
+                    key=f"run_agent_{agent}_view"
+                )
+                if view == "Markdown":
+                    st.markdown(out)
+                else:
+                    st.code(out)
 
 
 def render_graph_tab(steps):
@@ -1005,9 +1026,29 @@ def render_history_mode():
                 st.json(json.loads(final))
             except Exception:
                 st.warning("⚠️ Final output marked as JSON but failed to parse")
-                st.code(final)
+                # JSON detection failed – enable markdown/code toggle
+                view = st.radio(
+                    "View as",
+                    ["Markdown", "Code"],
+                    horizontal=True,
+                    key=f"hist_run_{run_id}_final_view"
+                )
+                if view == "Markdown":
+                    st.markdown(final)
+                else:
+                    st.code(final)
         else:
-            st.markdown(final)
+            # Not JSON – enable markdown/code toggle
+            view = st.radio(
+                "View as",
+                ["Markdown", "Code"],
+                horizontal=True,
+                key=f"hist_run_{run_id}_final_view"
+            )
+            if view == "Markdown":
+                st.markdown(final)
+            else:
+                st.code(final)
 
     for a in agents:
         name = a["agent_name"]
@@ -1024,9 +1065,29 @@ def render_history_mode():
                     st.json(json.loads(output))
                 except Exception:
                     st.warning("⚠️ Output marked as JSON but failed to parse")
-                    st.code(output)
+                    # JSON detection failed – enable markdown/code toggle
+                    view = st.radio(
+                        "View as",
+                        ["Markdown", "Code"],
+                        horizontal=True,
+                        key=f"hist_run_{run_id}_{name}_view"
+                    )
+                    if view == "Markdown":
+                        st.markdown(output)
+                    else:
+                        st.code(output)
             else:
-                st.markdown(output)
+                # Not JSON – enable markdown/code toggle
+                view = st.radio(
+                    "View as",
+                    ["Markdown", "Code"],
+                    horizontal=True,
+                    key=f"hist_run_{run_id}_{name}_view"
+                )
+                if view == "Markdown":
+                    st.markdown(output)
+                else:
+                    st.code(output)
 
     export = {
         "run_id": run_id,
