@@ -409,6 +409,9 @@ if "engine" not in st.session_state:
     else:
         reload_agents_into_engine()
 
+# Initialize Ad-hoc pipeline state (empty on first app start)
+if "adhoc_pipeline_steps" not in st.session_state:
+    st.session_state.adhoc_pipeline_steps = []
 
 # Also provide the conventional guard so running the script directly will bootstrap.
 if __name__ == "__main__":
@@ -528,7 +531,8 @@ def render_run_sidebar():
             if p["pipeline_name"] == selected_pipeline
         )
     else:
-        base_steps = available_agents
+        # Use stored Ad-hoc pipeline steps from session state
+        base_steps = st.session_state.get("adhoc_pipeline_steps", [])
 
     # -------------------------
     # Agent selection (SOURCE OF TRUTH)
@@ -538,6 +542,10 @@ def render_run_sidebar():
         available_agents,
         default=base_steps
     )
+
+    # Persist Ad-hoc steps so they survive pipeline switching & reruns
+    if selected_pipeline == "<Ad-hoc>":
+        st.session_state.adhoc_pipeline_steps = selected_steps
 
     # -------------------------
     # Detect file requirement (from selected steps!)
