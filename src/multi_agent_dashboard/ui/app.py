@@ -846,6 +846,9 @@ def render_run_mode():
 def render_agent_editor():
     st.header("🧠 Agent Editor")
 
+    # -------------------------
+    # Load agents from DB
+    # -------------------------
     agents_raw = cached_load_agents()
     agents = [
         {
@@ -860,18 +863,78 @@ def render_agent_editor():
     ]
     names = [a["name"] for a in agents]
 
+    # -------------------------
+    # Editor internal state
+    # -------------------------
+    if "agent_editor_state" not in st.session_state:
+        st.session_state.agent_editor_state = {
+            "selected_name": "<New Agent>",
+            "name": "",
+            "model": "gpt-4.1-nano",
+            "role": "",
+            "prompt": "",
+            "input_vars": [],
+            "output_vars": [],
+        }
+    state = st.session_state.agent_editor_state
+
+    # Persistent flag to survive st.rerun
+    if "agent_editor_state_changed_this_run" not in st.session_state:
+        st.session_state.agent_editor_state_changed_this_run = False
+
+    # Track if we loaded a different agent/template in this run
+    state_changed_this_run = st.session_state.agent_editor_state_changed_this_run
+
+    # -------------------------
+    # Agent selection
+    # -------------------------
+    options = ["<New Agent>"] + names
+
+    current_selected_name = state.get("selected_name", "<New Agent>")
+    if current_selected_name not in options:
+        current_selected_name = "<New Agent>"
+    current_index = options.index(current_selected_name)
+
     selected = st.selectbox(
         "Agent",
-        ["<New Agent>"] + names
+        options,
+        index=current_index,
+        key="agent_editor_selected_agent",
     )
 
-    is_new = selected == "<New Agent>"
-    agent = (
-        {"name": "", "model": "gpt-4.1-nano", "role": "", "prompt": "", "input_vars": [], "output_vars": []}
-        if is_new
-        else next(a for a in agents if a["name"] == selected)
-    )
+    # If user changed selection via the selectbox, populate editor fields
+    if selected != state.get("selected_name"):
+        state["selected_name"] = selected
+        if selected == "<New Agent>":
+            base_agent = {
+                "name": "",
+                "model": "gpt-4.1-nano",
+                "role": "",
+                "prompt": "",
+                "input_vars": [],
+                "output_vars": [],
+            }
+        else:
+            base_agent = next(a for a in agents if a["name"] == selected)
 
+        state.update({
+            "name": base_agent["name"],
+            "model": base_agent["model"],
+            "role": base_agent["role"],
+            "prompt": base_agent["prompt"],
+            "input_vars": base_agent["input_vars"],
+            "output_vars": base_agent["output_vars"],
+        })
+
+        # mark as changed in both local and session state
+        state_changed_this_run = True
+        st.session_state.agent_editor_state_changed_this_run = True
+
+    is_new = (state.get("selected_name") == "<New Agent>")
+
+    # -------------------------
+    # Tabs: Basics / Prompt / IO / Versions
+    # -------------------------
     tabs = st.tabs([
         "1️⃣ Basics",
         "2️⃣ Prompt",
@@ -879,70 +942,113 @@ def render_agent_editor():
         "📚 Versions"
     ])
 
+    # ----- Basics tab -----
     with tabs[0]:
-        name = st.text_input("Name", agent["name"])
-        model = st.text_input("Model", agent["model"])
-        role = st.text_input("Role", agent["role"])
-
-    with tabs[1]:
-        prompt = st.text_area(
-            "Prompt Template",
-            agent["prompt"],
-            height=400
+        name_val = st.text_input(
+            "Name",
+            value=state["name"],
+        )
+        model_val = st.text_input(
+            "Model",
+            value=state["model"],
+        )
+        role_val = st.text_input(
+            "Role",
+            value=state["role"],
         )
 
+    # ----- Prompt tab -----
+    with tabs[1]:
+        prompt_val = st.text_area(
+            "Prompt Template",
+            height=400,
+            value=state["prompt"],
+        )
+
+    # ----- Inputs / Outputs tab -----
     with tabs[2]:
         col1, col2 = st.columns(2)
         with col1:
-            input_vars = st.text_area(
+            input_vars_val = st.text_area(
                 "Input Variables (one per line)",
-                "\n".join(agent["input_vars"])
+                value="\n".join(state["input_vars"]),
             )
         with col2:
-            output_vars = st.text_area(
+            output_vars_val = st.text_area(
                 "Output Variables (one per line)",
-                "\n".join(agent["output_vars"])
+                value="\n".join(state["output_vars"]),
             )
 
+    # ----- Versions tab -----
     with tabs[3]:
         if not is_new:
-            versions = cached_load_prompt_versions(agent["name"])
+            versions = cached_load_prompt_versions(state["name"])
             for v in versions:
                 with st.expander(f"Version {v['version']} — {v['created_at']}"):
                     st.code(v["prompt"])
-                    if v["metadata"]:
+                    if v.get("metadata"):
                         st.json(v["metadata"])
 
     st.divider()
 
-    col_a, col_b, col_c = st.columns(3)
+    # -------------------------
+    # Reflect edits into state
+    # -------------------------
+    # Only write back widget values if we did NOT just load a different agent/template.
+    if not state_changed_this_run:
+        state.update({
+            "name": name_val.strip(),
+            "model": model_val.strip() or "gpt-4.1-nano",
+            "role": role_val.strip(),
+            "prompt": prompt_val,
+            "input_vars": [
+                v.strip() for v in input_vars_val.splitlines() if v.strip()
+            ],
+            "output_vars": [
+                v.strip() for v in output_vars_val.splitlines() if v.strip()
+            ],
+        })
 
+    # IMPORTANT: reset the persistent flag at the end of the render
+    st.session_state.agent_editor_state_changed_this_run = False
+
+    col_a, col_b, col_c, col_d = st.columns(4)
+
+    # -------------------------
+    # Save button
+    # -------------------------
     with col_a:
         if st.button("💾 Save"):
-            old_name = agent["name"]
+            old_name = state["selected_name"] if not is_new else ""
+            new_name = state["name"].strip()
 
-            if not is_new and old_name and old_name != name:
+            if not new_name:
+                st.error("Name cannot be empty.")
+                return
+
+            # Rename agent if needed
+            if not is_new and old_name != new_name:
                 try:
-                    agent_svc.rename_agent_atomic(old_name, name)
+                    agent_svc.rename_agent_atomic(old_name, new_name)
                 except Exception:
-                    logger.exception("Failed to persist rename")
+                    logger.exception("Failed to rename agent")
                     st.error("Rename completed but failed to save to database")
                 invalidate_agent_state()
 
-            # Only save new prompt version when prompt was actually changed
-            # Ensures agent meta-data changes don't spam the prompt history
-            # TODO: evaluate where to re-add logging logic for save_prompt_version
-            #   formerly wrapped in a try except block
-            #   logger.exception("Failed to persist new prompt version")
-            #   st.error("New prompt version created but failed to save to database")
+            # Save agent
+            previous_prompt = ""
+            if not is_new:
+                previous_agent = next(a for a in agents if a["name"] == old_name)
+                previous_prompt = previous_agent["prompt"]
+
             agent_svc.save_agent_atomic(
-                name,
-                model,
-                prompt,
-                role,
-                [v.strip() for v in input_vars.splitlines() if v.strip()],
-                [v.strip() for v in output_vars.splitlines() if v.strip()],
-                save_prompt_version=(prompt != agent["prompt"]),
+                new_name,
+                state["model"],
+                state["prompt"],
+                state["role"],
+                state["input_vars"],
+                state["output_vars"],
+                save_prompt_version=(state["prompt"] != previous_prompt),
             )
 
             invalidate_agent_state()
@@ -950,36 +1056,118 @@ def render_agent_editor():
             st.success("Agent saved")
             st.rerun()
 
+    # -------------------------
+    # Duplicate button
+    # -------------------------
     with col_b:
         if not is_new and st.button("📄 Duplicate"):
             try:
                 agent_svc.save_agent(
-                    f"{name}_copy",
-                    model,
-                    prompt,
-                    role,
-                    agent["input_vars"],
-                    agent["output_vars"]
+                    f"{state['name']}_copy",
+                    state["model"],
+                    state["prompt"],
+                    state["role"],
+                    state["input_vars"],
+                    state["output_vars"],
                 )
             except Exception:
-                logger.exception("Failed to persist duplicated agent")
+                logger.exception("Failed to duplicate agent")
                 st.error("Agent duplicated but failed to save to database")
             invalidate_agent_state()
             reload_agents_into_engine()
             st.success("Duplicated")
             st.rerun()
 
+    # -------------------------
+    # Delete button
+    # -------------------------
     with col_c:
         if not is_new and st.button("🗑 Delete"):
             try:
-                agent_svc.delete_agent_atomic(name)
+                agent_svc.delete_agent_atomic(state["name"])
             except Exception:
-                logger.exception("Failed to persist agent delete")
+                logger.exception("Failed to delete agent")
                 st.error("Failed to delete agent from database")
             invalidate_agent_state()
             reload_agents_into_engine()
             st.warning("Deleted")
             st.rerun()
+
+    # -------------------------
+    # Load from Template (no DB persistence)
+    # -------------------------
+    # Show this only when creating a new agent
+    if is_new:
+        with col_d:
+            st.markdown("**Load from Template**")
+            uploaded = st.file_uploader(
+                "Upload agent template JSON",
+                type=["json"],
+                key="agent_template_file",
+                help="Upload a JSON file containing one or more agents"
+            )
+
+            template_agents = []
+            if uploaded is not None:
+                try:
+                    tpl_data = json.loads(uploaded.read().decode("utf-8"))
+                    st.session_state["agent_template_data"] = tpl_data
+                except Exception as e:
+                    st.error(f"Failed to parse JSON: {e}")
+                    st.session_state["agent_template_data"] = None
+
+            tpl_data = st.session_state.get("agent_template_data")
+            if tpl_data:
+                if isinstance(tpl_data, dict) and "agents" in tpl_data:
+                    template_agents = tpl_data["agents"]
+                elif isinstance(tpl_data, dict):
+                    template_agents = [tpl_data]
+                elif isinstance(tpl_data, list):
+                    template_agents = tpl_data
+
+                template_agents = [
+                    a for a in template_agents
+                    if isinstance(a, dict)
+                    and all(k in a for k in ("name", "model", "prompt_template", "input_vars", "output_vars"))
+                ]
+
+            chosen_agent = None
+            if template_agents:
+                if len(template_agents) == 1:
+                    chosen_agent = template_agents[0]
+                else:
+                    names_tpl = [a["name"] for a in template_agents]
+                    chosen_name = st.selectbox(
+                        "Choose agent from template",
+                        names_tpl,
+                        key="agent_template_choose_name",
+                    )
+                    chosen_agent = next(a for a in template_agents if a["name"] == chosen_name)
+
+            if chosen_agent and st.button("Apply Template", key="agent_template_apply"):
+                original_name = str(chosen_agent.get("name", "")).strip() or "imported_agent"
+                suffix = datetime.now().strftime("_%y%m%d-%H%M_imported")
+                imported_name = f"{original_name}{suffix}"
+
+                # Treat as a new agent in the editor (not yet saved)
+                state["selected_name"] = "<New Agent>"
+                # THIS WON'T WORK: keep selectbox in sync so it doesn't reload another agent
+                # st.session_state.agent_editor_selected_agent = "<New Agent>"
+
+                state.update({
+                    "name": imported_name,
+                    "model": chosen_agent.get("model", "gpt-4.1-nano"),
+                    "role": chosen_agent.get("role", ""),
+                    "prompt": chosen_agent.get("prompt_template", ""),
+                    "input_vars": chosen_agent.get("input_vars", []),
+                    "output_vars": chosen_agent.get("output_vars", []),
+                })
+
+                # Mark change in persistent flag so next run skips write-back
+                st.session_state.agent_editor_state_changed_this_run = True
+
+                st.success("Template loaded into editor. Review and click Save to store the agent.")
+                st.rerun()
 
 
 # ======================================================
