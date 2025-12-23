@@ -1179,10 +1179,56 @@ def render_history_mode():
 
     runs = cached_load_runs()
 
-    options = {
-        f"Run {r['id']} — {r['timestamp']}": r["id"]
-        for r in runs
-    }
+    def abbreviate_task(text: str, max_words: int = 16) -> str:
+        if not text:
+            return ""
+        words = text.strip().split()
+        if len(words) <= max_words:
+            return " ".join(words)
+        return " ".join(words[:max_words]) + "…"
+
+    # Preload agent names per run to show them in the dropdown label
+    def get_agent_names_for_run(run_id: int) -> str:
+        try:
+            _, agents = cached_load_run_details(run_id)
+        except Exception:
+            logger.exception("Failed to load agent names for run %s", run_id)
+            return ""
+
+        # Preserve execution order (DB order) and deduplicate while keeping first occurrence
+        # seen = set()
+        ordered_names = []
+        for a in agents:
+            name = a.get("agent_name")
+            # if not name or name in seen:
+            #    continue
+            # seen.add(name)
+            ordered_names.append(name)
+
+        return ", ".join(ordered_names)
+
+    options: Dict[str, int] = {}
+
+    for r in runs:
+        run_id = r["id"]
+        ts = r["timestamp"]
+
+        # Abbreviated task
+        task_text = r.get("task_input", "") if isinstance(r, dict) else ""
+        task_abbrev = abbreviate_task(task_text)
+
+        # Agent names for this run
+        agent_names = get_agent_names_for_run(run_id)
+
+        # Build label: Run N — timestamp — agent1, agent2 — [Task words…]
+        label_parts = [f"Run {run_id}", str(ts)]
+        if agent_names:
+            label_parts.append(agent_names)
+        if task_abbrev:
+            label_parts.append(f"[{task_abbrev}]")
+
+        label = " — ".join(label_parts)
+        options[label] = run_id
 
     selected = st.selectbox(
         "Select Run",
@@ -1214,7 +1260,6 @@ def render_history_mode():
                 st.json(json.loads(final))
             except Exception:
                 st.warning("⚠️ Final output marked as JSON but failed to parse")
-                # JSON detection failed – enable markdown/code toggle
                 view = st.radio(
                     "View as",
                     ["Markdown", "Code"],
@@ -1226,7 +1271,6 @@ def render_history_mode():
                 else:
                     st.code(final)
         else:
-            # Not JSON – enable markdown/code toggle
             view = st.radio(
                 "View as",
                 ["Markdown", "Code"],
@@ -1253,7 +1297,6 @@ def render_history_mode():
                     st.json(json.loads(output))
                 except Exception:
                     st.warning("⚠️ Output marked as JSON but failed to parse")
-                    # JSON detection failed – enable markdown/code toggle
                     view = st.radio(
                         "View as",
                         ["Markdown", "Code"],
@@ -1265,7 +1308,6 @@ def render_history_mode():
                     else:
                         st.code(output)
             else:
-                # Not JSON – enable markdown/code toggle
                 view = st.radio(
                     "View as",
                     ["Markdown", "Code"],
@@ -1285,7 +1327,7 @@ def render_history_mode():
             "output": final,
             "is_json": bool(final_is_json),
             "model": final_model,
-            },
+        },
         "agents": {
             a["agent_name"]: {
                 "output": a["output"],
