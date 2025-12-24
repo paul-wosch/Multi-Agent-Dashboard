@@ -1424,6 +1424,10 @@ def render_history_mode():
     export = {
         "run_id": run_id,
         "timestamp": ts,
+        "pipeline_summary": {
+            "total_latency": round(total_latency, 5),
+            "total_cost": round(total_cost, 6),
+        },
         "task_input": task,
         "final_output": {
             "output": final,
