@@ -21,7 +21,8 @@ class RunService:
         memory: Dict[str, Any],
         *,
         agent_models: Optional[Dict[str, str]] = None,
-        final_model: Optional[str] = None
+        final_model: Optional[str] = None,
+        agent_metrics: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> int:
         with run_dao(self.db_path) as dao:
             run_id = dao.save(
@@ -30,13 +31,14 @@ class RunService:
                 memory,
                 agent_models=agent_models,
                 final_model=final_model,
+                agent_metrics=agent_metrics,
             )
             return run_id
 
     def list_runs(self) -> List[dict]:
         return RunDAO(self.db_path).list()
 
-    def get_run_details(self, run_id: int) -> Tuple[dict | None, List[dict]]:
+    def get_run_details(self, run_id: int) -> Tuple[dict | None, list[dict], list[dict]]:
         return RunDAO(self.db_path).get(run_id)
 
 

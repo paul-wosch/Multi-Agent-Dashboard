@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Callable
 
+from multi_agent_dashboard.config import OPENAI_PRICING
 from multi_agent_dashboard.models import AgentSpec, AgentRuntime
 from multi_agent_dashboard.llm_client import LLMClient
 
@@ -26,6 +27,10 @@ class EngineResult:
     memory: Dict[str, Any]
     warnings: List[str] = field(default_factory=list)
     final_agent: Optional[str] = None  # runtime-only
+    # per-agent metrics
+    agent_metrics: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    total_cost: float = 0.0
+    total_latency: float = 0.0
 
 
 # =========================
@@ -56,6 +61,8 @@ class MultiAgentEngine:
         self.state: Dict[str, Any] = {}
         self.memory: Dict[str, Any] = {}
         self._warnings: List[str] = []
+        # metrics per agent for last run
+        self.agent_metrics: Dict[str, Dict[str, Any]] = {}
 
     # -------------------------
     # Agent Management
@@ -84,6 +91,31 @@ class MultiAgentEngine:
     def _progress(self, pct: int, agent_name: Optional[str] = None) -> None:
         if self.on_progress:
             self.on_progress(pct, agent_name)
+
+    def _compute_cost(
+            self,
+            model: str,
+            input_tokens: Optional[int],
+            output_tokens: Optional[int],
+    ) -> float:
+        """
+        Compute approximate cost for a single LLM call.
+        Prices are per 1M tokens.
+        """
+        if input_tokens is None and output_tokens is None:
+            return 0.0
+
+        pricing = OPENAI_PRICING.get(model)
+        if not pricing:
+            return 0.0
+
+        inp = input_tokens or 0
+        out = output_tokens or 0
+
+        return (
+                inp / 1_000_000.0 * pricing.get("input", 0.0)
+                + out / 1_000_000.0 * pricing.get("output", 0.0)
+        )
 
     # -------------------------
     # Sequential Execution
@@ -116,6 +148,8 @@ class MultiAgentEngine:
         }
         self.memory = {}
         self._warnings = []
+        self._warnings = []
+        self.agent_metrics = {}
 
         # Store initial files in state so all agents can access
         if files:
@@ -175,6 +209,26 @@ class MultiAgentEngine:
                 logger.exception("Agent '%s' failed with real error:", agent_name)
                 raise
 
+            # Retrieve metrics from AgentRuntime.last_metrics
+            metrics = getattr(agent, "last_metrics", {}) or {}
+            input_tokens = metrics.get("input_tokens")
+            output_tokens = metrics.get("output_tokens")
+            latency = metrics.get("latency")
+
+            cost = self._compute_cost(
+                model=agent.spec.model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
+
+            self.agent_metrics[agent_name] = {
+                "model": agent.spec.model,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "latency": latency,
+                "cost": cost,
+            }
+
             self.memory[agent_name] = raw_output
             last_output = raw_output
 
@@ -221,6 +275,13 @@ class MultiAgentEngine:
 
         final_output = self.state.get("final", last_output)
 
+        total_cost = sum(
+            (m.get("cost") or 0.0) for m in self.agent_metrics.values()
+        )
+        total_latency = sum(
+            (m.get("latency") or 0.0) for m in self.agent_metrics.values()
+        )
+
         return EngineResult(
             final_output=final_output,
             state=dict(self.state),
@@ -228,7 +289,10 @@ class MultiAgentEngine:
             warnings=list(self._warnings),
             final_agent=(
                 "final" in self.state and last_agent
-            ) or last_agent
+            ) or last_agent,
+            agent_metrics=dict(self.agent_metrics),
+            total_cost=total_cost,
+            total_latency=total_latency,
         )
 
 

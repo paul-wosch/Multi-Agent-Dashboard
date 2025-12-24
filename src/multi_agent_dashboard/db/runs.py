@@ -66,7 +66,7 @@ class RunDAO:
 
         return [dict(row) for row in rows]
 
-    def get(self, run_id: int) -> Tuple[dict | None, list[dict]]:
+    def get(self, run_id: int) -> Tuple[dict | None, list[dict], list[dict]]:
         logger.debug("Loading details for run %s from DB", run_id)
         try:
             with self._connection() as conn:
@@ -85,6 +85,15 @@ class RunDAO:
                     """,
                     (run_id,),
                 ).fetchall()
+
+                metrics = conn.execute(
+                    """
+                    SELECT agent_name, input_tokens, output_tokens, latency, cost
+                    FROM agent_metrics
+                    WHERE run_id = ?
+                    """,
+                    (run_id,),
+                ).fetchall()
         except Exception:
             logger.exception("Failed to load details for run %s from DB", run_id)
             raise
@@ -92,6 +101,7 @@ class RunDAO:
         return (
             dict(run) if run else None,
             [dict(a) for a in agents],
+            [dict(m) for m in metrics],
         )
 
     # -----------------------
@@ -106,9 +116,11 @@ class RunDAO:
         *,
         agent_models: Dict[str, str] | None = None,
         final_model: str | None = None,
+        agent_metrics: Dict[str, Dict[str, Any]] | None = None,
     ) -> int:
         ts = datetime.now(UTC).isoformat()
         agent_models = agent_models or {}
+        agent_metrics = agent_metrics or {}
 
         if isinstance(final_output, str):
             final_text = final_output
@@ -136,6 +148,7 @@ class RunDAO:
                 )
                 run_id = c.lastrowid
 
+                # Agent outputs
                 for agent, output in memory_dict.items():
                     if isinstance(output, str):
                         raw = output
@@ -160,6 +173,24 @@ class RunDAO:
                             raw,
                             is_json,
                             agent_models.get(agent),
+                        ),
+                    )
+
+                # Per-Agent metrics
+                for agent_name, m in agent_metrics.items():
+                    c.execute(
+                        """
+                        INSERT INTO agent_metrics
+                            (run_id, agent_name, input_tokens, output_tokens, latency, cost)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            run_id,
+                            agent_name,
+                            m.get("input_tokens"),
+                            m.get("output_tokens"),
+                            m.get("latency"),
+                            m.get("cost"),
                         ),
                     )
         except Exception:

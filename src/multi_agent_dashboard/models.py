@@ -30,6 +30,8 @@ class AgentRuntime:
     """
     spec: AgentSpec
     llm_client: Any  # injected, intentionally untyped
+    # last LLM call metrics
+    last_metrics: Dict[str, Any] = field(default_factory=dict)
 
     def run(
         self,
@@ -105,6 +107,14 @@ class AgentRuntime:
             stream=stream,
             files=llm_files_payload if llm_files_payload else None,
         )
+
+        # Save metrics for engine to retrieve
+        self.last_metrics = {
+            "input_tokens": response.input_tokens,
+            "output_tokens": response.output_tokens,
+            "latency": response.latency,
+            "raw": response.raw,
+        }
 
         return response.text
 

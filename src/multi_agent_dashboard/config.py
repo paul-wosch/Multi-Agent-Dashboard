@@ -29,6 +29,37 @@ OPENAI_API_KEY = dotenv_values(DOTENV_FILE_PATH).get("OPENAI_API_KEY", None)
 
 LOG_LEVEL = dotenv_values(DOTENV_FILE_PATH).get("LOG_LEVEL", "INFO").upper()
 
+OPENAI_PRICING = {
+    # https://platform.openai.com/docs/pricing
+    # latest update: 251224
+    # price per 1M tokens
+    "gpt-3.5-turbo": {
+        "input": 0.50,
+        "output": 1.50,
+    },
+    "gpt-4o-mini": {
+        "input": 0.15,
+        "output": 0.60,
+    },
+    "gpt-4.1-mini": {
+        "input": 0.40,
+        "output": 1.60,
+    },
+    "gpt-4.1-nano": {
+        "input": 0.10,
+        "output": 0.40,
+    },
+    "gpt-5-nano": {
+        "input": 0.05,
+        "output": 0.40,
+    },
+    "gpt-5.1": {
+        "input": 1.25,
+        "output": 10.00,
+    },
+    # Add more models as needed
+}
+
 def configure_logging():
     root = logging.getLogger()
     if root.handlers:

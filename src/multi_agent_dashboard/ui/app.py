@@ -11,6 +11,7 @@ import time
 import logging
 from typing import List, Dict, Any, Tuple, Optional
 from collections import deque
+import pandas as pd
 
 from multi_agent_dashboard.config import OPENAI_API_KEY, DB_FILE_PATH, configure_logging
 
@@ -255,7 +256,7 @@ def pipeline_requires_files(engine, steps) -> bool:
     return False
 
 
-def render_agent_graph(steps: list[str]):
+def render_agent_graph(steps: list[str], agent_metrics: dict[str, dict] | None = None):
     dot = graphviz.Digraph()
     dot.attr(
         "node",
@@ -265,6 +266,8 @@ def render_agent_graph(steps: list[str]):
         fillcolor="#deebf7"
     )
 
+    agent_metrics = agent_metrics or {}
+
     for agent in steps:
         if agent in st.session_state.engine.agents:
             role = st.session_state.engine.agents[agent].spec.role
@@ -272,10 +275,30 @@ def render_agent_graph(steps: list[str]):
         else:
             label = agent
 
+        # Optionally annotate node with cost/latency
+        m = agent_metrics.get(agent, {})
+        extra = []
+        if m.get("latency") is not None:
+            extra.append(format_latency(m.get("latency")))
+        if m.get("cost") is not None:
+            extra.append(format_cost(m.get("cost")))
+        if extra:
+            label = f"{label}\n" + " | ".join(extra)
+
         dot.node(agent, label)
 
+    # Edges: label with downstream agent's metrics
     for i in range(len(steps) - 1):
-        dot.edge(steps[i], steps[i + 1], label="passes state →")
+        src = steps[i]
+        dst = steps[i + 1]
+        m = agent_metrics.get(dst, {})
+        latency = m.get("latency")
+        cost = m.get("cost")
+        if latency is not None or cost is not None:
+            edge_label = f"{format_latency(latency)} | {format_cost(cost)}"
+        else:
+            edge_label = "passes state →"
+        dot.edge(src, dst, label=edge_label)
 
     return dot
 
@@ -318,6 +341,18 @@ def export_pipeline_agents_as_json(pipeline_name: str, steps: List[str]) -> str:
     }
 
     return json.dumps(export, indent=2)
+
+
+def format_cost(value: float | None) -> str:
+    if value is None:
+        return "–"
+    return f"${value:.5f}"
+
+
+def format_latency(value: float | None) -> str:
+    if value is None:
+        return "–"
+    return f"{value:.2f}s"
 
 
 # ======================================================
@@ -592,30 +627,13 @@ def render_run_sidebar():
     # -------------------------
     run_clicked = st.sidebar.button(
         "🚀 Run Pipeline",
-        use_container_width=True
+        width="stretch"
     )
 
     # -------------------------
     # Advanced: Pipeline editing
     # -------------------------
     with st.sidebar.expander("Advanced", expanded=False):
-        """
-        available_agents = list(st.session_state.engine.agents.keys())
-
-        if selected_pipeline != "<Ad-hoc>":
-            steps = next(
-                p["steps"] for p in pipelines
-                if p["pipeline_name"] == selected_pipeline
-            )
-        else:
-            steps = available_agents
-
-        selected_steps = st.multiselect(
-            "Agents (execution order)",
-            available_agents,
-            default=active_steps,
-        )
-        """
         name = st.text_input("Save as Pipeline")
 
         if st.button("💾 Save Pipeline"):
@@ -642,7 +660,7 @@ def render_run_sidebar():
                 data=agents_json,
                 file_name=f"{selected_pipeline}_agents.json",
                 mime="application/json",
-                use_container_width=True,
+                width="stretch",
             )
 
     # -------------------------
@@ -712,11 +730,11 @@ def render_agent_outputs(result: EngineResult, steps):
                     st.code(out)
 
 
-def render_graph_tab(steps):
+def render_graph_tab(result: EngineResult, steps):
     if not steps:
         st.info("No agents selected.")
         return
-    st.graphviz_chart(render_agent_graph(steps))
+    st.graphviz_chart(render_agent_graph(steps, result.agent_metrics))
 
 
 def render_compare_tab(result: EngineResult, steps):
@@ -743,13 +761,58 @@ def render_compare_tab(result: EngineResult, steps):
         st.code("\n".join(diff), language="diff")
 
 
+def render_cost_latency_tab(result: EngineResult, steps: list[str]):
+    metrics = result.agent_metrics or {}
+
+    st.subheader("Pipeline Summary")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Total Latency", format_latency(result.total_latency))
+    with col2:
+        st.metric("Total Cost", format_cost(result.total_cost))
+
+    st.markdown("---")
+    st.subheader("Per-Agent Breakdown")
+
+    rows = []
+    for agent in steps:
+        m = metrics.get(agent, {})
+        rows.append({
+            "Agent": agent,
+            "Model": m.get("model", ""),
+            "Input Tokens": m.get("input_tokens"),
+            "Output Tokens": m.get("output_tokens"),
+            "Latency (s)": None if m.get("latency") is None else round(m["latency"], 3),
+            "Cost ($)": None if m.get("cost") is None else round(m["cost"], 6),
+        })
+
+    if not rows:
+        st.info("No metrics available.")
+        return
+
+    df = pd.DataFrame(rows)
+
+    # Nicely format None as "–"
+    def fmt(val):
+        if val is None:
+            return "–"
+        return val
+
+    st.dataframe(
+        df.map(fmt),
+        width="stretch",
+    )
+
+
 def render_run_results(result: EngineResult, steps):
     tabs = st.tabs([
         "🟢 Final Output",
         "⚠️ Warnings",
         "📁 Agent Outputs",
         "🧩 Graph",
-        "🔍 Compare"
+        "🔍 Compare",
+        "💲 Cost & Latency",
     ])
 
     with tabs[0]:
@@ -762,10 +825,13 @@ def render_run_results(result: EngineResult, steps):
         render_agent_outputs(result, steps)
 
     with tabs[3]:
-        render_graph_tab(steps)
+        render_graph_tab(result, steps)
 
     with tabs[4]:
         render_compare_tab(result, steps)
+
+    with tabs[5]:
+        render_cost_latency_tab(result, steps)
 
 
 def render_run_mode():
@@ -818,6 +884,7 @@ def render_run_mode():
                 result.memory,
                 agent_models=agent_models,
                 final_model=final_model,
+                agent_metrics=result.agent_metrics,
             )
         except Exception:
             logger.exception("Failed to persist run")
@@ -1190,7 +1257,7 @@ def render_history_mode():
     # Preload agent names per run to show them in the dropdown label
     def get_agent_names_for_run(run_id: int) -> str:
         try:
-            _, agents = cached_load_run_details(run_id)
+            _, agents, _ = cached_load_run_details(run_id)
         except Exception:
             logger.exception("Failed to load agent names for run %s", run_id)
             return ""
@@ -1239,13 +1306,48 @@ def render_history_mode():
         return
 
     run_id = options[selected]
-    run, agents = cached_load_run_details(run_id)
+    run, agents, metrics = cached_load_run_details(run_id)
+
+    total_latency = sum(
+        (m.get("latency") or 0.0) for m in metrics
+    )
+
+    total_cost = sum(
+        (m.get("cost") or 0.0) for m in metrics
+    )
 
     ts = run["timestamp"]
     task = run["task_input"]
     final = run["final_output"]
     final_is_json = run["final_is_json"]
     final_model = run["final_model"]
+
+    # Show stored metrics
+    if metrics:
+        st.subheader("Cost & Latency (Stored)")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Total Latency", format_latency(total_latency))
+        with col2:
+            st.metric("Total Cost", format_cost(total_cost))
+
+        st.markdown("---")
+        st.subheader("Per-Agent Breakdown")
+
+        rows = []
+        for m in metrics:
+            rows.append({
+                "Agent": m["agent_name"],
+                "Input Tokens": m["input_tokens"],
+                "Output Tokens": m["output_tokens"],
+                "Latency (s)": m["latency"],
+                "Cost ($)": m["cost"],
+            })
+        import pandas as pd
+        st.dataframe(pd.DataFrame(rows), width="stretch")
+
+        st.markdown("---")
 
     st.subheader(f"Run {run_id}")
     st.code(task)
@@ -1335,7 +1437,8 @@ def render_history_mode():
                 "model": a["model"],
             }
             for a in agents
-        }
+        },
+        "metrics": metrics,
     }
 
     st.download_button(

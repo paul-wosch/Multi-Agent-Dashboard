@@ -26,7 +26,10 @@ class TextResponse:
     """
     text: str
     raw: Dict[str, Any]
-
+    # Optional usage metadata
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    latency: Optional[float] = None  # seconds
 
 class LLMError(RuntimeError):
     """
@@ -117,11 +120,30 @@ class LLMClient:
                     bool(response_format),
                 )
 
+                start_ts = time.perf_counter()
                 response = self._client.responses.create(**kwargs)
+                end_ts = time.perf_counter()
+                latency = end_ts - start_ts
+
+                raw_dict = self._to_dict(response)
+
+                # Best-effort usage extraction (OpenAI Responses API)
+                input_tokens = None
+                output_tokens = None
+                try:
+                    # Typical structure: {"usage": {"input_tokens": ..., "output_tokens": ...}}
+                    usage = raw_dict.get("usage") or {}
+                    input_tokens = usage.get("input_tokens")
+                    output_tokens = usage.get("output_tokens")
+                except Exception:
+                    logger.debug("No usage metadata found in LLM response", exc_info=True)
 
                 return TextResponse(
                     text=self._extract_text(response),
-                    raw=self._to_dict(response),
+                    raw=raw_dict,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    latency=latency,
                 )
 
             except TypeError:
