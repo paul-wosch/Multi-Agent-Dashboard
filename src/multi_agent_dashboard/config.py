@@ -29,6 +29,9 @@ OPENAI_API_KEY = dotenv_values(DOTENV_FILE_PATH).get("OPENAI_API_KEY", None)
 
 LOG_LEVEL = dotenv_values(DOTENV_FILE_PATH).get("LOG_LEVEL", "INFO").upper()
 
+AGENT_INPUT_CAP = 40_000
+AGENT_OUTPUT_CAP = 50_000
+
 OPENAI_PRICING = {
     # https://platform.openai.com/docs/pricing
     # latest update: 251224

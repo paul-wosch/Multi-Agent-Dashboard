@@ -2,9 +2,9 @@
 import logging
 from string import Template
 from typing import Dict, Any
+from multi_agent_dashboard.config import AGENT_INPUT_CAP, AGENT_OUTPUT_CAP
 
 logger = logging.getLogger(__name__)
-
 
 class SafeTemplate(Template):
     """
@@ -27,8 +27,8 @@ def safe_format(
     template: str,
     mapping: Dict[str, Any],
     *,
-    max_value_len: int = 20_000,
-    max_prompt_len: int = 50_000,
+    max_value_len: int = AGENT_INPUT_CAP,
+    max_prompt_len: int = AGENT_OUTPUT_CAP,
 ) -> str:
     """
     Safely formats prompts:
