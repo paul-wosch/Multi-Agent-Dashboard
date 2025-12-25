@@ -28,20 +28,16 @@ SCHEMA = {
             "is_json": "INTEGER DEFAULT 0",
             "model": "TEXT",
         },
-        # TODO: debug migration workflow
-        #  1. add missing parent key "constraints"
-        #  2. run generate_migrations with --dry-run --enable-constraints
-        #  3. it should show table requires rebuild
-        #     ...to add foreign keys even if FKs are already present in DB
-        #  4. debug generate_migrations
-        #  5. for cases which require table rebuild make sqlite_rebuild user friendly
-        "foreign_keys": [
-            {
-                "column": "run_id",
-                "references": "runs(id)",
-                "on_delete": "CASCADE",
-            }
-        ],
+
+        "constraints": {
+            "foreign_keys": [
+                {
+                    "column": "run_id",
+                    "references": "runs(id)",
+                    "on_delete": "CASCADE",
+                }
+            ],
+        },
     },
 
     "agent_prompt_versions": {

@@ -600,7 +600,7 @@ def render_run_sidebar():
             uploaded_files = st.file_uploader(
                 "Upload files",
                 accept_multiple_files=True,
-                type=["txt", "pdf", "csv", "md", "json", "log", "py"],
+                type=["txt", "pdf", "csv", "md", "json", "log", "py", "sql", "patch"],
             )
 
             files_payload = []
