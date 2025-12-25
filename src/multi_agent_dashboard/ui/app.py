@@ -1558,6 +1558,41 @@ def render_logs_mode():
     col1, col2 = st.columns([3, 1])
 
     with col2:
+        # ---- BEGIN: color log levels in multiselect ----
+        # Instead of inlining colors into each rule,
+        # define CSS variables once and refer to them.
+        #
+        # Streamlit's multiselect uses baseweb tags with aria-label:
+        #   "INFO, close by backspace"
+        #   "DEBUG, close by backspace"
+        # etc.
+        level_css_vars = "\n".join(
+            f"--log-level-{level.lower()}: {color};"
+            for level, color in LOG_LEVEL_COLORS.items()
+        )
+
+        tag_rules = "\n".join(
+            f'''
+            span[data-baseweb="tag"][aria-label="{level}, close by backspace"] {{
+                background-color: var(--log-level-{level.lower()});
+                color: white;
+            }}'''
+            for level in LOG_LEVEL_COLORS
+        )
+
+        st.markdown(
+            f"""
+            <style>
+            :root {{
+                {level_css_vars}
+            }}
+            {tag_rules}
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+        # ---- END: color log levels in multiselect ----
+
         level_filter = st.multiselect(
             "Levels",
             ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
