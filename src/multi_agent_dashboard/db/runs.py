@@ -88,7 +88,13 @@ class RunDAO:
 
                 metrics = conn.execute(
                     """
-                    SELECT agent_name, input_tokens, output_tokens, latency, cost
+                    SELECT agent_name,
+                           input_tokens,
+                           output_tokens,
+                           latency,
+                           input_cost,
+                           output_cost,
+                           cost
                     FROM agent_metrics
                     WHERE run_id = ?
                     """,
@@ -176,23 +182,32 @@ class RunDAO:
                         ),
                     )
 
-                # Per-Agent metrics
-                for agent_name, m in agent_metrics.items():
-                    c.execute(
-                        """
-                        INSERT INTO agent_metrics
-                            (run_id, agent_name, input_tokens, output_tokens, latency, cost)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            run_id,
-                            agent_name,
-                            m.get("input_tokens"),
-                            m.get("output_tokens"),
-                            m.get("latency"),
-                            m.get("cost"),
-                        ),
-                    )
+                    # Per-Agent metrics
+                    for agent_name, m in agent_metrics.items():
+                        c.execute(
+                            """
+                            INSERT INTO agent_metrics
+                            (run_id,
+                             agent_name,
+                             input_tokens,
+                             output_tokens,
+                             latency,
+                             input_cost,
+                             output_cost,
+                             cost)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                run_id,
+                                agent_name,
+                                m.get("input_tokens"),
+                                m.get("output_tokens"),
+                                m.get("latency"),
+                                m.get("input_cost"),
+                                m.get("output_cost"),
+                                m.get("cost"),
+                            ),
+                        )
         except Exception:
             logger.exception("Failed to save run to DB")
             raise

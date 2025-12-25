@@ -29,8 +29,11 @@ class EngineResult:
     final_agent: Optional[str] = None  # runtime-only
     # per-agent metrics
     agent_metrics: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    # totals broken down
     total_cost: float = 0.0
     total_latency: float = 0.0
+    total_input_cost: float = 0.0
+    total_output_cost: float = 0.0
 
 
 # =========================
@@ -97,25 +100,25 @@ class MultiAgentEngine:
             model: str,
             input_tokens: Optional[int],
             output_tokens: Optional[int],
-    ) -> float:
-        """
-        Compute approximate cost for a single LLM call.
+    ) -> tuple[float, float, float]:
+        """Compute approximate cost for a single LLM call.
+
+        Return (total_cost, input_cost, output_cost).
         Prices are per 1M tokens.
         """
         if input_tokens is None and output_tokens is None:
-            return 0.0
+            return 0.0, 0.0, 0.0
 
         pricing = OPENAI_PRICING.get(model)
         if not pricing:
-            return 0.0
+            return 0.0, 0.0, 0.0
 
         inp = input_tokens or 0
         out = output_tokens or 0
 
-        return (
-                inp / 1_000_000.0 * pricing.get("input", 0.0)
-                + out / 1_000_000.0 * pricing.get("output", 0.0)
-        )
+        input_cost = inp / 1_000_000.0 * pricing.get("input", 0.0)
+        output_cost = out / 1_000_000.0 * pricing.get("output", 0.0)
+        return input_cost + output_cost, input_cost, output_cost
 
     # -------------------------
     # Sequential Execution
@@ -215,7 +218,7 @@ class MultiAgentEngine:
             output_tokens = metrics.get("output_tokens")
             latency = metrics.get("latency")
 
-            cost = self._compute_cost(
+            total_cost, input_cost, output_cost = self._compute_cost(
                 model=agent.spec.model,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
@@ -226,7 +229,9 @@ class MultiAgentEngine:
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
                 "latency": latency,
-                "cost": cost,
+                "input_cost": input_cost,
+                "output_cost": output_cost,
+                "cost": total_cost,
             }
 
             self.memory[agent_name] = raw_output
@@ -278,6 +283,12 @@ class MultiAgentEngine:
         total_cost = sum(
             (m.get("cost") or 0.0) for m in self.agent_metrics.values()
         )
+        total_input_cost = sum(
+            (m.get("input_cost") or 0.0) for m in self.agent_metrics.values()
+        )
+        total_output_cost = sum(
+            (m.get("output_cost") or 0.0) for m in self.agent_metrics.values()
+        )
         total_latency = sum(
             (m.get("latency") or 0.0) for m in self.agent_metrics.values()
         )
@@ -288,11 +299,13 @@ class MultiAgentEngine:
             memory=dict(self.memory),
             warnings=list(self._warnings),
             final_agent=(
-                "final" in self.state and last_agent
-            ) or last_agent,
+                                "final" in self.state and last_agent
+                        ) or last_agent,
             agent_metrics=dict(self.agent_metrics),
             total_cost=total_cost,
             total_latency=total_latency,
+            total_input_cost=total_input_cost,
+            total_output_cost=total_output_cost,
         )
 
 

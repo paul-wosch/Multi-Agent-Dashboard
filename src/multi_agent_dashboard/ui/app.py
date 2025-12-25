@@ -835,10 +835,14 @@ def render_cost_latency_tab(result: EngineResult, steps: list[str]):
 
     st.subheader("Pipeline Summary")
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("Total Latency", format_latency(result.total_latency))
     with col2:
+        st.metric("Total Input Cost", format_cost(getattr(result, "total_input_cost", None)))
+    with col3:
+        st.metric("Total Output Cost", format_cost(getattr(result, "total_output_cost", None)))
+    with col4:
         st.metric("Total Cost", format_cost(result.total_cost))
 
     st.markdown("---")
@@ -853,7 +857,9 @@ def render_cost_latency_tab(result: EngineResult, steps: list[str]):
             "Input Tokens": m.get("input_tokens"),
             "Output Tokens": m.get("output_tokens"),
             "Latency (s)": None if m.get("latency") is None else round(m["latency"], 3),
-            "Cost ($)": None if m.get("cost") is None else round(m["cost"], 6),
+            "Input Cost ($)": None if m.get("input_cost") is None else round(m["input_cost"], 6),
+            "Output Cost ($)": None if m.get("output_cost") is None else round(m["output_cost"], 6),
+            "Total Cost ($)": None if m.get("cost") is None else round(m["cost"], 6),
         })
 
     if not rows:
@@ -1384,6 +1390,12 @@ def render_history_mode():
     total_cost = sum(
         (m.get("cost") or 0.0) for m in metrics
     )
+    total_input_cost = sum(
+        (m.get("input_cost") or 0.0) for m in metrics
+    )
+    total_output_cost = sum(
+        (m.get("output_cost") or 0.0) for m in metrics
+    )
 
     ts = run["timestamp"]
     task = run["task_input"]
@@ -1395,10 +1407,14 @@ def render_history_mode():
     if metrics:
         st.subheader("Cost & Latency (Stored)")
 
-        col1, col2 = st.columns(2)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric("Total Latency", format_latency(total_latency))
         with col2:
+            st.metric("Total Input Cost", format_cost(total_input_cost))
+        with col3:
+            st.metric("Total Output Cost", format_cost(total_output_cost))
+        with col4:
             st.metric("Total Cost", format_cost(total_cost))
 
         st.markdown("---")
@@ -1411,7 +1427,9 @@ def render_history_mode():
                 "Input Tokens": m["input_tokens"],
                 "Output Tokens": m["output_tokens"],
                 "Latency (s)": m["latency"],
-                "Cost ($)": m["cost"],
+                "Input Cost ($)": m.get("input_cost"),
+                "Output Cost ($)": m.get("output_cost"),
+                "Total Cost ($)": m.get("cost"),
             })
         import pandas as pd
         st.dataframe(pd.DataFrame(rows), width="stretch")
@@ -1495,6 +1513,8 @@ def render_history_mode():
         "timestamp": ts,
         "pipeline_summary": {
             "total_latency": round(total_latency, 5),
+            "total_input_cost": round(total_input_cost, 6),
+            "total_output_cost": round(total_output_cost, 6),
             "total_cost": round(total_cost, 6),
         },
         "task_input": task,

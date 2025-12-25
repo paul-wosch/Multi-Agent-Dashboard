@@ -81,6 +81,8 @@ SCHEMA = {
             "input_tokens": "INTEGER",
             "output_tokens": "INTEGER",
             "latency": "REAL",
+            "input_cost": "REAL",
+            "output_cost": "REAL",
             "cost": "REAL",
         },
         "constraints": {
