@@ -28,7 +28,7 @@ import sys
 from datetime import datetime, UTC
 from typing import Dict, Any, List, Set
 
-from schema import SCHEMA
+from multi_agent_dashboard.db.infra.schema import SCHEMA
 from multi_agent_dashboard.config import DB_FILE_PATH
 
 
