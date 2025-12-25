@@ -12,8 +12,9 @@ import logging
 from typing import List, Dict, Any, Tuple, Optional
 from collections import deque
 import pandas as pd
+from pathlib import Path
 
-from multi_agent_dashboard.config import OPENAI_API_KEY, DB_FILE_PATH, configure_logging
+from multi_agent_dashboard.config import OPENAI_API_KEY, DB_FILE_PATH, configure_logging, LOG_FILE_PATH
 
 from multi_agent_dashboard.db.db import init_db
 from multi_agent_dashboard.db.runs import RunDAO
@@ -188,6 +189,71 @@ class StreamlitLogHandler(logging.Handler):
         except Exception:
             # Never let logging break the app
             pass
+
+
+def load_historic_logs_into_buffer(
+    log_path: Path,
+    capacity: int = 500,
+    session_key: str = "_log_buffer",
+):
+    """
+    Load existing log file lines into the Streamlit log buffer on first app start.
+    """
+    if not log_path.exists():
+        return
+
+    # Avoid reloading if buffer already initialized (e.g., rerun)
+    if session_key in st.session_state and st.session_state[session_key]:
+        return
+
+    buf = deque(maxlen=capacity)
+
+    try:
+        with log_path.open("r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.rstrip("\n")
+                if not line:
+                    continue
+
+                # Expect format like: "2025-01-01 12:34:56,789 [LEVEL] logger.name: message"
+                # that matches our configure_logging() formatter.
+                time_part = ""
+                level = "INFO"
+                logger_name = ""
+                message = line
+
+                # split timestamp from rest
+                # First space after timestamp-date and time (up to ]); safer: split on " ["
+                try:
+                    ts_and_rest = line.split(" [", 1)
+                    time_part = ts_and_rest[0].strip()
+                    rest = ts_and_rest[1] if len(ts_and_rest) > 1 else ""
+
+                    # "[LEVEL] logger: msg"
+                    level_and_rest = rest.split("]", 1)
+                    level = level_and_rest[0].strip("[]") or "INFO"
+                    rest2 = level_and_rest[1].strip() if len(level_and_rest) > 1 else ""
+
+                    # "logger.name: message"
+                    logger_and_msg = rest2.split(":", 1)
+                    logger_name = logger_and_msg[0].strip() if logger_and_msg else ""
+                    message = logger_and_msg[1].strip() if len(logger_and_msg) > 1 else rest2
+                except Exception:
+                    # If parsing fails, just store the raw line as message
+                    pass
+
+                entry = {
+                    "time": time_part,
+                    "level": level,
+                    "logger": logger_name,
+                    "message": message,
+                }
+                buf.append(entry)
+    except Exception:
+        # Never let log loading break the UI
+        pass
+
+    st.session_state[session_key] = buf
 
 
 # =======================
@@ -396,6 +462,9 @@ def app_start():
         handler = StreamlitLogHandler(capacity=500)
         logging.getLogger().addHandler(handler)
         st.session_state["_log_handler_attached"] = True
+
+        # Load historic logs into buffer on first attachment
+        load_historic_logs_into_buffer(LOG_FILE_PATH, capacity=500)
 
     # Initialize DB and apply migrations
     init_db(DB_PATH)
