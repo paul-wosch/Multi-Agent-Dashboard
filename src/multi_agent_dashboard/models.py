@@ -20,6 +20,9 @@ class AgentSpec:
     role: str = ""
     input_vars: List[str] = field(default_factory=list)
     output_vars: List[str] = field(default_factory=list)
+    # UI metadata
+    color: str | None = None
+    symbol: str | None = None
 
 
 @dataclass

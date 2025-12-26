@@ -1,5 +1,4 @@
 # src/multi_agent_dashboard/db/services.py
-from contextlib import contextmanager
 from typing import Dict, Any, List, Optional, Tuple
 
 from multi_agent_dashboard.db.runs import RunDAO, run_dao
@@ -53,15 +52,26 @@ class AgentService:
         return AgentDAO(self.db_path).list()
 
     def save_agent(
-        self,
-        name: str,
-        model: str,
-        prompt_template: str,
-        role: str = "",
-        input_vars: Optional[List[str]] = None,
-        output_vars: Optional[List[str]] = None,
+            self,
+            name: str,
+            model: str,
+            prompt_template: str,
+            role: str = "",
+            input_vars: Optional[List[str]] = None,
+            output_vars: Optional[List[str]] = None,
+            color: Optional[str] = None,
+            symbol: Optional[str] = None,
     ) -> None:
-        AgentDAO(self.db_path).save(name, model, prompt_template, role, input_vars, output_vars)
+        AgentDAO(self.db_path).save(
+            name,
+            model,
+            prompt_template,
+            role,
+            input_vars,
+            output_vars,
+            color,
+            symbol,
+        )
 
     def save_prompt_version(self, agent_name: str, prompt_text: str, metadata: Optional[dict] = None) -> int:
         return AgentDAO(self.db_path).save_prompt_version(agent_name, prompt_text, metadata)
@@ -84,6 +94,8 @@ class AgentService:
             input_vars: list[str],
             output_vars: list[str],
             *,
+            color: Optional[str] = None,
+            symbol: Optional[str] = None,
             save_prompt_version: bool = True,
             metadata: dict | None = None,
     ) -> None:
@@ -96,6 +108,8 @@ class AgentService:
                 role,
                 input_vars,
                 output_vars,
+                color,
+                symbol,
             )
 
             if save_prompt_version:

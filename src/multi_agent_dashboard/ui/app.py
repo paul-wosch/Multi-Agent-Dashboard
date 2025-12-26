@@ -1,4 +1,6 @@
 # ui/app.py
+from unittest.mock import DEFAULT
+
 import graphviz
 import streamlit as st
 from openai import OpenAI  # type/factory only
@@ -35,6 +37,10 @@ logger = logging.getLogger(__name__)
 # Configuration
 # =======================
 DB_PATH = DB_FILE_PATH
+
+# Default agent colors
+DEFAULT_COLOR = UI_COLORS["default"]["value"]
+DEFAULT_SYMBOL = UI_COLORS["default"]["symbol"]
 
 pipeline_svc = PipelineService(DB_PATH)
 agent_svc = AgentService(DB_PATH)
@@ -402,8 +408,33 @@ def reload_agents_into_engine():
             role=a["role"],
             input_vars=a["input_vars"],
             output_vars=a["output_vars"],
+            color=a.get("color") or DEFAULT_COLOR,
+            symbol=a.get("symbol") or DEFAULT_SYMBOL,
         )
         engine.add_agent(spec)
+
+
+def get_agent_symbol_map() -> Dict[str, str]:
+    """Return a mapping of agent_name -> symbol (with defaults applied)."""
+    symbol_map: Dict[str, str] = {}
+
+    # Prefer engine agents (already loaded with defaults)
+    engine = st.session_state.get("engine")
+    if engine and getattr(engine, "agents", None):
+        for name, runtime in engine.agents.items():
+            sym = getattr(runtime.spec, "symbol", None) or DEFAULT_SYMBOL
+            symbol_map[name] = sym
+        return symbol_map
+
+    # Fallback to DB listing (AgentDAO.list() already applies defaults)
+    try:
+        for a in cached_load_agents():
+            symbol_map[a["agent_name"]] = a.get("symbol") or DEFAULT_SYMBOL
+    except Exception:
+        # If something goes wrong, default all to DEFAULT_SYMBOL
+        pass
+
+    return symbol_map
 
 
 def export_pipeline_agents_as_json(pipeline_name: str, steps: List[str]) -> str:
@@ -511,6 +542,8 @@ def app_start():
             role=a["role"],
             input_vars=a["input_vars"],
             output_vars=a["output_vars"],
+            color=a.get("color") or DEFAULT_COLOR,
+            symbol=a.get("symbol") or DEFAULT_SYMBOL,
         )
         engine.add_agent(spec)
 
@@ -660,10 +693,35 @@ def render_run_sidebar():
     # -------------------------
     # Agent selection (SOURCE OF TRUTH)
     # -------------------------
+    # Style selected tags similar to Logs level filter
+    st.sidebar.markdown(
+        """
+        <style>
+        /* Neutral background for ALL selected multiselect tags (sidebar pipeline) */
+        section[data-testid="stSidebar"] span[data-baseweb="tag"] {
+            background-color: #55575b !important; /* neutral gray */
+            color: white !important;
+        }
+        section[data-testid="stSidebar"] span[data-baseweb="tag"]:hover {
+            background-color: #41454b !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Map agents to symbols (defaults handled by DAO/engine)
+    agent_symbols = get_agent_symbol_map()
+
+    def format_agent_label(name: str) -> str:
+        symbol = agent_symbols.get(name, DEFAULT_SYMBOL)
+        return f"{symbol} {name}"
+
     selected_steps = st.sidebar.multiselect(
         "Agents (execution order)",
         available_agents,
-        default=base_steps
+        default=base_steps,
+        format_func=format_agent_label,
     )
 
     # Persist Ad-hoc steps so they survive pipeline switching & reruns
@@ -1019,6 +1077,8 @@ def render_agent_editor():
             "prompt": a["prompt_template"],
             "input_vars": a["input_vars"],
             "output_vars": a["output_vars"],
+            "color": a.get("color") or DEFAULT_COLOR,
+            "symbol": a.get("symbol") or DEFAULT_SYMBOL,
         }
         for a in agents_raw
     ]
@@ -1036,6 +1096,8 @@ def render_agent_editor():
             "prompt": "",
             "input_vars": [],
             "output_vars": [],
+            "color": DEFAULT_COLOR,
+            "symbol": DEFAULT_SYMBOL,
         }
     state = st.session_state.agent_editor_state
 
@@ -1074,6 +1136,8 @@ def render_agent_editor():
                 "prompt": "",
                 "input_vars": [],
                 "output_vars": [],
+                "color": DEFAULT_COLOR,
+                "symbol": DEFAULT_SYMBOL,
             }
         else:
             base_agent = next(a for a in agents if a["name"] == selected)
@@ -1085,6 +1149,8 @@ def render_agent_editor():
             "prompt": base_agent["prompt"],
             "input_vars": base_agent["input_vars"],
             "output_vars": base_agent["output_vars"],
+            "color": base_agent.get("color", DEFAULT_COLOR) or DEFAULT_COLOR,
+            "symbol": base_agent.get("symbol", DEFAULT_SYMBOL) or DEFAULT_SYMBOL,
         })
 
         # mark as changed in both local and session state
@@ -1116,6 +1182,73 @@ def render_agent_editor():
         role_val = st.text_input(
             "Role",
             value=state["role"],
+        )
+
+        st.markdown("### Appearance")
+
+        # Prepare color options
+        color_keys = list(UI_COLORS.keys())
+        color_labels = {
+            key: f"{UI_COLORS[key]['symbol']} {key.capitalize()}"
+            for key in color_keys
+        }
+
+        # Infer current palette key from state's current color
+        def infer_color_key_from_hex(hex_value: str) -> str:
+            for k, v in UI_COLORS.items():
+                if v["value"].lower() == (hex_value or "").lower():
+                    return k
+            return "default"
+
+        current_color_key = infer_color_key_from_hex(
+            state.get("color", DEFAULT_COLOR)
+        )
+        if current_color_key not in color_labels:
+            current_color_key = "default"
+
+        # Base palette selection. We persist the previously used key
+        # in state so we can see if the user changed the dropdown.
+        prev_palette_key = state.get("_palette_key", current_color_key)
+
+        selected_color_key = st.selectbox(
+            "Base Color",
+            options=color_keys,
+            index=color_keys.index(current_color_key),
+            format_func=lambda k: color_labels[k],
+            help=(
+                "Choose a base color; this sets both the default color and "
+                "symbol for the agent. You can still override them below."
+            ),
+            key="agent_editor_base_color",
+        )
+
+        selected_palette = UI_COLORS[selected_color_key]
+        palette_color_value = selected_palette["value"]
+        palette_symbol_value = selected_palette["symbol"]
+
+        # If user changed the base palette, immediately update state color/symbol
+        # so both the color picker and symbol field reflect the chosen palette.
+        if selected_color_key != prev_palette_key:
+            state["color"] = palette_color_value
+            state["symbol"] = palette_symbol_value
+            state["_palette_key"] = selected_color_key
+        else:
+            # Make sure palette key is stored so we can compare next rerun
+            state["_palette_key"] = prev_palette_key
+
+        # Color picker override – use state (which may have been updated above)
+        color_val = st.color_picker(
+            "Agent Color",
+            value=state.get("color", palette_color_value) or palette_color_value,
+            help="Override the color for this agent.",
+        )
+
+        # Symbol override – use state (which may have been updated above)
+        symbol_val = st.text_input(
+            "Agent Symbol (emoji or short text)",
+            value=state.get("symbol", palette_symbol_value) or palette_symbol_value,
+            help="Override the symbol for this agent.",
+            max_chars=8,
         )
 
     # ----- Prompt tab -----
@@ -1168,6 +1301,8 @@ def render_agent_editor():
             "output_vars": [
                 v.strip() for v in output_vars_val.splitlines() if v.strip()
             ],
+            "color": color_val or DEFAULT_COLOR,
+            "symbol": symbol_val or UI_COLORS[selected_color_key]["symbol"],
         })
 
     # IMPORTANT: reset the persistent flag at the end of the render
@@ -1209,6 +1344,8 @@ def render_agent_editor():
                 state["role"],
                 state["input_vars"],
                 state["output_vars"],
+                color=state.get("color") or DEFAULT_COLOR,
+                symbol=state.get("symbol") or DEFAULT_SYMBOL,
                 save_prompt_version=(state["prompt"] != previous_prompt),
             )
 
@@ -1230,6 +1367,8 @@ def render_agent_editor():
                     state["role"],
                     state["input_vars"],
                     state["output_vars"],
+                    color=state.get("color") or DEFAULT_COLOR,
+                    symbol=state.get("symbol") or DEFAULT_SYMBOL,
                 )
             except Exception:
                 logger.exception("Failed to duplicate agent")
@@ -1322,6 +1461,8 @@ def render_agent_editor():
                     "prompt": chosen_agent.get("prompt_template", ""),
                     "input_vars": chosen_agent.get("input_vars", []),
                     "output_vars": chosen_agent.get("output_vars", []),
+                    "color": DEFAULT_COLOR,
+                    "symbol": DEFAULT_SYMBOL,
                 })
 
                 # Mark change in persistent flag so next run skips write-back

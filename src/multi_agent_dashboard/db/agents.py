@@ -20,6 +20,10 @@ from typing import List, Optional
 from contextlib import contextmanager
 
 from multi_agent_dashboard.db.infra.core import get_conn, safe_json_loads
+from multi_agent_dashboard.config import UI_COLORS
+
+DEFAULT_COLOR = UI_COLORS["default"]["value"]
+DEFAULT_SYMBOL = UI_COLORS["default"]["symbol"]
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +63,14 @@ class AgentDAO:
             with self._connection() as conn:
                 rows = conn.execute(
                     """
-                    SELECT agent_name, model, prompt_template, role, input_vars, output_vars
+                    SELECT agent_name,
+                           model,
+                           prompt_template,
+                           role,
+                           input_vars,
+                           output_vars,
+                           color,
+                           symbol
                     FROM agents
                     """
                 ).fetchall()
@@ -69,6 +80,8 @@ class AgentDAO:
 
         agents = []
         for row in rows:
+            color = row["color"] or DEFAULT_COLOR
+            symbol = row["symbol"] or DEFAULT_SYMBOL
             agents.append(
                 {
                     "agent_name": row["agent_name"],
@@ -77,6 +90,8 @@ class AgentDAO:
                     "role": row["role"],
                     "input_vars": safe_json_loads(row["input_vars"], []),
                     "output_vars": safe_json_loads(row["output_vars"], []),
+                    "color": color,
+                    "symbol": symbol,
                 }
             )
         return agents
@@ -116,16 +131,22 @@ class AgentDAO:
     # -----------------------
 
     def save(
-        self,
-        agent_name: str,
-        model: str,
-        prompt_template: str,
-        role: str = "",
-        input_vars: Optional[List[str]] = None,
-        output_vars: Optional[List[str]] = None,
+            self,
+            agent_name: str,
+            model: str,
+            prompt_template: str,
+            role: str = "",
+            input_vars: Optional[List[str]] = None,
+            output_vars: Optional[List[str]] = None,
+            color: Optional[str] = None,
+            symbol: Optional[str] = None,
     ) -> None:
         input_json = json.dumps(input_vars or [])
         output_json = json.dumps(output_vars or [])
+
+        # Backwards-compatible defaults
+        color = color or DEFAULT_COLOR
+        symbol = symbol or DEFAULT_SYMBOL
 
         logger.info("Saving agent %s to DB", agent_name)
         try:
@@ -133,8 +154,15 @@ class AgentDAO:
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO agents
-                        (agent_name, model, prompt_template, role, input_vars, output_vars)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                        (agent_name,
+                         model,
+                         prompt_template,
+                         role,
+                         input_vars,
+                         output_vars,
+                         color,
+                         symbol)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         agent_name,
@@ -143,6 +171,8 @@ class AgentDAO:
                         role,
                         input_json,
                         output_json,
+                        color,
+                        symbol,
                     ),
                 )
         except Exception:

@@ -61,6 +61,8 @@ SCHEMA = {
             "role": "TEXT",
             "input_vars": "TEXT",
             "output_vars": "TEXT",
+            "color": "TEXT",
+            "symbol": "TEXT",
         },
     },
 

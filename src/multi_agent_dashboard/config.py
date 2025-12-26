@@ -106,6 +106,10 @@ UI_COLORS = {
         "value": "#000000",
         "symbol": "⚫️",
     },
+    "default": {
+        "value": "#6c757d",
+        "symbol": "⚪",
+    },
 }
 
 
