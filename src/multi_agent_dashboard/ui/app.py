@@ -14,12 +14,15 @@ from collections import deque
 import pandas as pd
 from pathlib import Path
 
-from multi_agent_dashboard.config import OPENAI_API_KEY, DB_FILE_PATH, configure_logging, LOG_FILE_PATH
+from multi_agent_dashboard.config import (
+    OPENAI_API_KEY,
+    DB_FILE_PATH,
+    configure_logging,
+    LOG_FILE_PATH,
+    UI_COLORS,
+)
 
 from multi_agent_dashboard.db.db import init_db
-from multi_agent_dashboard.db.runs import RunDAO
-from multi_agent_dashboard.db.agents import AgentDAO
-from multi_agent_dashboard.db.pipelines import PipelineDAO
 from multi_agent_dashboard.db.services import RunService, AgentService, PipelineService
 
 from multi_agent_dashboard.engine import MultiAgentEngine, EngineResult
@@ -37,12 +40,28 @@ pipeline_svc = PipelineService(DB_PATH)
 agent_svc = AgentService(DB_PATH)
 run_svc = RunService(DB_PATH)
 
-LOG_LEVEL_COLORS = {
-    "DEBUG": "#6c757d",     # gray
-    "INFO": "#198754",      # green
-    "WARNING": "#fd7e14",   # orange
-    "ERROR": "#dc3545",     # red
-    "CRITICAL": "#842029",  # dark red
+# Centralized mapping of log levels to colors and symbols (derived from UI_COLORS)
+LOG_LEVEL_STYLES: Dict[str, Dict[str, str]] = {
+    "DEBUG": {
+        "color": UI_COLORS["grey"]["value"],
+        "symbol": UI_COLORS["grey"]["symbol"],
+    },
+    "INFO": {
+        "color": UI_COLORS["green"]["value"],
+        "symbol": UI_COLORS["green"]["symbol"],
+    },
+    "WARNING": {
+        "color": UI_COLORS["orange"]["value"],
+        "symbol": UI_COLORS["orange"]["symbol"],
+    },
+    "ERROR": {
+        "color": UI_COLORS["red"]["value"],
+        "symbol": UI_COLORS["red"]["symbol"],
+    },
+    "CRITICAL": {
+        "color": UI_COLORS["purple"]["value"],
+        "symbol": UI_COLORS["purple"]["symbol"],
+    },
 }
 
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
@@ -1558,45 +1577,36 @@ def render_logs_mode():
     col1, col2 = st.columns([3, 1])
 
     with col2:
-        # ---- BEGIN: color log levels in multiselect ----
-        # Instead of inlining colors into each rule,
-        # define CSS variables once and refer to them.
-        #
-        # Streamlit's multiselect uses baseweb tags with aria-label:
-        #   "INFO, close by backspace"
-        #   "DEBUG, close by backspace"
-        # etc.
-        level_css_vars = "\n".join(
-            f"--log-level-{level.lower()}: {color};"
-            for level, color in LOG_LEVEL_COLORS.items()
-        )
-
-        tag_rules = "\n".join(
-            f'''
-            span[data-baseweb="tag"][aria-label="{level}, close by backspace"] {{
-                background-color: var(--log-level-{level.lower()});
-                color: white;
-            }}'''
-            for level in LOG_LEVEL_COLORS
-        )
-
+        # Override tag background color
         st.markdown(
-            f"""
+            """
             <style>
-            :root {{
-                {level_css_vars}
-            }}
-            {tag_rules}
+            /* Neutral background for ALL selected multiselect tags */
+            span[data-baseweb="tag"] {
+                background-color: #55575b !important; /* neutral gray */
+                color: white !important;
+            }
+
+            /* Hover state */
+            span[data-baseweb="tag"]:hover {
+                background-color: #41454b !important;
+            }
             </style>
             """,
             unsafe_allow_html=True,
         )
-        # ---- END: color log levels in multiselect ----
+
+        # Multiselect with emoji-prefixed labels
+        LEVEL_LABELS = {
+            level: f"{style['symbol']} {level}"
+            for level, style in LOG_LEVEL_STYLES.items()
+        }
 
         level_filter = st.multiselect(
             "Levels",
-            ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+            list(LEVEL_LABELS.keys()),
             default=["INFO", "WARNING", "ERROR", "CRITICAL"],
+            format_func=lambda v: LEVEL_LABELS[v],
         )
 
         def build_log_lines(logs, level_filter, search):
@@ -1643,7 +1653,8 @@ def render_logs_mode():
                 continue
 
             level = entry["level"]
-            color = LOG_LEVEL_COLORS.get(level, "#000000")
+            style = LOG_LEVEL_STYLES.get(level, {"color": "#000000", "symbol": ""})
+            color = style["color"]
 
             prefix = f"{entry['time']} "
             level_token = f"[{level}]"

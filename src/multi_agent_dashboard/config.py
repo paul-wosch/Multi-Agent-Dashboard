@@ -69,6 +69,45 @@ OPENAI_PRICING = {
     # Add more models as needed
 }
 
+UI_COLORS = {
+    "red": {
+        "value": "#dc3545",
+        "symbol": "🔴",
+    },
+    "orange": {
+        "value": "#fd7e14",
+        "symbol": "🟠",
+    },
+    "yellow": {
+        "value": "#FFFF00",
+        "symbol": "🟡",
+    },
+    "green": {
+        "value": "#198754",
+        "symbol": "🟢",
+    },
+    "blue": {
+        "value": "#0000FF",
+        "symbol": "🔵",
+    },
+    "purple": {
+        "value": "#842029",
+        "symbol": "🟣",
+    },
+    "grey": {
+        "value": "#6c757d",
+        "symbol": "⚪",
+    },
+    "brown": {
+        "value": "#A52A2A",
+        "symbol": "🟤",
+    },
+    "black": {
+        "value": "#000000",
+        "symbol": "⚫️",
+    },
+}
+
 
 def configure_logging():
     root = logging.getLogger()
