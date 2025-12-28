@@ -14,14 +14,16 @@ class RunService:
         self.db_path = db_path
 
     def save_run(
-        self,
-        task_input: str,
-        final_output: str,
-        memory: Dict[str, Any],
-        *,
-        agent_models: Optional[Dict[str, str]] = None,
-        final_model: Optional[str] = None,
-        agent_metrics: Optional[Dict[str, Dict[str, Any]]] = None,
+            self,
+            task_input: str,
+            final_output: str,
+            memory: Dict[str, Any],
+            *,
+            agent_models: Optional[Dict[str, str]] = None,
+            final_model: Optional[str] = None,
+            agent_configs: Optional[Dict[str, Dict[str, Any]]] = None,
+            agent_metrics: Optional[Dict[str, Dict[str, Any]]] = None,
+            tool_usages: Optional[Dict[str, List[Dict[str, Any]]]] = None,
     ) -> int:
         with run_dao(self.db_path) as dao:
             run_id = dao.save(
@@ -30,14 +32,19 @@ class RunService:
                 memory,
                 agent_models=agent_models,
                 final_model=final_model,
+                agent_configs=agent_configs,
                 agent_metrics=agent_metrics,
+                tool_usages=tool_usages,
             )
             return run_id
 
     def list_runs(self) -> List[dict]:
         return RunDAO(self.db_path).list()
 
-    def get_run_details(self, run_id: int) -> Tuple[dict | None, list[dict], list[dict]]:
+    def get_run_details(
+            self,
+            run_id: int
+    ) -> Tuple[dict | None, list[dict], list[dict], list[dict], list[dict]]:
         return RunDAO(self.db_path).get(run_id)
 
 
@@ -61,6 +68,9 @@ class AgentService:
             output_vars: Optional[List[str]] = None,
             color: Optional[str] = None,
             symbol: Optional[str] = None,
+            tools: Optional[dict] = None,
+            reasoning_effort: Optional[str] = None,
+            reasoning_summary: Optional[str] = None,
     ) -> None:
         AgentDAO(self.db_path).save(
             name,
@@ -71,6 +81,9 @@ class AgentService:
             output_vars,
             color,
             symbol,
+            tools=tools,
+            reasoning_effort=reasoning_effort,
+            reasoning_summary=reasoning_summary,
         )
 
     def save_prompt_version(self, agent_name: str, prompt_text: str, metadata: Optional[dict] = None) -> int:
@@ -98,6 +111,9 @@ class AgentService:
             symbol: Optional[str] = None,
             save_prompt_version: bool = True,
             metadata: dict | None = None,
+            tools: Optional[dict] = None,
+            reasoning_effort: Optional[str] = None,
+            reasoning_summary: Optional[str] = None,
     ) -> None:
         """Atomically save agent metadata and optionally create a prompt version."""
         with agent_dao(self.db_path) as dao:
@@ -110,6 +126,9 @@ class AgentService:
                 output_vars,
                 color,
                 symbol,
+                tools=tools,
+                reasoning_effort=reasoning_effort,
+                reasoning_summary=reasoning_summary,
             )
 
             if save_prompt_version:

@@ -16,7 +16,7 @@ import json
 import logging
 import warnings
 from datetime import datetime, UTC
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, List, Any, Tuple, Optional
 from contextlib import contextmanager
 
 from multi_agent_dashboard.db.infra.core import get_conn
@@ -66,14 +66,18 @@ class RunDAO:
 
         return [dict(row) for row in rows]
 
-    def get(self, run_id: int) -> Tuple[dict | None, list[dict], list[dict]]:
+    def get(
+            self,
+            run_id: int
+    ) -> Tuple[dict | None, list[dict], list[dict], list[dict], list[dict]]:
         logger.debug("Loading details for run %s from DB", run_id)
         try:
             with self._connection() as conn:
                 run = conn.execute(
                     """
                     SELECT timestamp, task_input, final_output, final_is_json, final_model
-                    FROM runs WHERE id = ?
+                    FROM runs
+                    WHERE id = ?
                     """,
                     (run_id,),
                 ).fetchone()
@@ -81,7 +85,8 @@ class RunDAO:
                 agents = conn.execute(
                     """
                     SELECT agent_name, output, is_json, model
-                    FROM agent_outputs WHERE run_id = ?
+                    FROM agent_outputs
+                    WHERE run_id = ?
                     """,
                     (run_id,),
                 ).fetchall()
@@ -100,6 +105,39 @@ class RunDAO:
                     """,
                     (run_id,),
                 ).fetchall()
+
+                tool_usages = conn.execute(
+                    """
+                    SELECT agent_name,
+                           tool_type,
+                           tool_call_id,
+                           args_json,
+                           result_summary
+                    FROM tool_usages
+                    WHERE run_id = ?
+                    """,
+                    (run_id,),
+                ).fetchall()
+
+                agent_run_configs = conn.execute(
+                    """
+                    SELECT agent_name,
+                           model,
+                           prompt_template,
+                           role,
+                           input_vars,
+                           output_vars,
+                           tools_json,
+                           tools_config_json,
+                           reasoning_effort,
+                           reasoning_summary,
+                           reasoning_config_json,
+                           extra_config_json
+                    FROM agent_run_configs
+                    WHERE run_id = ?
+                    """,
+                    (run_id,),
+                ).fetchall()
         except Exception:
             logger.exception("Failed to load details for run %s from DB", run_id)
             raise
@@ -108,6 +146,8 @@ class RunDAO:
             dict(run) if run else None,
             [dict(a) for a in agents],
             [dict(m) for m in metrics],
+            [dict(t) for t in tool_usages],
+            [dict(c) for c in agent_run_configs],
         )
 
     # -----------------------
@@ -115,18 +155,22 @@ class RunDAO:
     # -----------------------
 
     def save(
-        self,
-        task_input: str,
-        final_output: str,
-        memory_dict: Dict[str, Any],
-        *,
-        agent_models: Dict[str, str] | None = None,
-        final_model: str | None = None,
-        agent_metrics: Dict[str, Dict[str, Any]] | None = None,
+            self,
+            task_input: str,
+            final_output: str,
+            memory_dict: Dict[str, Any],
+            *,
+            agent_models: Dict[str, str] | None = None,
+            final_model: str | None = None,
+            agent_configs: Dict[str, Dict[str, Any]] | None = None,
+            agent_metrics: Dict[str, Dict[str, Any]] | None = None,
+            tool_usages: Dict[str, List[Dict[str, Any]]] | None = None,
     ) -> int:
         ts = datetime.now(UTC).isoformat()
         agent_models = agent_models or {}
+        agent_configs = agent_configs or {}
         agent_metrics = agent_metrics or {}
+        tool_usages = tool_usages or {}
 
         if isinstance(final_output, str):
             final_text = final_output
@@ -182,30 +226,105 @@ class RunDAO:
                         ),
                     )
 
-                    # Per-Agent metrics
-                    for agent_name, m in agent_metrics.items():
-                        c.execute(
-                            """
-                            INSERT INTO agent_metrics
+                # Per-Agent metrics
+                for agent_name, m in agent_metrics.items():
+                    c.execute(
+                        """
+                        INSERT INTO agent_metrics
+                        (run_id,
+                         agent_name,
+                         input_tokens,
+                         output_tokens,
+                         latency,
+                         input_cost,
+                         output_cost,
+                         cost)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            run_id,
+                            agent_name,
+                            m.get("input_tokens"),
+                            m.get("output_tokens"),
+                            m.get("latency"),
+                            m.get("input_cost"),
+                            m.get("output_cost"),
+                            m.get("cost"),
+                        ),
+                    )
+
+                # Per-agent configuration snapshot (per run).
+                # NOTE: schema is intentionally redundant with agents table so
+                # that past runs remain reproducible even if agents change.
+                for agent_name, cfg in agent_configs.items():
+                    c.execute(
+                        """
+                        INSERT INTO agent_run_configs
                             (run_id,
                              agent_name,
-                             input_tokens,
-                             output_tokens,
-                             latency,
-                             input_cost,
-                             output_cost,
-                             cost)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                             model,
+                             prompt_template,
+                             role,
+                             input_vars,
+                             output_vars,
+                             tools_json,
+                             tools_config_json,
+                             reasoning_effort,
+                             reasoning_summary,
+                             reasoning_config_json,
+                             extra_config_json)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            run_id,
+                            agent_name,
+                            cfg.get("model"),
+                            cfg.get("prompt_template"),
+                            cfg.get("role"),
+                            json.dumps(cfg.get("input_vars") or []),
+                            json.dumps(cfg.get("output_vars") or []),
+                            json.dumps(cfg.get("tools") or {}),
+                            json.dumps(cfg.get("tools_config") or {}),
+                            cfg.get("reasoning_effort"),
+                            cfg.get("reasoning_summary"),
+                            json.dumps(cfg.get("reasoning_config") or {}),
+                            # Reserved for future options such as temperature
+                            json.dumps(cfg.get("extra") or {}),
+                        ),
+                    )
+
+                # tool usages per agent
+                logger.debug("Saving tool usages for run %s: %r", run_id, tool_usages)
+                for agent_name, entries in tool_usages.items():
+                    for entry in entries or []:
+                        action = entry.get("action") or {}
+                        # args_json is now scoped to the tool call itself
+                        # (arguments + status). Tool and reasoning config are
+                        # stored once per agent/run in agent_run_configs.
+                        payload = {"action": action}
+
+                        status = entry.get("status")
+                        if status is not None:
+                            payload["status"] = status
+
+                        c.execute(
+                            """
+                            INSERT INTO tool_usages
+                            (run_id,
+                             agent_name,
+                             tool_type,
+                             tool_call_id,
+                             args_json,
+                             result_summary)
+                            VALUES (?, ?, ?, ?, ?, ?)
                             """,
                             (
                                 run_id,
                                 agent_name,
-                                m.get("input_tokens"),
-                                m.get("output_tokens"),
-                                m.get("latency"),
-                                m.get("input_cost"),
-                                m.get("output_cost"),
-                                m.get("cost"),
+                                entry.get("tool_type"),
+                                entry.get("id"),
+                                json.dumps(payload),
+                                entry.get("result_summary") or "",
                             ),
                         )
         except Exception:

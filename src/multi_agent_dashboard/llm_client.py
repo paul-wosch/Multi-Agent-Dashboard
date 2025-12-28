@@ -89,6 +89,8 @@ class LLMClient:
         response_format: Optional[Dict[str, Any]] = None,
         stream: bool = False,
         files: Optional[List[Dict[str, Any]]] = None,
+        tools_config: Optional[Dict[str, Any]] = None,
+        reasoning_config: Optional[Dict[str, Any]] = None,
     ) -> TextResponse:
         """
         Execute a text-generation request and return a normalized response.
@@ -109,15 +111,34 @@ class LLMClient:
                 if stream and "stream" in self._capabilities:
                     kwargs["stream"] = True
 
+                # 1) response_format (if supported)
                 if response_format is not None and "response_format" in self._capabilities:
                     kwargs["response_format"] = response_format
 
+                # 2) tools / tool_choice / include (independent of response_format)
+                if tools_config:
+                    tools = tools_config.get("tools")
+                    if tools and "tools" in self._capabilities:
+                        kwargs["tools"] = tools
+                    tool_choice = tools_config.get("tool_choice")
+                    if tool_choice and "tool_choice" in self._capabilities:
+                        kwargs["tool_choice"] = tool_choice
+                    include = tools_config.get("include")
+                    if include and "include" in self._capabilities:
+                        kwargs["include"] = include
+
+                # 3) reasoning config (independent of response_format)
+                if reasoning_config and "reasoning" in self._capabilities:
+                    kwargs["reasoning"] = reasoning_config
+
                 logger.debug(
-                    "LLM request: model=%s, prompt_len=%d, stream=%s, structured=%s",
+                    "LLM request: model=%s, prompt_len=%d, stream=%s, structured=%s, tools=%s, reasoning=%s",
                     model,
                     len(prompt),
                     stream,
                     bool(response_format),
+                    bool(tools_config),
+                    bool(reasoning_config),
                 )
 
                 start_ts = time.perf_counter()

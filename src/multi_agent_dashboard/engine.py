@@ -29,11 +29,15 @@ class EngineResult:
     final_agent: Optional[str] = None  # runtime-only
     # per-agent metrics
     agent_metrics: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    # per-agent configuration snapshot for this run (used for DB logging)
+    agent_configs: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     # totals broken down
     total_cost: float = 0.0
     total_latency: float = 0.0
     total_input_cost: float = 0.0
     total_output_cost: float = 0.0
+    # per-agent tool usage, as parsed from LLM responses
+    tool_usages: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
 
 
 # =========================
@@ -132,6 +136,10 @@ class MultiAgentEngine:
         strict: bool = False,
         last_agent: Optional[str] = None,
         files: Optional[List[Dict[str, Any]]] = None,
+        # Can be either:
+        #   - List[str]: global allow-list for all agents
+        #   - Dict[str, List[str]]: per-agent allow-lists
+        allowed_domains: Optional[Any] = None,
     ) -> EngineResult:
         """
         Execute agents sequentially.
@@ -151,12 +159,28 @@ class MultiAgentEngine:
         }
         self.memory = {}
         self._warnings = []
-        self._warnings = []
         self.agent_metrics = {}
+        tool_usages: Dict[str, List[Dict[str, Any]]] = {}
+        # Per-agent configuration snapshot filled as agents run
+        agent_configs: Dict[str, Dict[str, Any]] = {}
 
         # Store initial files in state so all agents can access
         if files:
             self.state["files"] = files
+
+        # Optional domain filters for web_search
+        if allowed_domains:
+            if isinstance(allowed_domains, dict):
+                # Per-agent mapping {agent_name: [domains...]}
+                filtered = {
+                    k: v for k, v in allowed_domains.items()
+                    if isinstance(v, list) and v
+                }
+                if filtered:
+                    self.state["allowed_domains_by_agent"] = filtered
+            else:
+                # Backwards-compatible: single global list
+                self.state["allowed_domains"] = allowed_domains
 
         last_output: Any = None
         # ---- Progress bar: initialize ----
@@ -214,6 +238,40 @@ class MultiAgentEngine:
 
             # Retrieve metrics from AgentRuntime.last_metrics
             metrics = getattr(agent, "last_metrics", {}) or {}
+
+            # Extract config used for this agent call
+            tc = metrics.get("tools_config")
+            rc = metrics.get("reasoning_config")
+
+            # Extract tool usage for this agent (per-call details)
+            tools = (metrics.get("tools") or [])
+            if tools:
+                for t in tools:
+                    # Keep config on the in-memory tool events for convenience;
+                    # DB writes now use agent_run_configs instead.
+                    if tc:
+                        t["tools_config"] = tc
+                    if rc:
+                        t["reasoning_config"] = rc
+                tool_usages[agent_name] = tools
+
+            # Snapshot this agent's configuration for this particular run.
+            # This keeps agent config concerns out of tool_usages rows.
+            agent_configs[agent_name] = {
+                "model": agent.spec.model,
+                "prompt_template": agent.spec.prompt_template,
+                "role": agent.spec.role,
+                "input_vars": list(agent.spec.input_vars),
+                "output_vars": list(agent.spec.output_vars),
+                # High-level tools overview from AgentSpec.tools
+                "tools": agent.spec.tools or {},
+                # Low-level tools/reasoning config used in this run
+                "tools_config": tc,
+                "reasoning_effort": agent.spec.reasoning_effort,
+                "reasoning_summary": agent.spec.reasoning_summary,
+                "reasoning_config": rc,
+            }
+
             input_tokens = metrics.get("input_tokens")
             output_tokens = metrics.get("output_tokens")
             latency = metrics.get("latency")
@@ -302,10 +360,12 @@ class MultiAgentEngine:
                                 "final" in self.state and last_agent
                         ) or last_agent,
             agent_metrics=dict(self.agent_metrics),
+            agent_configs=agent_configs,
             total_cost=total_cost,
             total_latency=total_latency,
             total_input_cost=total_input_cost,
             total_output_cost=total_output_cost,
+            tool_usages=tool_usages,
         )
 
 

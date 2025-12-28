@@ -31,6 +31,16 @@ from multi_agent_dashboard.engine import MultiAgentEngine, EngineResult
 from multi_agent_dashboard.llm_client import LLMClient
 from multi_agent_dashboard.models import AgentSpec
 
+
+def _parse_json_field(raw: str | None, default):
+    if not raw:
+        return default
+    try:
+        return json.loads(raw)
+    except Exception:
+        return default
+
+
 logger = logging.getLogger(__name__)
 
 # =======================
@@ -410,6 +420,9 @@ def reload_agents_into_engine():
             output_vars=a["output_vars"],
             color=a.get("color") or DEFAULT_COLOR,
             symbol=a.get("symbol") or DEFAULT_SYMBOL,
+            tools=a.get("tools") or {},
+            reasoning_effort=a.get("reasoning_effort"),
+            reasoning_summary=a.get("reasoning_summary"),
         )
         engine.add_agent(spec)
 
@@ -544,6 +557,9 @@ def app_start():
             output_vars=a["output_vars"],
             color=a.get("color") or DEFAULT_COLOR,
             symbol=a.get("symbol") or DEFAULT_SYMBOL,
+            tools=a.get("tools") or {},
+            reasoning_effort=a.get("reasoning_effort"),
+            reasoning_summary=a.get("reasoning_summary"),
         )
         engine.add_agent(spec)
 
@@ -769,6 +785,56 @@ def render_run_sidebar():
                 })
 
     # -------------------------
+    # Detect whether any selected agent has web_search enabled
+    # -------------------------
+    def agent_uses_web_search(agent_name: str) -> bool:
+        ag = engine.agents.get(agent_name)
+        if not ag:
+            return False
+        tools_cfg = getattr(ag.spec, "tools", {}) or {}
+        if not tools_cfg.get("enabled"):
+            return False
+        tools = tools_cfg.get("tools") or []
+        return "web_search" in tools
+
+    any_web_search = any(agent_uses_web_search(a) for a in selected_steps)
+
+    # -------------------------
+    # Websearch domain filter section (per agent)
+    # -------------------------
+    # Dict[agent_name, List[str]]
+    allowed_domains_by_agent: Dict[str, List[str]] = {}
+
+    if any_web_search:
+        st.sidebar.markdown("### 🔎 Web Search Domains")
+        st.sidebar.caption(
+            "Optionally limit web search to specific domains for each agent "
+            "(one domain per line). Leave empty to allow any domain."
+        )
+
+        for agent_name in selected_steps:
+            if not agent_uses_web_search(agent_name):
+                continue
+
+            with st.sidebar.expander(
+                    f"Web Search Domains — {agent_name}", expanded=False
+            ):
+                domains_text = st.text_area(
+                    "Allowed domains (optional)",
+                    value="",
+                    placeholder="example.com\nanother-example.org",
+                    height=80,
+                    key=f"allowed_domains_{agent_name}",
+                )
+                domains = [
+                    d.strip()
+                    for d in domains_text.splitlines()
+                    if d.strip()
+                ]
+                if domains:
+                    allowed_domains_by_agent[agent_name] = domains
+
+    # -------------------------
     # Run button
     # -------------------------
     run_clicked = st.sidebar.button(
@@ -818,6 +884,7 @@ def render_run_sidebar():
         task,
         run_clicked,
         files_payload,
+        allowed_domains_by_agent,
     )
 
 
@@ -951,10 +1018,155 @@ def render_cost_latency_tab(result: EngineResult, steps: list[str]):
             return "–"
         return val
 
-    st.dataframe(
-        df.map(fmt),
-        width="stretch",
-    )
+    st.dataframe(df.map(fmt), width="stretch")
+
+    # Tool usage overview
+    tool_usages = result.tool_usages or {}
+    st.markdown("---")
+    st.subheader("Tool Usage Overview")
+
+    if not tool_usages:
+        st.info("No tools were used in this run.")
+        return
+
+    overview = []
+    for agent in steps:
+        entries = tool_usages.get(agent) or []
+        if not entries:
+            continue
+        counts = {}
+        for e in entries:
+            t = e.get("tool_type") or "unknown"
+            counts[t] = counts.get(t, 0) + 1
+        overview.append({
+            "Agent": agent,
+            "Tools": ", ".join(f"{k}×{v}" for k, v in counts.items()),
+        })
+
+    if overview:
+        st.dataframe(pd.DataFrame(overview), width="stretch")
+
+
+def render_tools_advanced_tab(result: EngineResult, steps: list[str]):
+    engine = st.session_state.engine
+    tool_usages = result.tool_usages or {}
+
+    st.subheader("Per-Agent Configuration (this run)")
+
+    for agent_name in steps:
+        ag = engine.agents.get(agent_name)
+        if not ag:
+            continue
+        spec = ag.spec
+        with st.expander(f"{agent_name} — Configuration", expanded=False):
+            st.markdown(f"**Model:** `{spec.model}`")
+            st.markdown(f"**Role:** {spec.role or '–'}")
+
+            tools_cfg = spec.tools or {}
+            enabled = bool(tools_cfg.get("enabled"))
+            st.markdown(f"**Tool calling enabled:** {'Yes' if enabled else 'No'}")
+            enabled_tools = tools_cfg.get("tools") or []
+            st.markdown(f"**Tools:** {', '.join(enabled_tools) if enabled_tools else '–'}")
+
+            # Show domain filters that were actually used for this run
+            # These are taken from engine.state snapshots in EngineResult.state
+            allowed_domains_agent = None
+            allowed_by_agent = result.state.get("allowed_domains_by_agent") or {}
+            if isinstance(allowed_by_agent, dict):
+                maybe = allowed_by_agent.get(agent_name)
+                if isinstance(maybe, list) and maybe:
+                    allowed_domains_agent = maybe
+
+            if not allowed_domains_agent:
+                global_domains = result.state.get("allowed_domains")
+                if isinstance(global_domains, list) and global_domains:
+                    allowed_domains_agent = global_domains
+
+            if allowed_domains_agent and "web_search" in enabled_tools:
+                st.markdown("**Allowed domains for `web_search` in this run:**")
+                st.code("\n".join(allowed_domains_agent))
+            elif "web_search" in enabled_tools:
+                st.markdown("**Allowed domains for `web_search`:** not restricted (any domain)")
+
+            st.markdown(f"**Reasoning effort:** {spec.reasoning_effort or 'default'}")
+            st.markdown(f"**Reasoning summary:** {spec.reasoning_summary or 'none'}")
+
+    # ---------- Tool usage as separate section ----------
+    st.markdown("---")
+    st.subheader("Tool Usage (this run)")
+
+    if not tool_usages:
+        st.info("No tools were used in this run.")
+        return
+
+    for agent_name in steps:
+        entries = tool_usages.get(agent_name) or []
+        if not entries:
+            continue
+
+        with st.expander(f"{agent_name} — Tool calls", expanded=False):
+            for u in entries:
+                tool_type = u.get("tool_type") or "unknown"
+                call_id = u.get("id") or "n/a"
+                st.markdown(f"- **Tool:** `{tool_type}` · **Call ID:** `{call_id}`")
+                action = u.get("action") or {}
+                if action:
+                    # For web_search, highlight allowed_domains
+                    if tool_type == "web_search":
+                        filters = action.get("filters") or {}
+                        allowed = filters.get("allowed_domains") if isinstance(filters, dict) else None
+                        if allowed:
+                            st.markdown("  - Allowed domains for this call:")
+                            st.code("\n".join(allowed) if isinstance(allowed, list) else str(allowed))
+                    st.json(action, expanded=False)
+
+    # Optional compact overview table
+    st.markdown("---")
+    st.subheader("Tool Usage Overview (this run)")
+
+    rows = []
+    for agent_name, entries in tool_usages.items():
+        for e in entries:
+            action = e.get("action") or {}
+            args: Dict[str, Any] = {}
+
+            # Extract user arguments for web_search: query, url, allowed_domains
+            if e.get("tool_type") == "web_search" and isinstance(action, dict):
+                action_type = action.get("type")
+
+                if action_type == "search":
+                    # Search call – primary "query" plus any filters
+                    if "query" in action:
+                        args["query"] = action["query"]
+                    filters = action.get("filters") or {}
+                    if isinstance(filters, dict) and "allowed_domains" in filters:
+                        args["allowed_domains"] = filters["allowed_domains"]
+
+                elif action_type == "open_page":
+                    # Follow-up open_page call – show URL (and optionally type)
+                    if "url" in action:
+                        args["url"] = action["url"]
+                    # Keep type for clarity in exports
+                    args["type"] = "open_page"
+
+                # Fallback: if we still have nothing, keep a slimmed-down view
+                if not args:
+                    # Copy everything except large "sources" list if present
+                    args = {
+                        k: v
+                        for k, v in action.items()
+                        if k != "sources"
+                    }
+
+            rows.append({
+                "Agent": agent_name,
+                "Tool": e.get("tool_type"),
+                "Call ID": e.get("id"),
+                "Args": args,
+            })
+
+    df = pd.DataFrame(rows)
+    st.dataframe(df, width="stretch")
 
 
 def render_run_results(result: EngineResult, steps):
@@ -965,6 +1177,7 @@ def render_run_results(result: EngineResult, steps):
         "🧩 Graph",
         "🔍 Compare",
         "💲 Cost & Latency",
+        "🛠 Tools & Advanced",
     ])
 
     with tabs[0]:
@@ -985,9 +1198,12 @@ def render_run_results(result: EngineResult, steps):
     with tabs[5]:
         render_cost_latency_tab(result, steps)
 
+    with tabs[6]:
+        render_tools_advanced_tab(result, steps)
+
 
 def render_run_mode():
-    pipeline, steps, task, run_clicked, files_payload = render_run_sidebar()
+    pipeline, steps, task, run_clicked, files_payload, allowed_domains_by_agent = render_run_sidebar()
 
     if run_clicked:
         # Create progress UI *only when running*
@@ -1010,6 +1226,8 @@ def render_run_mode():
                 initial_input=task,
                 strict=strict_mode,
                 files=files_payload if files_payload else None,
+                # Per‑agent mapping: {agent_name: [domains...]}
+                allowed_domains=allowed_domains_by_agent,
             )
 
             st.session_state.last_result = result
@@ -1036,7 +1254,9 @@ def render_run_mode():
                 result.memory,
                 agent_models=agent_models,
                 final_model=final_model,
+                agent_configs=result.agent_configs,
                 agent_metrics=result.agent_metrics,
+                tool_usages=result.tool_usages,
             )
         except Exception:
             logger.exception("Failed to persist run")
@@ -1079,6 +1299,9 @@ def render_agent_editor():
             "output_vars": a["output_vars"],
             "color": a.get("color") or DEFAULT_COLOR,
             "symbol": a.get("symbol") or DEFAULT_SYMBOL,
+            "tools": a.get("tools") or {},
+            "reasoning_effort": a.get("reasoning_effort"),
+            "reasoning_summary": a.get("reasoning_summary"),
         }
         for a in agents_raw
     ]
@@ -1098,6 +1321,9 @@ def render_agent_editor():
             "output_vars": [],
             "color": DEFAULT_COLOR,
             "symbol": DEFAULT_SYMBOL,
+            "tools": {"enabled": False, "tools": []},
+            "reasoning_effort": None,
+            "reasoning_summary": None,
         }
     state = st.session_state.agent_editor_state
 
@@ -1138,6 +1364,9 @@ def render_agent_editor():
                 "output_vars": [],
                 "color": DEFAULT_COLOR,
                 "symbol": DEFAULT_SYMBOL,
+                "tools": {"enabled": False, "tools": []},
+                "reasoning_effort": None,
+                "reasoning_summary": None,
             }
         else:
             base_agent = next(a for a in agents if a["name"] == selected)
@@ -1151,6 +1380,9 @@ def render_agent_editor():
             "output_vars": base_agent["output_vars"],
             "color": base_agent.get("color", DEFAULT_COLOR) or DEFAULT_COLOR,
             "symbol": base_agent.get("symbol", DEFAULT_SYMBOL) or DEFAULT_SYMBOL,
+            "tools": base_agent.get("tools") or {"enabled": False, "tools": []},
+            "reasoning_effort": base_agent.get("reasoning_effort"),
+            "reasoning_summary": base_agent.get("reasoning_summary"),
         })
 
         # mark as changed in both local and session state
@@ -1166,11 +1398,14 @@ def render_agent_editor():
         "1️⃣ Basics",
         "2️⃣ Prompt",
         "3️⃣ Inputs / Outputs",
+        "⚙️ Advanced",
         "📚 Versions"
     ])
 
+    basics_tab, prompt_tab, io_tab, adv_tab, versions_tab = tabs
+
     # ----- Basics tab -----
-    with tabs[0]:
+    with basics_tab:
         name_val = st.text_input(
             "Name",
             value=state["name"],
@@ -1252,7 +1487,7 @@ def render_agent_editor():
         )
 
     # ----- Prompt tab -----
-    with tabs[1]:
+    with prompt_tab:
         prompt_val = st.text_area(
             "Prompt Template",
             height=400,
@@ -1260,7 +1495,7 @@ def render_agent_editor():
         )
 
     # ----- Inputs / Outputs tab -----
-    with tabs[2]:
+    with io_tab:
         col1, col2 = st.columns(2)
         with col1:
             input_vars_val = st.text_area(
@@ -1274,7 +1509,7 @@ def render_agent_editor():
             )
 
     # ----- Versions tab -----
-    with tabs[3]:
+    with versions_tab:
         if not is_new:
             versions = cached_load_prompt_versions(state["name"])
             for v in versions:
@@ -1282,6 +1517,53 @@ def render_agent_editor():
                     st.code(v["prompt"])
                     if v.get("metadata"):
                         st.json(v["metadata"])
+
+    # ----- Advanced tab -----
+    with adv_tab:
+        st.markdown("### Tools")
+
+        tools_state = state.get("tools") or {}
+        tools_enabled_default = bool(tools_state.get("enabled"))
+        selected_tools_default = tools_state.get("tools") or []
+
+        tools_enabled = st.checkbox(
+            "Enable tool calling",
+            value=tools_enabled_default,
+            help="Allow this agent to call tools such as web search.",
+        )
+
+        # Available tools (future-proof)
+        available_tools = ["web_search"]  # more later
+        selected_tools = []
+        if tools_enabled:
+            selected_tools = st.multiselect(
+                "Allowed tools",
+                options=available_tools,
+                default=[t for t in selected_tools_default if t in available_tools],
+                help="For now only web_search is available.",
+            )
+
+        st.markdown("### Reasoning")
+
+        effort_options = ["none", "low", "medium", "high", "xhigh"]
+        current_effort = state.get("reasoning_effort") or "medium"
+        reasoning_effort_val = st.selectbox(
+            "Reasoning Effort",
+            options=effort_options,
+            index=effort_options.index(current_effort) if current_effort in effort_options else effort_options.index(
+                "medium"),
+            help="Controls depth & cost. 'none' disables special reasoning behavior.",
+        )
+
+        summary_options = ["auto", "concise", "detailed", "none"]
+        current_summary = state.get("reasoning_summary") or "none"
+        reasoning_summary_val = st.selectbox(
+            "Reasoning Summary",
+            options=summary_options,
+            index=summary_options.index(
+                current_summary) if current_summary in summary_options else summary_options.index("none"),
+            help="Configure reasoning summaries returned by reasoning models.",
+        )
 
     st.divider()
 
@@ -1303,6 +1585,12 @@ def render_agent_editor():
             ],
             "color": color_val or DEFAULT_COLOR,
             "symbol": symbol_val or UI_COLORS[selected_color_key]["symbol"],
+            "tools": {
+                "enabled": tools_enabled,
+                "tools": selected_tools if tools_enabled else [],
+            },
+            "reasoning_effort": reasoning_effort_val,
+            "reasoning_summary": reasoning_summary_val,
         })
 
     # IMPORTANT: reset the persistent flag at the end of the render
@@ -1347,6 +1635,9 @@ def render_agent_editor():
                 color=state.get("color") or DEFAULT_COLOR,
                 symbol=state.get("symbol") or DEFAULT_SYMBOL,
                 save_prompt_version=(state["prompt"] != previous_prompt),
+                tools=state.get("tools") or {"enabled": False, "tools": []},
+                reasoning_effort=state.get("reasoning_effort"),
+                reasoning_summary=state.get("reasoning_summary"),
             )
 
             invalidate_agent_state()
@@ -1369,6 +1660,9 @@ def render_agent_editor():
                     state["output_vars"],
                     color=state.get("color") or DEFAULT_COLOR,
                     symbol=state.get("symbol") or DEFAULT_SYMBOL,
+                    tools=state.get("tools") or {"enabled": False, "tools": []},
+                    reasoning_effort=state.get("reasoning_effort"),
+                    reasoning_summary=state.get("reasoning_summary"),
                 )
             except Exception:
                 logger.exception("Failed to duplicate agent")
@@ -1492,7 +1786,7 @@ def render_history_mode():
     # Preload agent names per run to show them in the dropdown label
     def get_agent_names_for_run(run_id: int) -> str:
         try:
-            _, agents, _ = cached_load_run_details(run_id)
+            _, agents, _, _, _ = cached_load_run_details(run_id)
         except Exception:
             logger.exception("Failed to load agent names for run %s", run_id)
             return ""
@@ -1541,7 +1835,7 @@ def render_history_mode():
         return
 
     run_id = options[selected]
-    run, agents, metrics = cached_load_run_details(run_id)
+    run, agents, metrics, tool_usages, agent_run_configs = cached_load_run_details(run_id)
 
     total_latency = sum(
         (m.get("latency") or 0.0) for m in metrics
@@ -1596,6 +1890,152 @@ def render_history_mode():
 
         st.markdown("---")
 
+        # ---------- Tools & Advanced Configuration (historic, per run snapshot) ----------
+        st.subheader("Per-Agent Configuration (Stored)")
+
+        # Index per-run configs and tool usages by agent
+        agent_run_cfg_by_name: Dict[str, dict] = {}
+        for cfg in agent_run_configs or []:
+            agent_run_cfg_by_name[cfg["agent_name"]] = cfg
+
+        tool_usages_by_agent: Dict[str, List[dict]] = {}
+        for t in tool_usages or []:
+            tool_usages_by_agent.setdefault(t["agent_name"], []).append(t)
+
+        # Per-agent configuration snapshot
+        for a in agents:
+            name = a["agent_name"]
+            cfg = agent_run_cfg_by_name.get(name, {})
+            tools_json = _parse_json_field(cfg.get("tools_json"), {})
+            tools_cfg_json = _parse_json_field(cfg.get("tools_config_json"), {})
+            reasoning_cfg_json = _parse_json_field(cfg.get("reasoning_config_json"), {})
+            extra_cfg_json = _parse_json_field(cfg.get("extra_config_json"), {})
+
+            with st.expander(f"{name} — Configuration (snapshot)", expanded=False):
+                st.markdown(f"**Model:** `{cfg.get('model') or a.get('model') or 'unknown'}`")
+                st.markdown(f"**Role:** {cfg.get('role') or '–'}")
+
+                tools_high = tools_json or {}
+                enabled = bool(tools_high.get("enabled"))
+                enabled_tools = tools_high.get("tools") or []
+
+                st.markdown(f"**Tool calling enabled:** {'Yes' if enabled else 'No'}")
+                st.markdown(f"**Tools:** {', '.join(enabled_tools) if enabled_tools else '–'}")
+
+                # If web_search enabled, try to surface allowed domains from tools_config_json
+                if "web_search" in enabled_tools:
+                    allowed_domains = None
+                    # Expect something like tools_config_json["tools"] = [{"type": "web_search", "filters": {...}}]
+                    tools_low = tools_cfg_json.get("tools") if isinstance(tools_cfg_json, dict) else None
+                    if isinstance(tools_low, list):
+                        for tcfg in tools_low:
+                            if not isinstance(tcfg, dict):
+                                continue
+                            if tcfg.get("type") != "web_search":
+                                continue
+                            filters = tcfg.get("filters") or {}
+                            if isinstance(filters, dict) and "allowed_domains" in filters:
+                                allowed_domains = filters["allowed_domains"]
+                                break
+
+                    if allowed_domains:
+                        st.markdown("**Allowed domains for `web_search` in this run:**")
+                        if isinstance(allowed_domains, list):
+                            st.code("\n".join(str(d) for d in allowed_domains))
+                        else:
+                            st.code(str(allowed_domains))
+                    else:
+                        st.markdown("**Allowed domains for `web_search`:** not restricted (any domain)")
+
+                st.markdown(f"**Reasoning effort:** {cfg.get('reasoning_effort') or 'default'}")
+                st.markdown(f"**Reasoning summary:** {cfg.get('reasoning_summary') or 'none'}")
+
+                if reasoning_cfg_json:
+                    with st.expander("Full reasoning configuration (raw JSON)", expanded=False):
+                        st.json(reasoning_cfg_json)
+
+                if tools_cfg_json:
+                    with st.expander("Low-level tools configuration (raw JSON)", expanded=False):
+                        st.json(tools_cfg_json)
+
+                if extra_cfg_json:
+                    with st.expander("Extra config (raw JSON)", expanded=False):
+                        st.json(extra_cfg_json)
+
+        # ---------- Tool usage as separate collapsible section ----------
+        st.markdown("---")
+        st.subheader("Tool Usage (Stored)")
+
+        if not tool_usages:
+            st.info("No tools were used in this run.")
+        else:
+            for a in agents:
+                name = a["agent_name"]
+                used = tool_usages_by_agent.get(name) or []
+                if not used:
+                    continue
+
+                with st.expander(f"{name} — Tool calls", expanded=False):
+                    for u in used:
+                        tool_type = u.get("tool_type") or "unknown"
+                        call_id = u.get("tool_call_id") or "n/a"
+                        st.markdown(f"- **Tool:** `{tool_type}` · **Call ID:** `{call_id}`")
+                        args = _parse_json_field(u.get("args_json"), {})
+                        if args:
+                            # args_json already excludes large config (it’s only per-call action/status)
+                            st.json(args, expanded=False)
+
+            # Compact overview with special handling for web_search domains
+            st.markdown("---")
+            st.subheader("Tool Usage Overview (Stored)")
+
+            rows = []
+            for a in agents:
+                name = a["agent_name"]
+                used = tool_usages_by_agent.get(name) or []
+                if not used:
+                    continue
+
+                counts: Dict[str, int] = {}
+                has_web_search = False
+                for u in used:
+                    ttype = u.get("tool_type") or "unknown"
+                    counts[ttype] = counts.get(ttype, 0) + 1
+                    if ttype == "web_search":
+                        has_web_search = True
+
+                row = {
+                    "Agent": name,
+                    "Tools": ", ".join(f"{k}×{v}" for k, v in counts.items()),
+                }
+
+                # Best-effort: show list of allowed domains if any web_search calls
+                if has_web_search:
+                    domains: set[str] = set()
+                    for u in used:
+                        if u.get("tool_type") != "web_search":
+                            continue
+                        args = _parse_json_field(u.get("args_json"), {})
+                        action = args.get("action") if isinstance(args, dict) else None
+                        if isinstance(action, dict):
+                            filters = action.get("filters") or {}
+                            if isinstance(filters, dict):
+                                ad = filters.get("allowed_domains")
+                                if isinstance(ad, list):
+                                    for d in ad:
+                                        domains.add(str(d))
+                                elif ad:
+                                    domains.add(str(ad))
+                    row["Allowed Domains (web_search)"] = ", ".join(sorted(domains)) if domains else "–"
+
+                rows.append(row)
+
+            if rows:
+                st.dataframe(pd.DataFrame(rows), width="stretch")
+            else:
+                st.info("No tool calls recorded.")
+
+    st.markdown("---")
     st.subheader(f"Run {run_id}")
     st.code(task)
 
@@ -1668,6 +2108,78 @@ def render_history_mode():
                 else:
                     st.code(output)
 
+    # ---------- Build per-agent details for export ----------
+    # Index metrics and tool usages by agent_name
+    metrics_by_agent: Dict[str, dict] = {}
+    for m in metrics or []:
+        agent_name = m.get("agent_name")
+        if agent_name:
+            # Store a shallow copy without agent_name to avoid redundancy
+            m_copy = dict(m)
+            m_copy.pop("agent_name", None)
+            metrics_by_agent[agent_name] = m_copy
+
+    tool_usages_by_agent: Dict[str, List[dict]] = {}
+    for t in tool_usages or []:
+        name = t.get("agent_name")
+        if not name:
+            continue
+        # Also drop agent_name from each tool usage entry in the export
+        t_copy = dict(t)
+        t_copy.pop("agent_name", None)
+        tool_usages_by_agent.setdefault(name, []).append(t_copy)
+
+    # Index run-time config snapshots by agent_name
+    agent_run_cfg_by_name: Dict[str, dict] = {}
+    for cfg in agent_run_configs or []:
+        agent_run_cfg_by_name[cfg["agent_name"]] = cfg
+
+    export_agents: Dict[str, dict] = {}
+
+    for a in agents:
+        name = a["agent_name"]
+
+        # Agent output snapshot
+        agent_output = {
+            "output": a["output"],
+            "is_json": bool(a["is_json"]),
+            "model": a["model"],
+        }
+
+        # Agent configuration snapshot (already visible in UI above)
+        cfg = agent_run_cfg_by_name.get(name, {})
+        tools_json = _parse_json_field(cfg.get("tools_json"), {})
+        tools_cfg_json = _parse_json_field(cfg.get("tools_config_json"), {})
+        reasoning_cfg_json = _parse_json_field(cfg.get("reasoning_config_json"), {})
+        extra_cfg_json = _parse_json_field(cfg.get("extra_config_json"), {})
+
+        # Compact, human-friendly config plus raw blobs for completeness
+        agent_config = {
+            "model": cfg.get("model") or a.get("model") or "unknown",
+            "role": cfg.get("role") or "–",
+            "tools": {
+                "enabled": bool(tools_json.get("enabled")),
+                "tools": tools_json.get("tools") or [],
+            },
+            "reasoning": {
+                "effort": cfg.get("reasoning_effort") or "default",
+                "summary": cfg.get("reasoning_summary") or "none",
+            },
+            "raw": {
+                "tools_json": tools_json or None,
+                "tools_config_json": tools_cfg_json or None,
+                "reasoning_config_json": reasoning_cfg_json or None,
+                "extra_config_json": extra_cfg_json or None,
+            },
+        }
+
+        export_agents[name] = {
+            "output": agent_output,
+            "metrics": metrics_by_agent.get(name) or None,
+            "config": agent_config,
+            "tool_usages": tool_usages_by_agent.get(name) or [],
+        }
+
     export = {
         "run_id": run_id,
         "timestamp": ts,
@@ -1683,15 +2195,8 @@ def render_history_mode():
             "is_json": bool(final_is_json),
             "model": final_model,
         },
-        "agents": {
-            a["agent_name"]: {
-                "output": a["output"],
-                "is_json": bool(a["is_json"]),
-                "model": a["model"],
-            }
-            for a in agents
-        },
-        "metrics": metrics,
+        # Unified per‑agent details keyed by agent name
+        "agents": export_agents,
     }
 
     st.download_button(

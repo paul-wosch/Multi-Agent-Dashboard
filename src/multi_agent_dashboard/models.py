@@ -1,8 +1,10 @@
 # models.py
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
-
+import logging
 from multi_agent_dashboard.utils import safe_format
+
+logger = logging.getLogger(__name__)
 
 # -------------------------
 # Agent domain models
@@ -23,6 +25,14 @@ class AgentSpec:
     # UI metadata
     color: str | None = None
     symbol: str | None = None
+    # NEW: tool configuration (backed by agents.tools_json)
+    # Example: {"enabled": True, "tools": ["web_search"]}
+    tools: Dict[str, Any] = field(default_factory=dict)
+    # NEW: reasoning configuration (per agent)
+    # effort: "none" | "low" | "medium" | "high" | "xhigh"
+    # summary: "auto" | "concise" | "detailed" | "none"
+    reasoning_effort: Optional[str] = None
+    reasoning_summary: Optional[str] = None
 
 
 @dataclass
@@ -103,12 +113,18 @@ class AgentRuntime:
         # -------------------------
         # Call LLM client
         # -------------------------
+        tc = self._build_tools_config(state)
+        rc = self._build_reasoning_config()
+        logger.debug("Agent %s tools_config=%r reasoning_config=%r", self.spec.name, tc, rc)
+
         response = self.llm_client.create_text_response(
             model=self.spec.model,
             prompt=prompt,
             response_format=structured_schema,
             stream=stream,
             files=llm_files_payload if llm_files_payload else None,
+            tools_config=self._build_tools_config(state),
+            reasoning_config=self._build_reasoning_config(),
         )
 
         # Save metrics for engine to retrieve
@@ -117,10 +133,100 @@ class AgentRuntime:
             "output_tokens": response.output_tokens,
             "latency": response.latency,
             "raw": response.raw,
+            "tools_config": tc,
+            "reasoning_config": rc,
         }
+
+        # If there was tool usage (web_search), store for engine / run logging
+        # We'll store high-level info into last_metrics["tools"]
+        tool_events = response.raw.get("output", [])
+        used_tools: List[Dict[str, Any]] = []
+
+        for item in tool_events:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") == "web_search_call":
+                # Basic call info
+                usage_entry = {
+                    "tool_type": "web_search",
+                    "id": item.get("id"),
+                    "status": item.get("status"),
+                }
+                action = item.get("action") or {}
+                if isinstance(action, dict):
+                    usage_entry["action"] = action
+                used_tools.append(usage_entry)
+
+        if used_tools:
+            self.last_metrics["tools"] = used_tools
 
         return response.text
 
+    def _build_tools_config(self, state: Dict[str, Any]) -> Dict[str, Any] | None:
+        """
+        Build tools/tool_choice/include args for OpenAI Responses API
+        based on agent spec tools and state (allowed domains).
+        Supports:
+          - state["allowed_domains_by_agent"][agent_name]
+          - state["allowed_domains"] as a global fallback.
+        """
+        tools_cfg = self.spec.tools or {}
+        if not tools_cfg.get("enabled"):
+            return None
+
+        enabled_tools = tools_cfg.get("tools") or []
+        tools_array: List[Dict[str, Any]] = []
+
+        # Here we only support web_search for now, but structure supports more later
+        if "web_search" in enabled_tools:
+            tool_obj: Dict[str, Any] = {"type": "web_search"}
+
+            # 1) Per-agent domains, if provided
+            allowed_domains = None
+            per_agent = state.get("allowed_domains_by_agent")
+            if isinstance(per_agent, dict):
+                maybe = per_agent.get(self.spec.name)
+                if isinstance(maybe, list) and maybe:
+                    allowed_domains = maybe
+
+            # 2) Global domains as fallback
+            if allowed_domains is None:
+                global_domains = state.get("allowed_domains")
+                if isinstance(global_domains, list) and global_domains:
+                    allowed_domains = global_domains
+
+            if allowed_domains:
+                tool_obj["filters"] = {"allowed_domains": allowed_domains}
+
+            # Keep default: external_web_access = True unless we want an option later
+            tools_array.append(tool_obj)
+
+        if not tools_array:
+            return None
+
+        return {
+            "tools": tools_array,
+            "tool_choice": "auto",
+            "include": ["web_search_call.action.sources"],
+        }
+
+    def _build_reasoning_config(self) -> Dict[str, Any] | None:
+        effort = self.spec.reasoning_effort
+        summary = self.spec.reasoning_summary
+
+        if not effort and not summary:
+            return None
+
+        reasoning: Dict[str, Any] = {}
+        if effort and effort != "none":
+            reasoning["effort"] = effort
+        # For summary, "none" means do not request it
+        if summary and summary != "none":
+            reasoning["summary"] = summary
+
+        if not reasoning:
+            return None
+        return reasoning
 
 # -------------------------
 # Pipeline domain model

@@ -70,7 +70,10 @@ class AgentDAO:
                            input_vars,
                            output_vars,
                            color,
-                           symbol
+                           symbol,
+                           tools_json,
+                           reasoning_effort,
+                           reasoning_summary
                     FROM agents
                     """
                 ).fetchall()
@@ -92,6 +95,9 @@ class AgentDAO:
                     "output_vars": safe_json_loads(row["output_vars"], []),
                     "color": color,
                     "symbol": symbol,
+                    "tools": safe_json_loads(row["tools_json"], {}),
+                    "reasoning_effort": row["reasoning_effort"],
+                    "reasoning_summary": row["reasoning_summary"],
                 }
             )
         return agents
@@ -140,6 +146,9 @@ class AgentDAO:
             output_vars: Optional[List[str]] = None,
             color: Optional[str] = None,
             symbol: Optional[str] = None,
+            tools: Optional[dict] = None,
+            reasoning_effort: Optional[str] = None,
+            reasoning_summary: Optional[str] = None,
     ) -> None:
         input_json = json.dumps(input_vars or [])
         output_json = json.dumps(output_vars or [])
@@ -147,6 +156,8 @@ class AgentDAO:
         # Backwards-compatible defaults
         color = color or DEFAULT_COLOR
         symbol = symbol or DEFAULT_SYMBOL
+
+        tools_json = json.dumps(tools or {})
 
         logger.info("Saving agent %s to DB", agent_name)
         try:
@@ -161,8 +172,11 @@ class AgentDAO:
                          input_vars,
                          output_vars,
                          color,
-                         symbol)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                         symbol,
+                         tools_json,
+                         reasoning_effort,
+                         reasoning_summary)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         agent_name,
@@ -173,6 +187,9 @@ class AgentDAO:
                         output_json,
                         color,
                         symbol,
+                        tools_json,
+                        reasoning_effort,
+                        reasoning_summary,
                     ),
                 )
         except Exception:
@@ -244,6 +261,21 @@ class AgentDAO:
 
                 conn.execute(
                     "UPDATE agent_outputs SET agent_name = ? WHERE agent_name = ?",
+                    (new_name, old_name),
+                )
+
+                # Keep metrics, tool usages, and per-run configs in sync so
+                # history queries stay coherent.
+                conn.execute(
+                    "UPDATE agent_metrics SET agent_name = ? WHERE agent_name = ?",
+                    (new_name, old_name),
+                )
+                conn.execute(
+                    "UPDATE tool_usages SET agent_name = ? WHERE agent_name = ?",
+                    (new_name, old_name),
+                )
+                conn.execute(
+                    "UPDATE agent_run_configs SET agent_name = ? WHERE agent_name = ?",
                     (new_name, old_name),
                 )
 
