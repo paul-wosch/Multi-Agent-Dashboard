@@ -21,9 +21,9 @@ import sqlite3
 import re
 from typing import Dict, Any
 
-from schema import SCHEMA
-from schema_diff import get_db_schema
-from schema_diff_constraints import (
+from multi_agent_dashboard.db.infra.schema import SCHEMA
+from multi_agent_dashboard.db.infra.schema_diff import get_db_schema
+from multi_agent_dashboard.db.infra.schema_diff_constraints import (
     get_db_foreign_keys,
     diff_foreign_keys,
 )
