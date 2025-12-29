@@ -359,6 +359,7 @@ def pipeline_requires_files(engine, steps) -> bool:
 
 def render_agent_graph(steps: list[str], agent_metrics: dict[str, dict] | None = None):
     dot = graphviz.Digraph()
+    # Keep defaults for nodes; individual nodes will override `color`
     dot.attr(
         "node",
         shape="box",
@@ -368,13 +369,22 @@ def render_agent_graph(steps: list[str], agent_metrics: dict[str, dict] | None =
     )
 
     agent_metrics = agent_metrics or {}
+    engine = st.session_state.engine
 
     for agent in steps:
-        if agent in st.session_state.engine.agents:
-            role = st.session_state.engine.agents[agent].spec.role
-            label = f"{agent}\n({role})" if role else agent
+        runtime = engine.agents.get(agent)
+
+        # Default label (fallbacks if agent not in engine)
+        role = runtime.spec.role if runtime else None
+        symbol = getattr(runtime.spec, "symbol", DEFAULT_SYMBOL) if runtime else DEFAULT_SYMBOL
+        color = getattr(runtime.spec, "color", DEFAULT_COLOR) if runtime else DEFAULT_COLOR
+
+        # Prefix name with emoji/symbol
+        base_label = f"{symbol} {agent}"
+        if role:
+            label = f"{base_label}\n({role})"
         else:
-            label = agent
+            label = base_label
 
         # Optionally annotate node with cost/latency
         m = agent_metrics.get(agent, {})
@@ -386,7 +396,13 @@ def render_agent_graph(steps: list[str], agent_metrics: dict[str, dict] | None =
         if extra:
             label = f"{label}\n" + " | ".join(extra)
 
-        dot.node(agent, label)
+        # Use agent-specific color as border color
+        dot.node(
+            agent,
+            label=label,
+            color=color,        # border color
+            fillcolor="#deebf7" # keep shared fill to stay readable
+        )
 
     # Edges: label with downstream agent's metrics
     for i in range(len(steps) - 1):
