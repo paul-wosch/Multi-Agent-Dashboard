@@ -206,7 +206,7 @@ class AgentRuntime:
 
         return {
             "tools": tools_array,
-            "tool_choice": "auto",
+            "tool_choice": "required",
             "include": ["web_search_call.action.sources"],
         }
 
