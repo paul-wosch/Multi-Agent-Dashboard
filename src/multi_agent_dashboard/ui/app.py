@@ -2,36 +2,21 @@
 import json
 import logging
 import time
-from collections import deque
-from dataclasses import asdict
-from datetime import UTC, datetime
-from pathlib import Path
+from datetime import datetime
 import threading
-from typing import Any, Dict, List, Optional, Tuple, NamedTuple
+from typing import Any, Dict, List, Optional, Tuple
 
-import graphviz
-import pandas as pd
 import streamlit as st
-from openai import OpenAI  # type/factory only
 
 from multi_agent_dashboard.config import (
     DB_FILE_PATH,
-    LOG_FILE_PATH,
-    OPENAI_API_KEY,
     UI_COLORS,
     configure_logging,
 )
-from multi_agent_dashboard.db.db import init_db
-from multi_agent_dashboard.db.services import AgentService, PipelineService, RunService
-from multi_agent_dashboard.engine import EngineResult, MultiAgentEngine
-from multi_agent_dashboard.llm_client import LLMClient
-from multi_agent_dashboard.models import AgentSpec
+from multi_agent_dashboard.engine import EngineResult
 from multi_agent_dashboard.ui.utils import parse_json_field
 from multi_agent_dashboard.ui.view_models import (
-    AgentMetricsView,
     AgentConfigView,
-    summarize_agent_metrics,
-    df_replace_none,
     metrics_view_from_engine_result,
     metrics_view_from_db_rows,
     config_view_from_db_rows,
@@ -48,6 +33,23 @@ from multi_agent_dashboard.ui.exports import (
     export_pipeline_agents_as_json,
     build_export_from_engine_result,
 )
+
+# Imports moved to dedicated modules (Phase 3)
+from multi_agent_dashboard.ui.cache import (
+    cached_load_agents,
+    cached_load_pipelines,
+    cached_load_runs,
+    cached_load_run_details,
+    cached_load_prompt_versions,
+    invalidate_agents,
+    invalidate_pipelines,
+    invalidate_runs,
+    get_agent_service,
+    get_pipeline_service,
+    get_run_service,
+)
+from multi_agent_dashboard.ui.bootstrap import app_start, reload_agents_into_engine
+from multi_agent_dashboard.ui.logging_ui import LOG_LEVEL_STYLES
 
 # ======================================================
 # STREAMLIT PAGE CONFIG (must be first Streamlit call)
@@ -70,114 +72,9 @@ DB_PATH = DB_FILE_PATH
 DEFAULT_COLOR = UI_COLORS["default"]["value"]
 DEFAULT_SYMBOL = UI_COLORS["default"]["symbol"]
 
-pipeline_svc = PipelineService(DB_PATH)
-agent_svc = AgentService(DB_PATH)
-run_svc = RunService(DB_PATH)
-
-# Centralized mapping of log levels to colors and symbols (derived from UI_COLORS)
-LOG_LEVEL_STYLES: Dict[str, Dict[str, str]] = {
-    "DEBUG": {
-        "color": UI_COLORS["grey"]["value"],
-        "symbol": UI_COLORS["grey"]["symbol"],
-    },
-    "INFO": {
-        "color": UI_COLORS["green"]["value"],
-        "symbol": UI_COLORS["green"]["symbol"],
-    },
-    "WARNING": {
-        "color": UI_COLORS["orange"]["value"],
-        "symbol": UI_COLORS["orange"]["symbol"],
-    },
-    "ERROR": {
-        "color": UI_COLORS["red"]["value"],
-        "symbol": UI_COLORS["red"]["symbol"],
-    },
-    "CRITICAL": {
-        "color": UI_COLORS["purple"]["value"],
-        "symbol": UI_COLORS["purple"]["symbol"],
-    },
-}
-
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
 MAX_TOTAL_SIZE = 20 * 1024 * 1024  # 20 MB
 AD_HOC_PIPELINE_LABEL = "<Ad-hoc>"
-
-
-# =======================
-# DEFAULT AGENTS
-# =======================
-default_agents = {
-    "planner": {
-        "model": "gpt-4.1-nano",
-        "prompt_template": """
-You are the Planner Agent.
-Refrain from producing the actual solution.
-Only clarify the task and produce steps.
-
-Task:
-{task}
-
-Output:
-- Clarified Task
-- Plan
-""",
-        "role": "planner",
-        "input_vars": ["task"],
-        "output_vars": ["plan"],
-    },
-    "solver": {
-        "model": "gpt-4.1-nano",
-        "prompt_template": """
-You are the Solver Agent.
-Use the plan to produce an answer.
-
-Plan:
-{plan}
-
-Output:
-- Answer
-""",
-        "role": "solver",
-        "input_vars": ["plan"],
-        "output_vars": ["answer"],
-    },
-    "critic": {
-        "model": "gpt-4.1-nano",
-        "prompt_template": """
-You are the Critic Agent.
-Evaluate the answer.
-
-Answer:
-{answer}
-
-Output:
-- Issues
-- Improvements
-""",
-        "role": "critic",
-        "input_vars": ["answer"],
-        "output_vars": ["critique"],
-    },
-    "finalizer": {
-        "model": "gpt-4.1-nano",
-        "prompt_template": """
-You are the Finalizer Agent.
-You must revise the original answer using the critique.
-
-Original Answer:
-{answer}
-
-Critique:
-{critique}
-
-Your task:
-Return the improved final answer only.
-""",
-        "role": "finalizer",
-        "input_vars": ["answer", "critique"],
-        "output_vars": ["final"],
-    },
-}
 
 
 # ======================================================
@@ -236,323 +133,9 @@ def inject_global_tag_style():
 # config_view_from_db_rows
 
 
-# =======================
-# CACHED WRAPPERS
-# =======================
-
-@st.cache_data(ttl=60)
-def cached_load_agents():
-    return agent_svc.list_agents()
-
-
-@st.cache_data(ttl=60)
-def cached_load_pipelines():
-    return pipeline_svc.list_pipelines()
-
-
-@st.cache_data(ttl=30)
-def cached_load_runs():
-    return run_svc.list_runs()
-
-
-@st.cache_data(ttl=30)
-def cached_load_run_details(run_id: int):
-    return run_svc.get_run_details(run_id)
-
-
-@st.cache_data(ttl=60)
-def cached_load_prompt_versions(agent_name: str):
-    return agent_svc.load_prompt_versions(agent_name)
-
-
-# =======================
-# LOG HANDLER CLASS
-# =======================
-
-class StreamlitLogHandler(logging.Handler):
-    """
-    Logging handler that stores recent log records in Streamlit session_state.
-    """
-
-    def __init__(self, capacity: int = 500):
-        super().__init__()
-        self.capacity = capacity
-
-    def emit(self, record: logging.LogRecord):
-        try:
-            # Only touch Streamlit from the main thread to avoid
-            # "missing ScriptRunContext" warnings.
-            if threading.current_thread() is not threading.main_thread():
-                return
-
-            entry = {
-                "time": (
-                    time.strftime(
-                        "%Y-%m-%d %H:%M:%S",
-                        time.localtime(record.created),
-                    )
-                    + f",{int(record.msecs):03d}"
-                ),
-                "level": record.levelname,
-                "logger": record.name,
-                "message": record.getMessage(),
-            }
-
-            logs = st.session_state.setdefault(
-                "_log_buffer",
-                deque(maxlen=self.capacity),
-            )
-            logs.append(entry)
-        except Exception:
-            # Never let logging break the app
-            pass
-
-
-def load_historic_logs_into_buffer(
-    log_path: Path,
-    capacity: int = 500,
-    session_key: str = "_log_buffer",
-):
-    """
-    Load existing log file lines into the Streamlit log buffer on first app start.
-    """
-    if not log_path.exists():
-        return
-
-    # Avoid reloading if buffer already initialized (e.g., rerun)
-    if session_key in st.session_state and st.session_state[session_key]:
-        return
-
-    buf = deque(maxlen=capacity)
-
-    try:
-        with log_path.open("r", encoding="utf-8", errors="replace") as f:
-            for line in f:
-                line = line.rstrip("\n")
-                if not line:
-                    continue
-
-                # Expected format:
-                # "YYYY-MM-DD HH:MM:SS,mmm [LEVEL] logger.name: message"
-                time_part = ""
-                level = "INFO"
-                logger_name = ""
-                message = line
-
-                try:
-                    ts_and_rest = line.split(" [", 1)
-                    time_part = ts_and_rest[0].strip()
-                    rest = ts_and_rest[1] if len(ts_and_rest) > 1 else ""
-
-                    level_and_rest = rest.split("]", 1)
-                    level = level_and_rest[0].strip("[]") or "INFO"
-                    rest2 = level_and_rest[1].strip() if len(level_and_rest) > 1 else ""
-
-                    logger_and_msg = rest2.split(":", 1)
-                    logger_name = logger_and_msg[0].strip() if logger_and_msg else ""
-                    message = logger_and_msg[1].strip() if len(logger_and_msg) > 1 else rest2
-                except Exception:
-                    # If parsing fails, just store the raw line as message
-                    pass
-
-                entry = {
-                    "time": time_part,
-                    "level": level,
-                    "logger": logger_name,
-                    "message": message,
-                }
-                buf.append(entry)
-    except Exception:
-        # Never let log loading break the UI
-        pass
-
-    st.session_state[session_key] = buf
-
-
-# =======================
-# CACHE INVALIDATION HELPERS
-# =======================
-
-def invalidate_caches(*names: str):
-    """
-    Centralized cache invalidation helper.
-    Allowed names:
-      - agents
-      - prompt_versions
-      - pipelines
-      - runs
-      - run_details
-      - all
-    """
-    if "all" in names:
-        cached_load_agents.clear()
-        cached_load_prompt_versions.clear()
-        cached_load_pipelines.clear()
-        cached_load_runs.clear()
-        cached_load_run_details.clear()
-        return
-
-    for name in names:
-        if name == "agents":
-            cached_load_agents.clear()
-        elif name == "prompt_versions":
-            cached_load_prompt_versions.clear()
-        elif name == "pipelines":
-            cached_load_pipelines.clear()
-        elif name == "runs":
-            cached_load_runs.clear()
-        elif name == "run_details":
-            cached_load_run_details.clear()
-
-
-def invalidate_agents():
-    """Invalidate caches related to agents and prompt versions."""
-    invalidate_caches("agents", "prompt_versions")
-
-
-def invalidate_pipelines():
-    """Invalidate caches related to pipelines."""
-    invalidate_caches("pipelines")
-
-
-def invalidate_runs():
-    """Invalidate caches related to runs and run details."""
-    invalidate_caches("runs", "run_details")
-
-
-# =======================
-# OpenAI client factory
-# =======================
-
-def create_openai_client(api_key: str):
-    """Factory to create an OpenAI client. Allows tests to replace this factory or pass fake client."""
-    return OpenAI(api_key=api_key)
-
-
-# ======================================================
-# SHARED HELPERS (USED BY APP_START AND UI)
-# ======================================================
-
-def pipeline_requires_files(engine, steps) -> bool:
-    for name in steps:
-        agent = engine.agents.get(name)
-        if not agent:
-            continue
-        if "files" in agent.spec.input_vars:
-            return True
-    return False
-
-
-def reload_agents_into_engine():
-    """Helper to reload agents into the engine from DB."""
-    engine = st.session_state.engine
-    engine.agents.clear()
-
-    stored_agents = cached_load_agents()
-    for a in stored_agents:
-        spec = AgentSpec(
-            name=a["agent_name"],
-            model=a["model"],
-            prompt_template=a["prompt_template"],
-            role=a["role"],
-            input_vars=a["input_vars"],
-            output_vars=a["output_vars"],
-            color=a.get("color") or DEFAULT_COLOR,
-            symbol=a.get("symbol") or DEFAULT_SYMBOL,
-            tools=a.get("tools") or {},
-            reasoning_effort=a.get("reasoning_effort"),
-            reasoning_summary=a.get("reasoning_summary"),
-        )
-        engine.add_agent(spec)
-
-
-def get_agent_symbol_map() -> Dict[str, str]:
-    """Return a mapping of agent_name -> symbol (with defaults applied)."""
-    symbol_map: Dict[str, str] = {}
-
-    # Prefer engine agents (already loaded with defaults)
-    engine = st.session_state.get("engine")
-    if engine and getattr(engine, "agents", None):
-        for name, runtime in engine.agents.items():
-            sym = getattr(runtime.spec, "symbol", None) or DEFAULT_SYMBOL
-            symbol_map[name] = sym
-        return symbol_map
-
-    # Fallback to DB listing
-    try:
-        for a in cached_load_agents():
-            symbol_map[a["agent_name"]] = a.get("symbol") or DEFAULT_SYMBOL
-    except Exception:
-        # If something goes wrong, default all to DEFAULT_SYMBOL
-        pass
-
-    return symbol_map
-
-
 # ======================================================
 # INITIALIZE DB AND PREPARE ENGINE
 # ======================================================
-
-def bootstrap_default_agents(defaults: Dict[str, dict]):
-    existing = cached_load_agents()
-    if existing:
-        return
-    for name, data in defaults.items():
-        agent_svc.save_agent(
-            name,
-            data.get("model", "gpt-4.1-nano"),
-            data.get("prompt_template", ""),
-            data.get("role", ""),
-            data.get("input_vars", []),
-            data.get("output_vars", []),
-        )
-        # also save a versioned prompt snapshot
-        agent_svc.save_prompt_version(
-            name,
-            data.get("prompt_template", ""),
-            metadata={"role": data.get("role", "")},
-        )
-
-
-def app_start():
-    """
-    Explicit application bootstrap. Call this once when running the Streamlit app.
-    - initializes DB and migrations
-    - creates an OpenAI client via factory
-    - creates the MultiAgentEngine with the injected client
-    - bootstraps default agents if DB empty
-    - loads agents from DB into the engine
-    - stores engine into st.session_state
-    """
-    # Attach Streamlit log handler once per session
-    if "_log_handler_attached" not in st.session_state:
-        handler = StreamlitLogHandler(capacity=500)
-        logging.getLogger().addHandler(handler)
-        st.session_state["_log_handler_attached"] = True
-
-        # Load historic logs into buffer on first attachment
-        load_historic_logs_into_buffer(LOG_FILE_PATH, capacity=500)
-
-    # Initialize DB and apply migrations
-    init_db(DB_PATH)
-
-    # create OpenAI client (factory)
-    openai_client = create_openai_client(OPENAI_API_KEY)
-    llm_client = LLMClient(openai_client)
-
-    # create engine with injected client
-    engine = MultiAgentEngine(llm_client=llm_client)
-    st.session_state.engine = engine
-
-    # Ensure default agents exist in DB (only if table empty)
-    bootstrap_default_agents(default_agents)
-
-    # Load agents from DB into engine
-    reload_agents_into_engine()
-
-    # Optionally keep client in session state for custom use
-    st.session_state.llm_client = llm_client
-
 
 configure_logging()
 
@@ -646,6 +229,39 @@ st.divider()
 # ======================================================
 # RUN MODE
 # ======================================================
+
+def pipeline_requires_files(engine, steps) -> bool:
+    for name in steps:
+        agent = engine.agents.get(name)
+        if not agent:
+            continue
+        if "files" in agent.spec.input_vars:
+            return True
+    return False
+
+
+def get_agent_symbol_map() -> Dict[str, str]:
+    """Return a mapping of agent_name -> symbol (with defaults applied)."""
+    symbol_map: Dict[str, str] = {}
+
+    # Prefer engine agents (already loaded with defaults)
+    engine = st.session_state.get("engine")
+    if engine and getattr(engine, "agents", None):
+        for name, runtime in engine.agents.items():
+            sym = getattr(runtime.spec, "symbol", None) or DEFAULT_SYMBOL
+            symbol_map[name] = sym
+        return symbol_map
+
+    # Fallback to DB listing
+    try:
+        for a in cached_load_agents():
+            symbol_map[a["agent_name"]] = a.get("symbol") or DEFAULT_SYMBOL
+    except Exception:
+        # If something goes wrong, default all to DEFAULT_SYMBOL
+        pass
+
+    return symbol_map
+
 
 def render_run_sidebar() -> Tuple[
     str,
@@ -832,7 +448,8 @@ def render_run_sidebar() -> Tuple[
                 st.error("Cannot save an empty pipeline. Select at least one agent.")
             else:
                 try:
-                    pipeline_svc.save_pipeline(pipeline_name, selected_steps)
+                    # use getter to obtain pipeline service lazily
+                    get_pipeline_service().save_pipeline(pipeline_name, selected_steps)
                 except Exception:
                     logger.exception("Failed to persist pipeline")
                     st.error("Failed to save pipeline to database")
@@ -955,6 +572,7 @@ def render_graph_tab(result: EngineResult, steps: List[str]):
     if not steps:
         st.info("No agents selected.")
         return
+    # render_agent_graph reads engine from session_state internally
     st.graphviz_chart(render_agent_graph(steps, result.agent_metrics))
 
 
@@ -1247,7 +865,8 @@ def render_run_mode():
         )
 
         try:
-            run_svc.save_run(
+            # use getter to obtain run service lazily
+            get_run_service().save_run(
                 task,
                 result.final_output,
                 result.memory,
@@ -1638,7 +1257,7 @@ def render_agent_editor():
             # Rename agent if needed
             if not is_new and old_name != new_name:
                 try:
-                    agent_svc.rename_agent_atomic(old_name, new_name)
+                    get_agent_service().rename_agent_atomic(old_name, new_name)
                 except Exception:
                     logger.exception("Failed to rename agent")
                     st.error("Rename completed but failed to save to database")
@@ -1649,7 +1268,7 @@ def render_agent_editor():
                 previous_agent = next(a for a in agents if a["name"] == old_name)
                 previous_prompt = previous_agent["prompt"]
 
-            agent_svc.save_agent_atomic(
+            get_agent_service().save_agent_atomic(
                 new_name,
                 state["model"],
                 state["prompt"],
@@ -1676,7 +1295,7 @@ def render_agent_editor():
     with col_b:
         if not is_new and st.button("📄 Duplicate"):
             try:
-                agent_svc.save_agent(
+                get_agent_service().save_agent(
                     f"{state['name']}_copy",
                     state["model"],
                     state["prompt"],
@@ -1704,7 +1323,7 @@ def render_agent_editor():
     with col_c:
         if not is_new and st.button("🗑 Delete"):
             try:
-                agent_svc.delete_agent_atomic(state["name"])
+                get_agent_service().delete_agent_atomic(state["name"])
             except Exception:
                 logger.exception("Failed to delete agent")
                 st.error("Failed to delete agent from database")

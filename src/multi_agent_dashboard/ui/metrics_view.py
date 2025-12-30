@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
-import pandas as pd
 import streamlit as st
 
 from multi_agent_dashboard.ui.view_models import (

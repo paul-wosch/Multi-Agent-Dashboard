@@ -3,31 +3,70 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
-from datetime import UTC, datetime
-from typing import Dict, List
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
 
 import streamlit as st
 
 from multi_agent_dashboard.engine import EngineResult, MultiAgentEngine
 
 
-def export_pipeline_agents_as_json(pipeline_name: str, steps: List[str]) -> str:
+def _agent_spec_to_dict_safe(spec) -> dict:
+    """
+    Safely convert an AgentSpec-like object to a plain dict suitable for JSON export.
+    Prefer dataclasses.asdict, but fall back to an explicit attribute extraction to
+    remain robust if AgentSpec is not a dataclass or contains non-serializable fields.
+    """
+    try:
+        # Preferred if AgentSpec is a dataclass
+        return asdict(spec)
+    except Exception:
+        # Fall back: extract common attributes used in the UI
+        out = {
+            "name": getattr(spec, "name", None),
+            "model": getattr(spec, "model", None),
+            "prompt_template": getattr(spec, "prompt_template", None),
+            "role": getattr(spec, "role", None),
+            "input_vars": getattr(spec, "input_vars", None),
+            "output_vars": getattr(spec, "output_vars", None),
+            "color": getattr(spec, "color", None),
+            "symbol": getattr(spec, "symbol", None),
+            "tools": getattr(spec, "tools", None),
+            "reasoning_effort": getattr(spec, "reasoning_effort", None),
+            "reasoning_summary": getattr(spec, "reasoning_summary", None),
+        }
+        # Remove keys with None (keep payload compact)
+        return {k: v for k, v in out.items() if v is not None}
+
+
+def export_pipeline_agents_as_json(
+    pipeline_name: str,
+    steps: List[str],
+    engine: Optional[MultiAgentEngine] = None,
+) -> str:
     """
     Export all agents used in a pipeline as a JSON string.
-    Reads the engine from st.session_state to preserve existing call sites.
+
+    Backwards-compatible: if `engine` is not provided, read engine from st.session_state
+    (same behavior as before). Providing an explicit `engine` makes the function easier
+    to test in isolation.
     """
-    engine: MultiAgentEngine = st.session_state.engine
+    if engine is None:
+        if "engine" not in st.session_state:
+            raise ValueError("No engine available in session state; provide `engine` argument.")
+        engine = st.session_state.engine
 
     agents_payload = []
     for agent_name in steps:
         agent = engine.agents.get(agent_name)
         if not agent:
             continue
-        agents_payload.append(asdict(agent.spec))
+        # Use safe conversion to avoid hard failure if AgentSpec is not a dataclass
+        agents_payload.append(_agent_spec_to_dict_safe(agent.spec))
 
     export = {
         "pipeline": pipeline_name,
-        "exported_at": datetime.now(UTC).isoformat(),
+        "exported_at": datetime.now(timezone.utc).isoformat(),
         "agents": agents_payload,
     }
 
@@ -38,14 +77,20 @@ def build_export_from_engine_result(
     result: EngineResult,
     steps: List[str],
     task: str,
+    engine: Optional[MultiAgentEngine] = None,
 ) -> dict:
     """
     Build a JSON-serializable export for the current (live) run,
     mirroring the structure used for stored runs in History.
 
-    Reads the engine from st.session_state to preserve the previous behavior.
+    Backwards-compatible: if `engine` is None, the function reads the engine from
+    st.session_state (previous behavior). Optionally pass an engine explicitly for
+    testing or isolation.
     """
-    engine: MultiAgentEngine = st.session_state.engine
+    if engine is None:
+        if "engine" not in st.session_state:
+            raise ValueError("No engine available in session state; provide `engine` argument.")
+        engine = st.session_state.engine
 
     # Build metrics_by_agent from result.agent_metrics
     metrics_by_agent: Dict[str, dict] = {}
@@ -107,7 +152,7 @@ def build_export_from_engine_result(
 
     return {
         "run_id": None,  # live run has no DB id
-        "timestamp": datetime.now(UTC).isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "pipeline_summary": {
             "total_latency": round(total_latency, 5),
             "total_input_cost": round(total_input_cost, 6),

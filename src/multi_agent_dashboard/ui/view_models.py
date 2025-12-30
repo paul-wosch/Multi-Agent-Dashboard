@@ -1,7 +1,7 @@
 # ui/view_models.py
 from __future__ import annotations
 
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+from typing import Dict, List, NamedTuple, Optional, Tuple
 
 import pandas as pd
 
