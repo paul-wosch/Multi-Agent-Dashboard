@@ -587,6 +587,12 @@ def render_agent_config_section(
         header += f" ({title_suffix})"
     st.subheader(header)
 
+    # Build a lookup for per-agent configured allowed domains
+    configured_domains_by_agent: Dict[str, Optional[List[str]]] = {
+        cfg.agent_name: cfg.web_search_allowed_domains
+        for cfg in config_view
+    }
+
     for cfg in config_view:
         with st.expander(f"{cfg.agent_name} — Configuration", expanded=False):
             st.markdown(f"**Model:** `{cfg.model}`")
@@ -724,9 +730,15 @@ def render_agent_config_section(
                     domains.add(d)
 
             if domains:
+                # We found allowed domains directly on the tool calls
                 row["Allowed Domains (web_search)"] = ", ".join(sorted(domains))
             else:
-                row["Allowed Domains (web_search)"] = "–"
+                # fall back to configured per-agent allowed domains
+                cfg_domains = configured_domains_by_agent.get(agent_name) or []
+                if cfg_domains:
+                    row["Allowed Domains (web_search)"] = ", ".join(cfg_domains)
+                else:
+                    row["Allowed Domains (web_search)"] = "–"
 
         rows_overview.append(row)
 
@@ -734,6 +746,103 @@ def render_agent_config_section(
         st.dataframe(pd.DataFrame(rows_overview), width="stretch")
     else:
         st.info("No tool calls recorded.")
+
+
+def build_tool_calls_overview(
+    tool_usages_by_agent: Dict[str, List[dict]],
+    *,
+    is_historic: bool,
+) -> pd.DataFrame:
+    """
+    Build a flat per-call overview table for tools.
+
+    Columns:
+      - Agent
+      - Tool
+      - Call ID
+      - Args (compact)
+    """
+    rows: List[Dict[str, Any]] = []
+
+    for agent_name, entries in tool_usages_by_agent.items():
+        for e in entries:
+            tool_type = e.get("tool_type") or "unknown"
+
+            # Normalize call id: live uses "id"; historic uses "tool_call_id"
+            call_id = e.get("id") or e.get("tool_call_id") or "n/a"
+
+            # Build a compact args view
+            args: Dict[str, Any] = {}
+
+            if not is_historic:
+                # Live run: action dict is already present
+                action = e.get("action") or {}
+                if isinstance(action, dict):
+                    if tool_type == "web_search":
+                        action_type = action.get("type")
+
+                        if action_type == "search":
+                            if "query" in action:
+                                args["query"] = action["query"]
+                            filters = action.get("filters") or {}
+                            if isinstance(filters, dict) and "allowed_domains" in filters:
+                                args["allowed_domains"] = filters["allowed_domains"]
+
+                        elif action_type == "open_page":
+                            if "url" in action:
+                                args["url"] = action["url"]
+                            args["type"] = "open_page"
+
+                        if not args:
+                            args = {
+                                k: v for k, v in action.items() if k != "sources"
+                            }
+                    else:
+                        args = {
+                            k: v for k, v in action.items() if k != "sources"
+                        }
+            else:
+                # Historic: args_json contains the original tool call
+                raw_args = _parse_json_field(e.get("args_json"), {})
+                if isinstance(raw_args, dict):
+                    if tool_type == "web_search":
+                        action = raw_args.get("action") or {}
+                        if isinstance(action, dict):
+                            action_type = action.get("type")
+                            if action_type == "search":
+                                if "query" in action:
+                                    args["query"] = action["query"]
+                                filters = action.get("filters") or {}
+                                if isinstance(filters, dict) and "allowed_domains" in filters:
+                                    args["allowed_domains"] = filters["allowed_domains"]
+                            elif action_type == "open_page":
+                                if "url" in action:
+                                    args["url"] = action["url"]
+                                args["type"] = "open_page"
+                            if not args:
+                                args = {
+                                    k: v for k, v in action.items() if k != "sources"
+                                }
+                        else:
+                            # fallback: show raw args without sources
+                            args = {
+                                k: v for k, v in raw_args.items() if k != "sources"
+                            }
+                    else:
+                        args = {
+                            k: v for k, v in raw_args.items() if k != "sources"
+                        }
+
+            rows.append(
+                {
+                    "Agent": agent_name,
+                    "Tool": tool_type,
+                    "Call ID": call_id,
+                    "Args": args,
+                }
+            )
+
+    return pd.DataFrame(rows)
 
 
 # =======================
@@ -1673,7 +1782,6 @@ def render_tools_advanced_tab(result: EngineResult, steps: List[str]):
     engine = st.session_state.engine
     tool_usages = result.tool_usages or {}
 
-    # Normalize tool usages mapping: ensure every agent has a list
     tool_usages_by_agent: Dict[str, List[dict]] = {
         name: tool_usages.get(name) or [] for name in steps
     }
@@ -1685,6 +1793,18 @@ def render_tools_advanced_tab(result: EngineResult, steps: List[str]):
         title_suffix="this run",
         is_historic=False,
     )
+
+    # Optional: flat per-call overview table for this run
+    st.markdown("---")
+    st.subheader("Tool Usage Overview (per call, this run)")
+    df_calls = build_tool_calls_overview(
+        tool_usages_by_agent,
+        is_historic=False,
+    )
+    if not df_calls.empty:
+        st.dataframe(df_calls, width="stretch")
+    else:
+        st.info("No tool calls recorded.")
 
 
 def render_run_results(
@@ -2525,6 +2645,18 @@ def render_history_mode():
         title_suffix="stored",
         is_historic=True,
     )
+
+    # Per-call Tool Usage Overview for stored runs
+    st.markdown("---")
+    st.subheader("Tool Usage Overview (per call, stored)")
+    df_calls_stored = build_tool_calls_overview(
+        tool_usages_by_agent,
+        is_historic=True,
+    )
+    if not df_calls_stored.empty:
+        st.dataframe(df_calls_stored, width="stretch")
+    else:
+        st.info("No tool calls recorded for this run.")
 
     st.markdown("---")
     st.subheader(f"Run {run_id}")
