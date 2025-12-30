@@ -309,15 +309,31 @@ class LLMClient:
 
     def _to_dict(self, response: Any) -> Dict[str, Any]:
         """
-        Convert SDK response into a serializable dict (best-effort).
+        Convert SDK response into a serializable dict (best-effort),
+        avoiding noisy Pydantic serializer warnings from the SDK's
+        internal model graph.
         """
         try:
+            # Prefer the SDK's own helper, if present
+            if hasattr(response, "to_dict") and callable(getattr(response, "to_dict")):
+                return response.to_dict()
+
+            # Fall back to Pydantic's model_dump, but silence its
+            # "PydanticSerializationUnexpectedValue" warnings, which
+            # are expected with some of the internal tool-call types.
             if hasattr(response, "model_dump"):
-                return response.model_dump()
+                try:
+                    return response.model_dump(warnings="none")
+                except TypeError:
+                    # Older Pydantic / SDK versions may not accept warnings=
+                    return response.model_dump()
+
             if hasattr(response, "dict"):
                 return response.dict()
         except Exception:
-            pass
+            logger.exception("Failed to convert LLM response to dict")
+
+        # Last-resort fallback
         return {"repr": repr(response)}
 
     # -------------------------
