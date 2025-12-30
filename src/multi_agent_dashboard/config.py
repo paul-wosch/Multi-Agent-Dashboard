@@ -40,7 +40,7 @@ AGENT_OUTPUT_CAP = 50_000
 
 OPENAI_PRICING = {
     # https://platform.openai.com/docs/pricing
-    # latest update: 251224
+    # latest update: 251230
     # price per 1M tokens
     "gpt-3.5-turbo": {
         "input": 0.50,
@@ -58,6 +58,10 @@ OPENAI_PRICING = {
         "input": 0.10,
         "output": 0.40,
     },
+    "gpt-5-mini": {
+        "input": 0.25,
+        "output": 2.00,
+    },
     "gpt-5-nano": {
         "input": 0.05,
         "output": 0.40,
@@ -65,6 +69,10 @@ OPENAI_PRICING = {
     "gpt-5.1": {
         "input": 1.25,
         "output": 10.00,
+    },
+    "text-embedding-3-small": {
+        "input": 0.02,
+        "output": 0.00,
     },
     # Add more models as needed
 }
