@@ -92,7 +92,22 @@ def summarize_agent_metrics(
 
 
 def df_replace_none(df: pd.DataFrame, none_value: str = "–") -> pd.DataFrame:
-    return df.map(lambda v: none_value if v is None else v)
+    """
+    Replace None/NaN values in a DataFrame with a readable placeholder.
+
+    Uses DataFrame.where with pd.notnull to reliably replace missing values
+    across pandas versions (avoids relying on DataFrame.map/applymap
+    semantics which have changed across releases).
+
+    Consider re-adding `return df.map(lambda v: none_value if v is None else v)`
+    and removing the conditional after verifying correctness
+    of the expression above.
+    """
+    # Ensure we have a DataFrame (if a different structure is passed)
+    if not isinstance(df, pd.DataFrame):
+        return df
+
+    return df.where(pd.notnull(df), none_value)
 
 
 def metrics_view_from_engine_result(
