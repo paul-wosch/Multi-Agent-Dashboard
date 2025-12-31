@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import streamlit as st
 
-from multi_agent_dashboard.config import UI_COLORS
+from multi_agent_dashboard.config import UI_COLORS, ATTACHMENT_FILE_TYPES
 from multi_agent_dashboard.engine import EngineResult
 from multi_agent_dashboard.ui.cache import (
     cached_load_pipelines,
@@ -165,7 +165,7 @@ def render_run_sidebar() -> Tuple[
             uploaded_files = st.file_uploader(
                 "Upload files",
                 accept_multiple_files=True,
-                type=["txt", "pdf", "csv", "md", "json", "log", "py", "sql", "patch"],
+                type=ATTACHMENT_FILE_TYPES,
             )
 
             files_payload = []

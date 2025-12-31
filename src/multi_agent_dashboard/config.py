@@ -77,6 +77,23 @@ OPENAI_PRICING = {
     # Add more models as needed
 }
 
+# Allowed attachment file extensions for the file uploader (used in the UI)
+# Keep in sync with any documentation / allowed agent input types.
+ATTACHMENT_FILE_TYPES = [
+    "txt",
+    "pdf",
+    "csv",
+    "md",
+    "json",
+    "log",
+    "py",
+    "sql",
+    "patch",
+    "LICENSE",
+    "toml",
+    "gitignore",
+]
+
 UI_COLORS = {
     "red": {
         "value": "#dc3545",
