@@ -167,7 +167,7 @@ On first successful run, the app will:
   ```
 
 - Apply all SQL migrations from `data/migrations/` using the centralized migration system
-- Seed default agents (planner/worker/critic/finalizer-style roles) if the `agents` table is empty
+- Seed default agents (planner/solver/critic/finalizer-style roles) if the `agents` table is empty
 - Initialize a rotating log file under `data/logs/`
 
 ### 🩺 Troubleshooting First Run
@@ -402,7 +402,20 @@ repo_root/
 │       │       └── sqlite_rebuild.py          # Safe table rebuild helpers & CLI
 │       └── ui/
 │           ├── __init__.py
-│           └── app.py           # Streamlit application (presentation only)
+│           ├── agent_editor_mode.py  # Agent CRUD + prompt versioning UI
+│           ├── app.py                # Streamlit app entrypoint & mode routing
+│           ├── bootstrap.py          # App setup: DB, clients, engine, defaults
+│           ├── cache.py              # Streamlit caching helpers
+│           ├── exports.py            # Pipeline/run export helpers
+│           ├── graph_view.py         # Pipeline graph visualization
+│           ├── history_mode.py       # Past runs viewer & export UI
+│           ├── logging_ui.py         # Log viewer & Streamlit log handler
+│           ├── metrics_view.py       # Cost & latency metrics UI
+│           ├── run_mode.py           # Run configuration, execution, results UI
+│           ├── styles.py             # Streamlit CSS helpers
+│           ├── tools_view.py         # Tool usage & per-agent tool UI
+│           ├── utils.py              # UI utility helpers
+│           └── view_models.py        # UI view-model transformations
 ├── data/
 │   ├── db/
 │   │   └── multi_agent_runs.db  # Auto-created SQLite database (not tracked)
