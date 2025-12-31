@@ -6,11 +6,12 @@ import threading
 import time
 from collections import deque
 from pathlib import Path
-from typing import Deque, Dict, Any
+from typing import Deque, Dict, Any, List
 
 import streamlit as st
 
 from multi_agent_dashboard.config import LOG_FILE_PATH, UI_COLORS
+
 
 # Centralized mapping of log levels to colors and symbols (derived from UI_COLORS)
 LOG_LEVEL_STYLES: Dict[str, Dict[str, str]] = {
@@ -150,8 +151,157 @@ def attach_streamlit_log_handler(capacity: int = 500):
         return
 
     handler = StreamlitLogHandler(capacity=capacity)
+    # Ensure the handler captures all records (including DEBUG) and let root's level
+    # determine whether records flow to handlers. Setting handler level to DEBUG
+    # avoids accidentally dropping lower-level logs at the handler boundary.
+    handler.setLevel(logging.DEBUG)
     logging.getLogger().addHandler(handler)
     st.session_state["_log_handler_attached"] = True
 
     # Load historic logs into buffer on first attachment
     load_historic_logs_into_buffer(LOG_FILE_PATH, capacity=capacity)
+
+
+# ------------------------------------------------------
+# Tag styling utilities (moved here so UI modules can import without circular deps)
+# ------------------------------------------------------
+def inject_tag_style(scope: str = "global"):
+    """
+    Shared CSS injector for tag styling.
+
+    scope = "global"  -> all tags
+    scope = "sidebar" -> sidebar tags only
+    """
+    if scope == "sidebar":
+        selector = 'section[data-testid="stSidebar"] span[data-baseweb="tag"]'
+    else:
+        selector = 'span[data-baseweb="tag"]'
+    st.markdown(
+        f"""
+        <style>
+        {selector} {{
+            background-color: #55575b !important;
+            color: white !important;
+        }}
+        {selector}:hover {{
+            background-color: #41454b !important;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def inject_tag_style_for_sidebar():
+    """Backward-compatible wrapper for sidebar tag styling."""
+    inject_tag_style("sidebar")
+
+
+def inject_global_tag_style():
+    """Backward-compatible wrapper for global tag styling."""
+    inject_tag_style("global")
+
+
+# ------------------------------------------------------
+# Logs-view renderer (extracted from app.py during Phase 4)
+# ------------------------------------------------------
+def render_logs_mode():
+    st.header("🪵 Application Logs")
+
+    logs = st.session_state.get("_log_buffer", [])
+
+    if not logs:
+        st.info("No logs yet.")
+        return
+
+    inject_global_tag_style()
+
+    col1, col2 = st.columns([3, 1])
+
+    with col2:
+        LEVEL_LABELS = {
+            level: f"{style['symbol']} {level}"
+            for level, style in LOG_LEVEL_STYLES.items()
+        }
+
+        level_filter = st.multiselect(
+            "Levels",
+            list(LEVEL_LABELS.keys()),
+            default=["INFO", "WARNING", "ERROR", "CRITICAL"],
+            format_func=lambda v: LEVEL_LABELS[v],
+        )
+
+        def build_log_lines(
+            logs_list: List[Dict[str, Any]],
+            level_filter_list: List[str],
+            search_str: str,
+        ):
+            lines: List[str] = []
+            for entry in logs_list:
+                if entry["level"] not in level_filter_list:
+                    continue
+                if search_str and search_str.lower() not in entry[
+                    "message"
+                ].lower():
+                    continue
+
+                lines.append(
+                    f"{entry['time']} "
+                    f"[{entry['level']}] "
+                    f"{entry['logger']}: "
+                    f"{entry['message']}"
+                )
+            return "\n".join(lines)
+
+        search = st.text_input("Search")
+
+        if st.button("🧹 Clear logs"):
+            logs.clear()
+            st.rerun()
+
+        export_text = build_log_lines(
+            logs_list=list(logs),
+            level_filter_list=level_filter,
+            search_str=search,
+        )
+
+        st.download_button(
+            label="⬇️ Download logs",
+            data=export_text,
+            file_name="application.log",
+            mime="text/plain",
+            disabled=not bool(export_text),
+        )
+
+    with col1:
+        for entry in reversed(logs):
+            if entry["level"] not in level_filter:
+                continue
+            if search and search.lower() not in entry["message"].lower():
+                continue
+
+            level = entry["level"]
+            style = LOG_LEVEL_STYLES.get(
+                level, {"color": "#000000", "symbol": ""}
+            )
+            color = style["color"]
+
+            prefix = f"{entry['time']} "
+            level_token = f"[{level}]"
+            suffix = f" {entry['logger']}: {entry['message']}"
+
+            st.markdown(
+                f"""
+            <pre style="
+                margin: 0;
+                padding: 6px 10px;
+                background-color: #f8f9fa;
+                border-radius: 4px;
+                font-family: monospace;
+                white-space: pre-wrap;
+            ">
+{prefix}<span style="color:{color}; font-weight:bold;">{level_token}</span>{suffix}
+            </pre>
+            """,
+                unsafe_allow_html=True,
+            )
