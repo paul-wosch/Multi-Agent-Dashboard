@@ -11,6 +11,7 @@ from typing import Deque, Dict, Any, List
 import streamlit as st
 
 from multi_agent_dashboard.config import LOG_FILE_PATH, UI_COLORS
+from multi_agent_dashboard.ui.styles import inject_global_tag_style
 
 
 # Centralized mapping of log levels to colors and symbols (derived from UI_COLORS)
@@ -160,46 +161,6 @@ def attach_streamlit_log_handler(capacity: int = 500):
 
     # Load historic logs into buffer on first attachment
     load_historic_logs_into_buffer(LOG_FILE_PATH, capacity=capacity)
-
-
-# ------------------------------------------------------
-# Tag styling utilities (moved here so UI modules can import without circular deps)
-# ------------------------------------------------------
-def inject_tag_style(scope: str = "global"):
-    """
-    Shared CSS injector for tag styling.
-
-    scope = "global"  -> all tags
-    scope = "sidebar" -> sidebar tags only
-    """
-    if scope == "sidebar":
-        selector = 'section[data-testid="stSidebar"] span[data-baseweb="tag"]'
-    else:
-        selector = 'span[data-baseweb="tag"]'
-    st.markdown(
-        f"""
-        <style>
-        {selector} {{
-            background-color: #55575b !important;
-            color: white !important;
-        }}
-        {selector}:hover {{
-            background-color: #41454b !important;
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def inject_tag_style_for_sidebar():
-    """Backward-compatible wrapper for sidebar tag styling."""
-    inject_tag_style("sidebar")
-
-
-def inject_global_tag_style():
-    """Backward-compatible wrapper for global tag styling."""
-    inject_tag_style("global")
 
 
 # ------------------------------------------------------

@@ -32,7 +32,7 @@ from multi_agent_dashboard.ui.tools_view import (
     build_tool_calls_overview,
 )
 from multi_agent_dashboard.ui.graph_view import render_agent_graph
-from multi_agent_dashboard.ui.logging_ui import inject_tag_style_for_sidebar
+from multi_agent_dashboard.ui.styles import inject_tag_style_for_sidebar
 
 logger = logging.getLogger(__name__)
 
