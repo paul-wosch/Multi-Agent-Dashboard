@@ -38,6 +38,14 @@ The project uses a **standard `src/` Python package layout** for clean imports a
    pip install -e .
    ```
 
+   Note: Installing in editable mode is recommended so the `multi_agent_dashboard` package is importable in your environment. See the "How to run commands" note below if you prefer not to install.
+
+   Important: module-style commands shown elsewhere in this README (for example, `python -m multi_agent_dashboard.db.infra.generate_migration ...`) require that the package be importable in your environment — e.g. after `pip install -e .` or with `PYTHONPATH` including `src/`. If you prefer not to install, run the helper scripts directly from the repository root, e.g.:
+
+   ```bash
+   python src/multi_agent_dashboard/db/infra/generate_migration.py ...
+   ```
+
 4. **Configure environment**
 
    Create `.env` in the project root:
@@ -66,14 +74,25 @@ On first run, the app will:
 - Apply SQL migrations from `data/migrations/`
 - Seed default agents if the DB is empty
 
+Quick note — How to run CLI scripts
+- Module-style (recommended for examples in this README):
+  - `python -m multi_agent_dashboard.db.infra.generate_migration ...`
+  - Requires the package to be importable, i.e. `pip install -e .` (or appropriate PYTHONPATH).
+- Direct script invocation (works without `pip install -e .`):
+  - Run the helper script from the repository top-level, e.g.:
+    - `python src/multi_agent_dashboard/db/infra/generate_migration.py ...`
+  - This can be handy for quick one-off runs when you don't want to install the package.
+
 ---
 
 ## 🧩 System Requirements
 
-- 🐍 **Python**: 3.10+ (uses modern typing & standard libraries)
-- 💻 **OS**: Tested on macOS and Linux; should work on Windows with appropriate environment setup
+- 🐍 **Python**: >=3.10 (tested with CPython 3.14)
+- 💻 **OS**: Tested on macOS; should work on Linux and Windows with appropriate environment setup
 - 🌐 **Network**: Outbound HTTPS access to OpenAI’s APIs
 - 🔑 **Credentials**: Valid `OPENAI_API_KEY` in `.env`
+
+Note: pandas (and numpy) are installed as direct dependencies of Streamlit, so you generally won't need to pip install `pandas` separately for the UI/analytics workflows that rely on Streamlit. (See Streamlit docs.) ([docs.streamlit.io](https://docs.streamlit.io/deploy/concepts/dependencies?utm_source=openai))
 
 ---
 
@@ -132,6 +151,8 @@ This is **required** when using a `src/` layout so that `multi_agent_dashboard` 
 pip install -e .
 ```
 
+(If you prefer not to install, see the Quick Start note above for how to invoke helper scripts directly.)
+
 ### 4️⃣ Configure environment variables
 
 Create a `.env` file in the project root:
@@ -168,7 +189,7 @@ On first successful run, the app will:
 
 - Apply all SQL migrations from `data/migrations/` using the centralized migration system
 - Seed default agents (planner/solver/critic/finalizer-style roles) if the `agents` table is empty
-- Initialize a rotating log file under `data/logs/`
+- Initialize a rotating log file under `data/logs/` (see Logging below)
 
 ### 🩺 Troubleshooting First Run
 
@@ -182,7 +203,7 @@ On first successful run, the app will:
 
 - ❗ **Python version errors**
   - Symptom: Syntax errors on union types (`str | None`) or similar.
-  - Fix: Upgrade to Python 3.10+.
+  - Fix: Use Python >=3.10; this project is tested with CPython 3.14 (upgrade your interpreter if you encounter syntax incompatibilities).
 
 ---
 
@@ -453,61 +474,73 @@ The Streamlit UI calls this automatically when you run `app.py`.
   - Tracks applied migrations in a dedicated table
   - Applies new migrations in order
 
-### 🧮 FK-Aware Changes & Rebuilds
+### 🧭 Recommended safe workflow (concise)
 
-Some schema changes (especially foreign keys and constraints) require table rebuilds. The tooling handles this in two ways:
+Follow this checklist to reduce errors when changing schema:
 
-- `generate_migration.py`:
-  - Diffs the current DB schema vs `schema.py`
-  - Emits SQL migrations and, when necessary:
-    - Attaches `_REQUIRES_REBUILD` to the migration filename
-    - Inserts comments/instructions regarding affected tables
+1. Update the canonical schema:
+   - Edit `src/multi_agent_dashboard/db/infra/schema.py` to model the intended change.
+2. Preview changes (dry-run):
+   - After installing the package (recommended), run:
+     ```bash
+     python -m multi_agent_dashboard.db.infra.generate_migration my_change --dry-run
+     ```
+   - Or run the script directly from repo top if not installed:
+     ```bash
+     python src/multi_agent_dashboard/db/infra/generate_migration.py my_change --dry-run
+     ```
+   - Review the diff output carefully.
+3. Generate migration SQL files:
+   ```bash
+   python -m multi_agent_dashboard.db.infra.generate_migration my_change
+   ```
+   (or run the script directly if you didn't install the package)
+   - This writes SQL under `data/migrations/` (e.g. `000_...`, `001_...`).
+4. Apply migrations:
+   - Start the app (or run a script which calls `init_db`) to apply migrations; `init_db` will apply new migrations automatically.
+5. Handle `_REQUIRES_REBUILD` migrations:
+   - If the migration filename includes `_REQUIRES_REBUILD` and your DB is non-empty, run the safe rebuild tool:
+     ```bash
+     python -m multi_agent_dashboard.db.infra.sqlite_rebuild --all-with-diffs data/db/multi_agent_runs.db
+     ```
+     (This tool creates backups before destructive operations. Use `--dry-run` to preview.)
+   - If your DB is fresh (no user tables or all user tables empty), the migration system may auto-rebuild those tables for you during init; otherwise, use `sqlite_rebuild.py` to make the rebuild explicit and safe.
 
-- `_REQUIRES_REBUILD` migrations:
-  - On a **fresh (empty) DB**:
-    - Relevant tables can be auto-rebuilt to match `schema.py` when applying the migration
-  - On a **non-empty DB**:
-    - The migration is applied but constraints may not fully match `schema.py` until you explicitly run `sqlite_rebuild.py`
-    - This design makes destructive rebuilds **opt-in** for non-empty databases
+Note about "fresh DB" heuristic:
+- The system treats a DB as "fresh" when no user-created tables exist, or when existing user tables are empty. In that case, rebuilds required by a migration may be applied automatically. For any non-empty DB you should run `sqlite_rebuild.py` explicitly to avoid unexpected destructive changes and to ensure data is preserved/migrated.
 
-### 🛠 CLI Tools
+### 🛠 CLI Tools (examples)
 
-From the project root (using `python -m ...` style):
+From the project root, two ways to run tools:
 
-#### 1. Generate a Migration
+- Module-style (recommended after `pip install -e .`):
 
-```bash
-# Preview diffs (no files written)
-python -m multi_agent_dashboard.db.infra.generate_migration add_new_feature --dry-run
+  ```bash
+  # Preview diffs (no files written)
+  python -m multi_agent_dashboard.db.infra.generate_migration add_new_feature --dry-run
 
-# Generate migration files under data/migrations/
-python -m multi_agent_dashboard.db.infra.generate_migration add_new_feature
-```
+  # Generate migration files under data/migrations/
+  python -m multi_agent_dashboard.db.infra.generate_migration add_new_feature
+  ```
 
-Key options:
+- Direct script invocation (no install required; run from repo root):
 
-- `name`: required suffix for the migration name
-- `--dry-run`: show diffs without writing files
-- `--disable-constraints`: ignore constraint diffs if desired
+  ```bash
+  python src/multi_agent_dashboard/db/infra/generate_migration.py add_new_feature --dry-run
+  python src/multi_agent_dashboard/db/infra/generate_migration.py add_new_feature
+  ```
 
-Typical workflow to add a column or table:
-
-1. Edit `schema.py` to describe the target schema
-2. Run `generate_migration.py` (with `--dry-run` first)
-3. Run again without `--dry-run` to write the SQL
-4. Start the app (or run a dedicated script) to apply migrations via `init_db`
-
-#### 2. Rebuild Tables Safely
+Rebuild examples:
 
 ```bash
 # Rebuild a single table in-place (with backup)
 python -m multi_agent_dashboard.db.infra.sqlite_rebuild agents
 
-# Rebuild all tables with pending FK/constraint diffs (recommended after *_REQUIRES_REBUILD on non-empty DBs)
-python -m multi_agent_dashboard.db.infra.sqlite_rebuild --all-with-diffs
+# Rebuild all tables with pending FK/constraint diffs
+python -m multi_agent_dashboard.db.infra.sqlite_rebuild --all-with-diffs data/db/multi_agent_runs.db
 ```
 
-Options include `--dry-run` to preview planned rebuilds. The tool creates backups and carefully migrates data to match the canonical schema.
+Use `--dry-run` to preview rebuild plans before executing. The rebuild tool creates backups by default.
 
 ---
 
@@ -515,7 +548,7 @@ Options include `--dry-run` to preview planned rebuilds. The tool creates backup
 
 - 🧱 **`src/` layout**:
   - Avoids accidental imports from the working directory
-  - Always develop with `pip install -e .`
+  - Always develop with `pip install -e .` for module-style runs and imports
 
 - 🖼️ **Engine/UI separation**:
   - Keep Streamlit-specific code in `multi_agent_dashboard/ui`
@@ -533,6 +566,9 @@ Options include `--dry-run` to preview planned rebuilds. The tool creates backup
 - 🎨 **UI theming & symbols**:
   - Shared color and emoji schemes live in `config.py`
   - Avoid hardcoding colors/symbols in UI components
+
+- 🧪 Tests & CI:
+  - Unit tests are not yet implemented (help wanted). See "Status & Known Gaps" below for details and how to contribute.
 
 ### 🔁 Typical Schema-Change Flow
 
@@ -553,16 +589,75 @@ To add a new column or table:
 
 ---
 
+## 🧾 Logging
+
+- Log directory and files:
+  - Log path (rotating file): `data/logs/application.log`
+  - The app uses a RotatingFileHandler with these parameters:
+    - maxBytes = 5 * 1024 * 1024 (5 MB) per file
+    - backupCount = 3 (keeps up to 3 rotated backups)
+- Logs also stream to stdout for easy Streamlit viewing.
+
+---
+
+## 🔎 Troubleshooting & FAQ
+
+- Missing `OPENAI_API_KEY`:
+  - Symptom: UI appears but LLM calls fail with authentication errors.
+  - Fix: Add `OPENAI_API_KEY` to `.env` and restart the app.
+
+- Permission errors writing to `data/`:
+  - Symptom: PermissionError when creating DB/logs.
+  - Fix: Ensure your user or container has write access to the project directory. Adjust mount options in Docker or CI.
+
+- Python version errors:
+  - Symptom: Syntax errors for newer syntax constructs.
+  - Fix: Use the project-tested interpreter (this repo is tested with CPython 3.14). Ensure your environment uses a compatible Python >=3.10 if 3.14 is not available.
+
+- Graphviz rendering/export confusion:
+  - The Python `graphviz` package is included as a Python dependency in pyproject. A system-level Graphviz installation (the `dot` binary) is only required if you plan to render/export graphs to image/PDF files locally using the Graphviz toolchain. Typical in-browser Streamlit `graphviz_chart` usage does not require the system `dot` binary, but exporting to files (e.g., `graphviz.Source(...).render(...)`) may require installing Graphviz on your OS (e.g., `apt install graphviz` or `brew install graphviz`).
+
+- Migrations showing `_REQUIRES_REBUILD`:
+  - Symptom: Migration file name includes `_REQUIRES_REBUILD`.
+  - Fix: Read the migration comments, back up your DB, and run:
+    ```bash
+    python -m multi_agent_dashboard.db.infra.sqlite_rebuild --all-with-diffs data/db/multi_agent_runs.db
+    ```
+    Use `--dry-run` first to preview.
+
+- Tests / CI:
+  - Symptom: You expect tests to run but the `tests/` folder is empty or minimal.
+  - Fix: Unit tests are currently not implemented.
+
+---
+
 ## 🤝 Contributing
 
-Contributions are welcome. To keep the project healthy:
+To keep the project healthy:
 
 - ✅ Keep UI changes confined to `multi_agent_dashboard/ui`
 - 🚫 Avoid introducing `sys.path` hacks
 - 🗃️ Use DAOs and `services.py` instead of direct SQLite access
-- 🧱 Always use the migration system for schema changes
+- 🧱 Always use the migration system for schema changes (see Migration: Safe Workflow)
 - 🧠 Preserve engine/UI separation; keep the engine free of Streamlit dependencies
 - 🧪 Add or extend tests for new engine, DB, or migration behavior where applicable
+
+Developer checklist (quick):
+- Create a feature branch
+- Update `schema.py` for DB changes (if any)
+- Run `generate_migration.py --dry-run`, review diffs, then run without `--dry-run`
+- Start the app or run scripts that call `init_db` to apply migrations
+- If `_REQUIRES_REBUILD` appears and DB is non-empty, run `sqlite_rebuild.py` with backups
+- Add tests for new behavior and include them under `tests/`
+- Submit a PR with a clear description and migration notes
+
+---
+
+## 🔧 Status & Known Gaps
+
+- Unit tests: not yet implemented.
+- CHANGELOG: not currently maintained — a `CHANGELOG.md` would be a helpful addition for releases.
+- CI: add checks for linting and tests once a test suite exists.
 
 ---
 
