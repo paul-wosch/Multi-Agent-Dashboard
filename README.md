@@ -15,6 +15,19 @@ The project uses a **standard `src/` Python package layout** for clean imports a
 
 ---
 
+## 🕵️‍♀️ Who this is for (and who it's not)
+
+- Intended users:
+  - LLM/agent engineers and researchers who want a local experimentation playground.
+  - Internal tooling teams exploring multi-agent orchestration patterns.
+  - Developers prototyping agent prompt/versioning and cost/latency monitoring.
+
+- Non-goals:
+  - Not a managed production orchestration SaaS (e.g., not intended as a full replacement for production workflow orchestrators).
+  - Not a turn-key chatbot hosting service for external users (it's an experimentation & observability tool).
+
+---
+
 ## ⚡ Quick Start (TL;DR)
 
 1. **Clone & enter repo**
