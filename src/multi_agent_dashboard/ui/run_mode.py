@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import streamlit as st
 
-from multi_agent_dashboard.config import UI_COLORS, ATTACHMENT_FILE_TYPES
+from multi_agent_dashboard.config import UI_COLORS, ATTACHMENT_FILE_TYPES, ATTACHMENT_FILE_TYPES_RESTRICTED
 from multi_agent_dashboard.engine import EngineResult
 from multi_agent_dashboard.ui.cache import (
     cached_load_pipelines,
@@ -162,10 +162,15 @@ def render_run_sidebar() -> Tuple[
 
     if requires_files:
         with st.sidebar.expander("📎 Attach files", expanded=True):
+            # Determine the 'type' parameter for Streamlit's file_uploader:
+            # - If ATTACHMENT_FILE_TYPES_RESTRICTED is True, pass the allowed extensions list.
+            # - If False, pass None to allow any file extension.
+            file_types_param = ATTACHMENT_FILE_TYPES if ATTACHMENT_FILE_TYPES_RESTRICTED else None
+
             uploaded_files = st.file_uploader(
                 "Upload files",
                 accept_multiple_files=True,
-                type=ATTACHMENT_FILE_TYPES,
+                type=file_types_param,
             )
 
             files_payload = []

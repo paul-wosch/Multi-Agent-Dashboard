@@ -77,6 +77,11 @@ OPENAI_PRICING = {
     # Add more models as needed
 }
 
+# Toggle whether the UI file uploader restricts selectable file extensions.
+# If True, the uploader will only allow extensions listed in ATTACHMENT_FILE_TYPES.
+# If False, the uploader will accept any file extension (Streamlit default: None).
+ATTACHMENT_FILE_TYPES_RESTRICTED = False
+
 # Allowed attachment file extensions for the file uploader (used in the UI)
 # Keep in sync with any documentation / allowed agent input types.
 ATTACHMENT_FILE_TYPES = [
