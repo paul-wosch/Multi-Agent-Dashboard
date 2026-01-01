@@ -88,7 +88,8 @@ def render_history_mode():
     final_model = run["final_model"]
 
     # Shared cost & latency rendering for stored metrics
-    metrics_view = metrics_view_from_db_rows(metrics)
+    # Pass agent_run_configs so we can populate the Model column for historic runs.
+    metrics_view = metrics_view_from_db_rows(metrics, agent_run_configs)
     if metrics_view:
         render_cost_latency_section(metrics_view, title_suffix="Stored")
 

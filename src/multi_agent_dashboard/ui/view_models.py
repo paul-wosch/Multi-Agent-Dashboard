@@ -136,16 +136,33 @@ def metrics_view_from_engine_result(
     return views
 
 
-def metrics_view_from_db_rows(metrics_rows: List[dict]) -> List[AgentMetricsView]:
+def metrics_view_from_db_rows(
+    metrics_rows: List[dict],
+    agent_run_configs: Optional[List[dict]] = None,
+) -> List[AgentMetricsView]:
     """
     Build AgentMetricsView list from DB metric rows.
+
+    For historic runs, the metrics rows returned by the DB currently do not include
+    the model column. Prefer the model value from the per-run agent snapshot
+    (agent_run_configs) when available. This function accepts an optional
+    agent_run_configs list (as returned by run detail queries) and uses it to
+    populate the Model field in the resulting views.
     """
     views: List[AgentMetricsView] = []
+
+    cfg_by_name: Dict[str, dict] = {}
+    if agent_run_configs:
+        cfg_by_name = {c.get("agent_name"): c for c in agent_run_configs}
+
     for m in metrics_rows or []:
+        name = m.get("agent_name")
+        # Priority: model on metrics row (if present) -> agent_run_configs snapshot -> empty
+        model = m.get("model") or (cfg_by_name.get(name, {}).get("model") if name else "") or ""
         views.append(
             AgentMetricsView(
-                agent_name=m["agent_name"],
-                model=m.get("model", ""),
+                agent_name=name or "",
+                model=model,
                 input_tokens=m.get("input_tokens"),
                 output_tokens=m.get("output_tokens"),
                 latency=m.get("latency"),
