@@ -62,8 +62,22 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e .
 'OPENAI_API_KEY=your_key_here' > .env
-streamlit run src/multi_agent_dashboard/ui/app.py---
+streamlit run src/multi_agent_dashboard/ui/app.py
 ```
+
+---
+
+## 🩺 First run behavior (what the app does on first start)
+
+On first run, the app will:
+
+- Ensure `data/`, `data/db/`, `data/logs/`, and `data/migrations/` exist
+- Create the SQLite DB at: `data/db/multi_agent_runs.db`
+- Apply SQL migrations from `data/migrations/`
+- Seed default agents (planner/solver/critic/finalizer-style roles) if the `agents` table is empty
+- Initialize a rotating log file under `data/logs/` (see [docs/CONFIG.md](docs/CONFIG.md) for logging details)
+
+---
 
 ## 🧩 System Requirements
 
@@ -86,27 +100,6 @@ Most configuration is centralized in `config.py` and `.env`. See [docs/CONFIG.md
 | ---------------- | -------- | ------- | ---------------------------------------------------------- |
 | `OPENAI_API_KEY` | ✅        | None    | OpenAI API key used by the LLM client                      |
 | `LOG_LEVEL`      | ❌        | `INFO`  | Global logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
-
----
-
-## 🚀 Getting started — fast
-
-1. Clone the repo (see top).  
-2. Create & activate a Python 3.11+ virtualenv.  
-3. `pip install -e .`
-4. Copy `.env.template` → `.env` (or create `.env`) and set `OPENAI_API_KEY`.  
-5. `streamlit run src/multi_agent_dashboard/ui/app.py`
-6. Open [http://localhost:8501](http://localhost:8501)
-
-### 🩺 First run behavior (what the app does on first start)
-
-On first run, the app will:
-
-- Ensure `data/`, `data/db/`, `data/logs/`, and `data/migrations/` exist
-- Create the SQLite DB at: `data/db/multi_agent_runs.db`
-- Apply SQL migrations from `data/migrations/`
-- Seed default agents (planner/solver/critic/finalizer-style roles) if the `agents` table is empty
-- Initialize a rotating log file under `data/logs/` (see [docs/CONFIG.md](docs/CONFIG.md) for logging details)
 
 ---
 
@@ -291,6 +284,8 @@ For deep, step-by-step instructions (install, CLI reference, migrations, archite
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
 - [docs/USAGE.md](docs/USAGE.md)
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
+
+---
 
 ## 📄 License
 
