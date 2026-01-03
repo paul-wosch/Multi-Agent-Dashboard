@@ -73,7 +73,8 @@ class AgentDAO:
                            symbol,
                            tools_json,
                            reasoning_effort,
-                           reasoning_summary
+                           reasoning_summary,
+                           system_prompt_template
                     FROM agents
                     """
                 ).fetchall()
@@ -98,6 +99,7 @@ class AgentDAO:
                     "tools": safe_json_loads(row["tools_json"], {}),
                     "reasoning_effort": row["reasoning_effort"],
                     "reasoning_summary": row["reasoning_summary"],
+                    "system_prompt_template": row["system_prompt_template"],
                 }
             )
         return agents
@@ -149,6 +151,7 @@ class AgentDAO:
             tools: Optional[dict] = None,
             reasoning_effort: Optional[str] = None,
             reasoning_summary: Optional[str] = None,
+            system_prompt_template: Optional[str] = None,
     ) -> None:
         input_json = json.dumps(input_vars or [])
         output_json = json.dumps(output_vars or [])
@@ -175,8 +178,9 @@ class AgentDAO:
                          symbol,
                          tools_json,
                          reasoning_effort,
-                         reasoning_summary)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         reasoning_summary,
+                         system_prompt_template)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         agent_name,
@@ -190,6 +194,7 @@ class AgentDAO:
                         tools_json,
                         reasoning_effort,
                         reasoning_summary,
+                        system_prompt_template,
                     ),
                 )
         except Exception:

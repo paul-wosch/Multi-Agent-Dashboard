@@ -139,6 +139,7 @@ def reload_agents_into_engine():
             tools=a.get("tools") or {},
             reasoning_effort=a.get("reasoning_effort"),
             reasoning_summary=a.get("reasoning_summary"),
+            system_prompt_template=a.get("system_prompt_template"),
         )
         engine.add_agent(spec)
 

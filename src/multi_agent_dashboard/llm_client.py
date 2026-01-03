@@ -91,9 +91,14 @@ class LLMClient:
         files: Optional[List[Dict[str, Any]]] = None,
         tools_config: Optional[Dict[str, Any]] = None,
         reasoning_config: Optional[Dict[str, Any]] = None,
+        system_prompt: Optional[str] = None,
     ) -> TextResponse:
         """
         Execute a text-generation request and return a normalized response.
+
+        system_prompt: optional system/developer-level instructions. When provided,
+        prefer using the Responses API 'instructions' parameter (if supported by the SDK).
+        Otherwise, insert a system-role input item before the user input list.
         """
         last_err: Optional[Exception] = None
 
@@ -103,19 +108,49 @@ class LLMClient:
                     "model": model,
                 }
 
+                # Build user input item(s)
                 if files:
-                    kwargs["input"] = self._build_input_with_files(prompt, files)
+                    # _build_input_with_files returns a list of input items (usually a single user item
+                    # containing the prompt and file references). Keep that list.
+                    user_items = self._build_input_with_files(prompt, files)
+                    user_input_for_kwargs = user_items  # list
                 else:
-                    kwargs["input"] = prompt
+                    # no files: we build a simple user item consistent with Responses' input item format
+                    user_item = {
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": prompt}],
+                    }
+                    user_input_for_kwargs = user_item  # single dict (we'll adapt below)
+
+                # 1) Use 'instructions' when available + system_prompt is provided
+                if system_prompt and "instructions" in self._capabilities:
+                    kwargs["instructions"] = system_prompt
+                    # Keep user input in the same shape we used previously:
+                    kwargs["input"] = user_input_for_kwargs
+                    logger.debug("LLMClient: using 'instructions' capability to set system prompt.")
+                elif system_prompt:
+                    # Fallback: insert a system-role input item before the user items
+                    system_item = {
+                        "role": "system",
+                        "content": [{"type": "input_text", "text": system_prompt}],
+                    }
+                    if isinstance(user_input_for_kwargs, list):
+                        kwargs["input"] = [system_item] + user_input_for_kwargs
+                    else:
+                        kwargs["input"] = [system_item, user_input_for_kwargs]
+                    logger.debug("LLMClient: injected system-role input item (fallback to input list).")
+                else:
+                    # No system prompt provided: keep previous behavior
+                    kwargs["input"] = user_input_for_kwargs
 
                 if stream and "stream" in self._capabilities:
                     kwargs["stream"] = True
 
-                # 1) response_format (if supported)
+                # response_format (if supported)
                 if response_format is not None and "response_format" in self._capabilities:
                     kwargs["response_format"] = response_format
 
-                # 2) tools / tool_choice / include (independent of response_format)
+                # tools config (if supported)
                 if tools_config:
                     tools = tools_config.get("tools")
                     if tools and "tools" in self._capabilities:
@@ -127,18 +162,19 @@ class LLMClient:
                     if include and "include" in self._capabilities:
                         kwargs["include"] = include
 
-                # 3) reasoning config (independent of response_format)
+                # reasoning config (if supported)
                 if reasoning_config and "reasoning" in self._capabilities:
                     kwargs["reasoning"] = reasoning_config
 
                 logger.debug(
-                    "LLM request: model=%s, prompt_len=%d, stream=%s, structured=%s, tools=%s, reasoning=%s",
+                    "LLM request: model=%s, prompt_len=%d, stream=%s, structured=%s, tools=%s, reasoning=%s, system_prompt_set=%s",
                     model,
                     len(prompt),
                     stream,
                     bool(response_format),
                     bool(tools_config),
                     bool(reasoning_config),
+                    bool(system_prompt),
                 )
 
                 start_ts = time.perf_counter()
@@ -316,6 +352,7 @@ class LLMClient:
                 "text": f"\n\n--- FILE: {filename} (binary not attached) ---\n",
             })
 
+        # Return a list of input items (wrap as a user item)
         return [{"role": "user", "content": content}]
 
     # -------------------------

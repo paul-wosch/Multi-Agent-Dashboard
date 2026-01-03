@@ -25,14 +25,16 @@ class AgentSpec:
     # UI metadata
     color: str | None = None
     symbol: str | None = None
-    # NEW: tool configuration (backed by agents.tools_json)
+    # Tool configuration (backed by agents.tools_json)
     # Example: {"enabled": True, "tools": ["web_search"]}
     tools: Dict[str, Any] = field(default_factory=dict)
-    # NEW: reasoning configuration (per agent)
+    # Reasoning configuration (per agent)
     # effort: "none" | "low" | "medium" | "high" | "xhigh"
     # summary: "auto" | "concise" | "detailed" | "none"
     reasoning_effort: Optional[str] = None
     reasoning_summary: Optional[str] = None
+    # Explicit system (developer) prompt
+    system_prompt_template: Optional[str] = None
 
 
 @dataclass
@@ -117,14 +119,18 @@ class AgentRuntime:
         rc = self._build_reasoning_config()
         logger.debug("Agent %s tools_config=%r reasoning_config=%r", self.spec.name, tc, rc)
 
+        # NOTE: pass system_prompt separately so the LLM client can prefer
+        # the Responses API 'instructions' parameter (if available) or
+        # fall back to a system-role input item.
         response = self.llm_client.create_text_response(
             model=self.spec.model,
             prompt=prompt,
             response_format=structured_schema,
             stream=stream,
             files=llm_files_payload if llm_files_payload else None,
-            tools_config=self._build_tools_config(state),
-            reasoning_config=self._build_reasoning_config(),
+            tools_config=tc,
+            reasoning_config=rc,
+            system_prompt=self.spec.system_prompt_template,
         )
 
         # Save metrics for engine to retrieve
