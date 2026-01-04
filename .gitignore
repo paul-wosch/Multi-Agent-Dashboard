@@ -3,6 +3,9 @@ data/**/*.sqlite3
 data/**/*.sqlite
 data/**/*.db
 
+# Log files
+data/logs/**
+
 # MacOS hidden system file from finder applicaation
 .DS_Store
 
