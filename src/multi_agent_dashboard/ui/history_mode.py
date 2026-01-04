@@ -211,6 +211,9 @@ def render_history_mode():
                 "effort": cfg.get("reasoning_effort") or "default",
                 "summary": cfg.get("reasoning_summary") or "none",
             },
+            # Explicitly expose prompt templates from the per-run snapshot
+            "prompt_template": cfg.get("prompt_template") or None,
+            "system_prompt_template": cfg.get("system_prompt_template") or None,
             "raw": {
                 "tools_json": tools_json or None,
                 "tools_config_json": tools_cfg_json or None,

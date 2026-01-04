@@ -70,6 +70,8 @@ SCHEMA = {
             "reasoning_effort": "TEXT",
             # Reasoning summary: auto|concise|detailed|none
             "reasoning_summary": "TEXT",
+            # Explicit system / developer prompt (nullable)
+            "system_prompt_template": "TEXT",
         },
     },
 
@@ -129,6 +131,8 @@ SCHEMA = {
             "reasoning_config_json": "TEXT",
             # Future‑proof bag for additional options (temperature, top_p, etc.)
             "extra_config_json": "TEXT",
+            # Snapshot of the system prompt used for this agent/run
+            "system_prompt_template": "TEXT",
         },
         "constraints": {
             "foreign_keys": [

@@ -43,6 +43,7 @@ def render_agent_editor():
             "tools": a.get("tools") or {},
             "reasoning_effort": a.get("reasoning_effort"),
             "reasoning_summary": a.get("reasoning_summary"),
+            "system_prompt": a.get("system_prompt_template"),
         }
         for a in agents_raw
     ]
@@ -82,6 +83,7 @@ def render_agent_editor():
             "model": "gpt-4.1-nano",
             "role": "",
             "prompt": "",
+            "system_prompt": "",
             "input_vars": [],
             "output_vars": [],
             "color": DEFAULT_COLOR,
@@ -125,6 +127,7 @@ def render_agent_editor():
                 "model": "gpt-4.1-nano",
                 "role": "",
                 "prompt": "",
+                "system_prompt": "",
                 "input_vars": [],
                 "output_vars": [],
                 "color": DEFAULT_COLOR,
@@ -142,6 +145,7 @@ def render_agent_editor():
                 "model": base_agent["model"],
                 "role": base_agent["role"],
                 "prompt": base_agent["prompt"],
+                "system_prompt": base_agent.get("system_prompt", "") or "",
                 "input_vars": base_agent["input_vars"],
                 "output_vars": base_agent["output_vars"],
                 "color": base_agent.get("color", DEFAULT_COLOR) or DEFAULT_COLOR,
@@ -251,9 +255,20 @@ def render_agent_editor():
 
     # ----- Prompt tab -----
     with prompt_tab:
+        system_prompt_val = st.text_area(
+            "System Prompt (optional)",
+            height=200,
+            value=state.get("system_prompt", "") or "",
+            help=(
+                "Authoritative instructions for the agent (developer/system role). "
+                "These instructions will be sent separately from the user/task input when supported "
+                "by the LLM client. Keep them concise and avoid inserting untrusted user data here."
+            ),
+        )
+
         prompt_val = st.text_area(
             "Prompt Template",
-            height=400,
+            height=200,
             value=state["prompt"],
         )
 
@@ -345,6 +360,7 @@ def render_agent_editor():
                 "model": model_val.strip() or "gpt-4.1-nano",
                 "role": role_val.strip(),
                 "prompt": prompt_val,
+                "system_prompt": system_prompt_val or "",
                 "input_vars": [
                     v.strip() for v in input_vars_val.splitlines() if v.strip()
                 ],
@@ -403,10 +419,12 @@ def render_agent_editor():
                 color=state.get("color") or DEFAULT_COLOR,
                 symbol=state.get("symbol") or DEFAULT_SYMBOL,
                 save_prompt_version=(state["prompt"] != previous_prompt),
+                metadata={},
                 tools=state.get("tools")
                 or {"enabled": False, "tools": []},
                 reasoning_effort=state.get("reasoning_effort"),
                 reasoning_summary=state.get("reasoning_summary"),
+                system_prompt=state.get("system_prompt") or None,
             )
 
             invalidate_agents()
@@ -433,6 +451,7 @@ def render_agent_editor():
                     or {"enabled": False, "tools": []},
                     reasoning_effort=state.get("reasoning_effort"),
                     reasoning_summary=state.get("reasoning_summary"),
+                    system_prompt=state.get("system_prompt") or None,
                 )
             except Exception:
                 logger.exception("Failed to duplicate agent")
@@ -535,6 +554,7 @@ def render_agent_editor():
                         "model": chosen_agent.get("model", "gpt-4.1-nano"),
                         "role": chosen_agent.get("role", ""),
                         "prompt": chosen_agent.get("prompt_template", ""),
+                        "system_prompt": chosen_agent.get("system_prompt_template", "") or "",
                         "input_vars": chosen_agent.get("input_vars", []),
                         "output_vars": chosen_agent.get("output_vars", []),
                         "color": DEFAULT_COLOR,

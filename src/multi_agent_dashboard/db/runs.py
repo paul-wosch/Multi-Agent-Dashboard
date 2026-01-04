@@ -132,7 +132,8 @@ class RunDAO:
                            reasoning_effort,
                            reasoning_summary,
                            reasoning_config_json,
-                           extra_config_json
+                           extra_config_json,
+                           system_prompt_template
                     FROM agent_run_configs
                     WHERE run_id = ?
                     """,
@@ -272,8 +273,9 @@ class RunDAO:
                              reasoning_effort,
                              reasoning_summary,
                              reasoning_config_json,
-                             extra_config_json)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                             extra_config_json,
+                             system_prompt_template)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             run_id,
@@ -290,6 +292,7 @@ class RunDAO:
                             json.dumps(cfg.get("reasoning_config") or {}),
                             # Reserved for future options such as temperature
                             json.dumps(cfg.get("extra") or {}),
+                            cfg.get("system_prompt_template"),
                         ),
                     )
 

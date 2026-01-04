@@ -71,6 +71,7 @@ class AgentService:
             tools: Optional[dict] = None,
             reasoning_effort: Optional[str] = None,
             reasoning_summary: Optional[str] = None,
+            system_prompt: Optional[str] = None,
     ) -> None:
         AgentDAO(self.db_path).save(
             name,
@@ -84,6 +85,7 @@ class AgentService:
             tools=tools,
             reasoning_effort=reasoning_effort,
             reasoning_summary=reasoning_summary,
+            system_prompt_template=system_prompt,
         )
 
     def save_prompt_version(self, agent_name: str, prompt_text: str, metadata: Optional[dict] = None) -> int:
@@ -114,6 +116,7 @@ class AgentService:
             tools: Optional[dict] = None,
             reasoning_effort: Optional[str] = None,
             reasoning_summary: Optional[str] = None,
+            system_prompt: Optional[str] = None,
     ) -> None:
         """Atomically save agent metadata and optionally create a prompt version."""
         with agent_dao(self.db_path) as dao:
@@ -129,13 +132,19 @@ class AgentService:
                 tools=tools,
                 reasoning_effort=reasoning_effort,
                 reasoning_summary=reasoning_summary,
+                system_prompt_template=system_prompt,
             )
 
             if save_prompt_version:
+                # Include system_prompt in the prompt version metadata so versions
+                # capture the full agent configuration used to generate outputs.
+                meta = dict(metadata or {})
+                if system_prompt:
+                    meta["system_prompt"] = system_prompt
                 dao.save_prompt_version(
                     name,
                     prompt,
-                    metadata,
+                    meta,
                 )
 
     def rename_agent_atomic(self, old_name: str, new_name: str) -> None:

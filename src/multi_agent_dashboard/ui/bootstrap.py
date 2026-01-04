@@ -11,19 +11,18 @@ from multi_agent_dashboard.engine import MultiAgentEngine
 from multi_agent_dashboard.llm_client import LLMClient
 from multi_agent_dashboard.models import AgentSpec
 
-from multi_agent_dashboard.ui.cache import cached_load_agents, get_agent_service
+from multi_agent_dashboard.ui.cache import cached_load_agents, get_agent_service, invalidate_agents
 from multi_agent_dashboard.ui.logging_ui import attach_streamlit_log_handler
 
 
 # Default agent templates (moved from app.py for bootstrap)
+# Each agent now has an explicit system_prompt_template (developer/system role)
+# and a prompt_template (user/task-facing content).
 default_agents = {
     "planner": {
         "model": "gpt-4.1-nano",
+        "system_prompt_template": "You are the Planner Agent. Refrain from producing the actual solution. Only clarify the task and produce steps.",
         "prompt_template": """
-You are the Planner Agent.
-Refrain from producing the actual solution.
-Only clarify the task and produce steps.
-
 Task:
 {task}
 
@@ -37,8 +36,8 @@ Output:
     },
     "solver": {
         "model": "gpt-4.1-nano",
+        "system_prompt_template": "You are the Solver Agent. Focus on producing a correct and complete answer using the provided plan.",
         "prompt_template": """
-You are the Solver Agent.
 Use the plan to produce an answer.
 
 Plan:
@@ -53,8 +52,8 @@ Output:
     },
     "critic": {
         "model": "gpt-4.1-nano",
+        "system_prompt_template": "You are the Critic Agent. Provide concise, actionable critique of the provided answer.",
         "prompt_template": """
-You are the Critic Agent.
 Evaluate the answer.
 
 Answer:
@@ -70,8 +69,8 @@ Output:
     },
     "finalizer": {
         "model": "gpt-4.1-nano",
+        "system_prompt_template": "You are the Finalizer Agent. Use the critique to revise and improve the answer; return the improved final answer only.",
         "prompt_template": """
-You are the Finalizer Agent.
 You must revise the original answer using the critique.
 
 Original Answer:
@@ -99,25 +98,38 @@ def create_openai_client(api_key: str):
 
 
 def bootstrap_default_agents(defaults: Dict[str, dict]):
-    existing = cached_load_agents()
+    """
+    Ensure default agents exist in the DB.
+
+    Implementation notes:
+    - Use the AgentService directly to avoid reading a cached empty list from
+      cached_load_agents() on first run (which would mask newly-inserted rows).
+    - Use save_agent_atomic to persist agent metadata and create a prompt version
+      in a single transaction.
+    - Invalidate the agents cache after inserting so subsequent cached reads
+      (reload_agents_into_engine) will pick up the inserted agents.
+    """
+    svc = get_agent_service()
+    # Read DB directly (bypass st.cache_data) to detect empty DB reliably.
+    existing = svc.list_agents()
     if existing:
         return
-    svc = get_agent_service()
+
     for name, data in defaults.items():
-        svc.save_agent(
+        svc.save_agent_atomic(
             name,
             data.get("model", "gpt-4.1-nano"),
             data.get("prompt_template", ""),
             data.get("role", ""),
             data.get("input_vars", []),
             data.get("output_vars", []),
-        )
-        # also save a versioned prompt snapshot
-        svc.save_prompt_version(
-            name,
-            data.get("prompt_template", ""),
+            save_prompt_version=True,
             metadata={"role": data.get("role", "")},
+            system_prompt=data.get("system_prompt_template", None),
         )
+
+    # Ensure caches are invalidated so the new agents are visible immediately.
+    invalidate_agents()
 
 
 def reload_agents_into_engine():
@@ -139,6 +151,7 @@ def reload_agents_into_engine():
             tools=a.get("tools") or {},
             reasoning_effort=a.get("reasoning_effort"),
             reasoning_summary=a.get("reasoning_summary"),
+            system_prompt_template=a.get("system_prompt_template"),
         )
         engine.add_agent(spec)
 
