@@ -16,10 +16,18 @@ def _agent_spec_to_dict_safe(spec) -> dict:
     Safely convert an AgentSpec-like object to a plain dict suitable for JSON export.
     Prefer dataclasses.asdict, but fall back to an explicit attribute extraction to
     remain robust if AgentSpec is not a dataclass or contains non-serializable fields.
+
+    Important: always expose 'prompt_template' and 'system_prompt_template' keys
+    explicitly in the exported dict (even if None) so downstream consumers can
+    rely on their presence.
     """
     try:
         # Preferred if AgentSpec is a dataclass
-        return asdict(spec)
+        d = asdict(spec)
+        # Ensure the two prompt keys exist explicitly
+        d.setdefault("prompt_template", getattr(spec, "prompt_template", None))
+        d.setdefault("system_prompt_template", getattr(spec, "system_prompt_template", None))
+        return d
     except Exception:
         # Fall back: extract common attributes used in the UI
         out = {
@@ -34,9 +42,15 @@ def _agent_spec_to_dict_safe(spec) -> dict:
             "tools": getattr(spec, "tools", None),
             "reasoning_effort": getattr(spec, "reasoning_effort", None),
             "reasoning_summary": getattr(spec, "reasoning_summary", None),
+            "system_prompt_template": getattr(spec, "system_prompt_template", None),
         }
-        # Remove keys with None (keep payload compact)
-        return {k: v for k, v in out.items() if v is not None}
+        # Keep prompt keys even if None; drop other keys that are None to keep payload compact
+        final = {}
+        for k, v in out.items():
+            if v is None and k not in ("prompt_template", "system_prompt_template"):
+                continue
+            final[k] = v
+        return final
 
 
 def export_pipeline_agents_as_json(
@@ -86,6 +100,9 @@ def build_export_from_engine_result(
     Backwards-compatible: if `engine` is None, the function reads the engine from
     st.session_state (previous behavior). Optionally pass an engine explicitly for
     testing or isolation.
+
+    This export now exposes both prompt_template and system_prompt_template for
+    each agent under the agent's config.
     """
     if engine is None:
         if "engine" not in st.session_state:
@@ -124,6 +141,9 @@ def build_export_from_engine_result(
                 if runtime
                 else None,
             },
+            # Explicitly expose both prompt templates
+            "prompt_template": getattr(runtime.spec, "prompt_template", None) if runtime else None,
+            "system_prompt_template": getattr(runtime.spec, "system_prompt_template", None) if runtime else None,
         }
 
         export_agents[name] = {
