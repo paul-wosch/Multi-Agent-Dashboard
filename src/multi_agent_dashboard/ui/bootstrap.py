@@ -52,7 +52,7 @@ Output:
     },
     "critic": {
         "model": "gpt-4.1-nano",
-        "system_prompt_template": "You are the Critic Agent. Provide concise, actionable critique of the provided answer.",
+        "system_prompt_template": "You are the Critic Agent. Your role is to verify that the answer fully and correctly satisfies the user’s task. Provide concise, actionable critique of the provided answer.",
         "prompt_template": """
 Evaluate the answer.
 
@@ -64,7 +64,7 @@ Output:
 - Improvements
 """,
         "role": "critic",
-        "input_vars": ["answer"],
+        "input_vars": ["task", "answer"],
         "output_vars": ["critique"],
     },
     "finalizer": {
