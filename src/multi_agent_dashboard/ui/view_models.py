@@ -28,6 +28,11 @@ class AgentConfigView(NamedTuple):
     web_search_allowed_domains: Optional[List[str]]
     reasoning_effort: str
     reasoning_summary: str
+    # Expose both prompt templates in the view so UI can display both user-facing
+    # prompt_template and optional system_prompt_template (developer role).
+    prompt_template: Optional[str] = None
+    system_prompt_template: Optional[str] = None
+    # Raw stored JSON blobs (historic runs)
     raw_tools_config: Optional[dict] = None
     raw_reasoning_config: Optional[dict] = None
     raw_extra_config: Optional[dict] = None
@@ -246,6 +251,12 @@ def config_view_from_db_rows(
             parsed["tools_config_json"]
         )
 
+        # Per-run prompt templates (user-facing and system) are stored in the
+        # agent_run_configs snapshot. Expose them to the UI so history shows
+        # what templates were actually used.
+        prompt_template = cfg.get("prompt_template") or None
+        system_prompt_template = cfg.get("system_prompt_template") or None
+
         views.append(
             AgentConfigView(
                 agent_name=name,
@@ -256,6 +267,8 @@ def config_view_from_db_rows(
                 web_search_allowed_domains=allowed_domains,
                 reasoning_effort=parsed["reasoning_effort"],
                 reasoning_summary=parsed["reasoning_summary"],
+                prompt_template=prompt_template,
+                system_prompt_template=system_prompt_template,
                 raw_tools_config=parsed["tools_config_json"] or None,
                 raw_reasoning_config=parsed["reasoning_config_json"] or None,
                 raw_extra_config=parsed["extra_config_json"] or None,

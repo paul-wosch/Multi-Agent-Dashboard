@@ -257,9 +257,12 @@ class MultiAgentEngine:
 
             # Snapshot this agent's configuration for this particular run.
             # This keeps agent config concerns out of tool_usages rows.
+            # Include both user-facing prompt_template and system_prompt_template so
+            # stored runs capture both templates used during execution.
             agent_configs[agent_name] = {
                 "model": agent.spec.model,
                 "prompt_template": agent.spec.prompt_template,
+                "system_prompt_template": agent.spec.system_prompt_template,
                 "role": agent.spec.role,
                 "input_vars": list(agent.spec.input_vars),
                 "output_vars": list(agent.spec.output_vars),
@@ -270,6 +273,8 @@ class MultiAgentEngine:
                 "reasoning_effort": agent.spec.reasoning_effort,
                 "reasoning_summary": agent.spec.reasoning_summary,
                 "reasoning_config": rc,
+                # Reserved for future options such as temperature
+                "extra": {},
             }
 
             input_tokens = metrics.get("input_tokens")

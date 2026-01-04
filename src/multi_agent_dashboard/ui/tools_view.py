@@ -73,9 +73,25 @@ def render_agent_config_section(
 
     for cfg in config_view:
         with st.expander(f"{cfg.agent_name} — Configuration", expanded=False):
+            # Model & role
             st.markdown(f"**Model:** `{cfg.model}`")
             st.markdown(f"**Role:** {cfg.role}")
 
+            st.markdown("**System prompt (system/developer role):**")
+            if cfg.system_prompt_template:
+                st.code(cfg.system_prompt_template, language=None)
+            else:
+                st.markdown("–")
+
+            # --- Prompts (user & system) ---
+            st.markdown("**User prompt (prompt_template):**")
+            if cfg.prompt_template:
+                # Use st.code to preserve formatting and allow wrapping
+                st.code(cfg.prompt_template, language=None)
+            else:
+                st.markdown("–")
+
+            # Tools summary
             st.markdown(
                 f"**Tool calling enabled:** {'Yes' if cfg.tools_enabled else 'No'}"
             )

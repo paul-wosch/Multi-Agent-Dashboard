@@ -522,6 +522,9 @@ def config_view_from_engine_result(
                 web_search_allowed_domains=allowed_domains_agent,
                 reasoning_effort=spec.reasoning_effort or "default",
                 reasoning_summary=spec.reasoning_summary or "none",
+                # Expose both prompt templates from the live AgentSpec
+                prompt_template=getattr(spec, "prompt_template", None),
+                system_prompt_template=getattr(spec, "system_prompt_template", None),
             )
         )
     return views
