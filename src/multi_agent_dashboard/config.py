@@ -23,14 +23,21 @@ DB_PATH.mkdir(exist_ok=True)
 MIGRATIONS_PATH.mkdir(exist_ok=True)
 LOGS_PATH.mkdir(exist_ok=True)
 
-DB_FILE_PATH = (DATA_PATH / DB_DIR / DB_FILE).resolve()
-
 DOTENV_FILE = Path(".env")
 DOTENV_FILE_PATH = (PROJECT_ROOT / DOTENV_FILE).resolve()
 
-OPENAI_API_KEY = dotenv_values(DOTENV_FILE_PATH).get("OPENAI_API_KEY", None)
+_env = dotenv_values(DOTENV_FILE_PATH)
 
-LOG_LEVEL = dotenv_values(DOTENV_FILE_PATH).get("LOG_LEVEL", "INFO").upper()
+# If DB_FILE is provided in the .env and not empty, use it.
+_db_file_env = _env.get("DB_FILE")
+if _db_file_env is not None and str(_db_file_env).strip():
+    DB_FILE = Path(str(_db_file_env).strip())
+
+DB_FILE_PATH = (DATA_PATH / DB_DIR / DB_FILE).resolve()
+
+OPENAI_API_KEY = _env.get("OPENAI_API_KEY", None)
+
+LOG_LEVEL = _env.get("LOG_LEVEL", "INFO").upper()
 
 LOG_FILE = Path("application.log")
 LOG_FILE_PATH = (LOGS_PATH / LOG_FILE).resolve()
