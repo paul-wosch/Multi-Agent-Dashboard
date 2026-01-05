@@ -8,7 +8,7 @@ from typing import List, Dict, Any
 
 import streamlit as st
 
-from multi_agent_dashboard.config import UI_COLORS
+from multi_agent_dashboard.config import UI_COLORS, AGENT_SNAPSHOT_PRUNE_KEEP
 from multi_agent_dashboard.ui.cache import (
     cached_load_agents,
     cached_load_prompt_versions,
@@ -341,6 +341,49 @@ def render_agent_editor():
                 except Exception:
                     logger.exception("Failed to save snapshot")
                     st.error("Failed to save snapshot to database")
+
+            # Manual prune controls
+            st.markdown("### Prune old snapshots")
+            st.caption(
+                "Remove older snapshots and keep the most recent N per agent. Changes are permanent."
+            )
+            keep_key = f"prune_keep_{state['name']}"
+            # initialize session_state default for the number input to avoid changing on every rerun
+            if keep_key not in st.session_state:
+                st.session_state[keep_key] = AGENT_SNAPSHOT_PRUNE_KEEP
+
+            # Create the number input using the session state's value as the authoritative initial value.
+            # Important: do not pass the `value=` parameter when the session state key has been initialized,
+            # because Streamlit throws a warning if a widget is created with a default value while the
+            # Session State API already set the key. Using only key=keep_key follows Streamlit guidance.
+            keep_val = st.number_input(
+                "Keep latest N snapshots per agent",
+                min_value=0,
+                step=1,
+                key=keep_key,
+            )
+
+            col_prune_a, col_prune_b = st.columns(2)
+            with col_prune_a:
+                if st.button("🧹 Prune snapshots for this agent", key=f"prune_agent_{state['name']}"):
+                    try:
+                        deleted = get_agent_service().prune_snapshots(agent_name=state["name"], keep=int(keep_val))
+                        invalidate_agents()
+                        st.success(f"Pruned {deleted} snapshots for {state['name']}")
+                        st.rerun()
+                    except Exception:
+                        logger.exception("Failed to prune snapshots for %s", state["name"])
+                        st.error("Failed to prune snapshots; check logs for details")
+            with col_prune_b:
+                if st.button("🧹 Prune snapshots for all agents", key=f"prune_all_{state['name']}"):
+                    try:
+                        deleted = get_agent_service().prune_snapshots(agent_name=None, keep=int(keep_val))
+                        invalidate_agents()
+                        st.success(f"Pruned {deleted} snapshots across all agents")
+                        st.rerun()
+                    except Exception:
+                        logger.exception("Failed to prune snapshots for all agents")
+                        st.error("Failed to prune snapshots; check logs for details")
 
             snapshots = cached_load_agent_snapshots(state["name"])
             if not snapshots:

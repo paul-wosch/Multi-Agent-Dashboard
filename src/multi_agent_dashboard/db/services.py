@@ -4,7 +4,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from multi_agent_dashboard.db.runs import RunDAO, run_dao
 from multi_agent_dashboard.db.agents import AgentDAO, agent_dao
 from multi_agent_dashboard.db.pipelines import PipelineDAO, pipeline_dao
-from multi_agent_dashboard.config import AGENT_SNAPSHOTS_AUTO
+from multi_agent_dashboard.config import AGENT_SNAPSHOTS_AUTO, AGENT_SNAPSHOT_PRUNE_KEEP
 
 # -----------------------
 # Run Service
@@ -193,6 +193,17 @@ class AgentService:
 
     def delete_snapshot(self, snapshot_id: int) -> None:
         return AgentDAO(self.db_path).delete_snapshot(snapshot_id)
+
+    def prune_snapshots(self, agent_name: Optional[str] = None, keep: Optional[int] = None) -> int:
+        """
+        Prune agent snapshots using the DB maintenance helper.
+        If keep is None, fall back to AGENT_SNAPSHOT_PRUNE_KEEP from config.
+        Returns number of deleted rows.
+        """
+        from multi_agent_dashboard.db.maintenance import prune_agent_snapshots
+        if keep is None:
+            keep = AGENT_SNAPSHOT_PRUNE_KEEP
+        return prune_agent_snapshots(agent_name=agent_name, keep=keep)
 
 
 # -----------------------
