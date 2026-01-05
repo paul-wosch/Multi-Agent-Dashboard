@@ -14,7 +14,7 @@ with pipeline_dao(db_path) as dao:
 import json
 import logging
 import warnings
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from typing import List, Optional
 from contextlib import contextmanager
 
@@ -92,7 +92,7 @@ class PipelineDAO:
         logger.info("Saving pipeline %s to DB", pipeline_name)
         try:
             with self._connection() as conn:
-                ts = datetime.now(UTC).isoformat()
+                ts = datetime.now(timezone.utc).isoformat()
                 steps_json = json.dumps(steps)
                 metadata_json = json.dumps(metadata or {})
 

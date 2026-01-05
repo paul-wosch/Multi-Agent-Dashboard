@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 
 from multi_agent_dashboard.db.infra.schema import SCHEMA
 from multi_agent_dashboard.db.infra.sqlite_rebuild import rebuild_table_with_constraints
@@ -137,7 +137,7 @@ def apply_migrations(conn, migrations_dir: str):
 
         conn.execute(
             "INSERT INTO migrations (id, applied_at) VALUES (?, ?)",
-            (migration_id, datetime.now(UTC).isoformat()),
+            (migration_id, datetime.now(timezone.utc).isoformat()),
         )
 
         conn.commit()

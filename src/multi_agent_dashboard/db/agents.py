@@ -15,7 +15,7 @@ with agent_dao(db_path) as dao:
 import json
 import logging
 import warnings
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from typing import List, Optional
 from contextlib import contextmanager
 
@@ -158,7 +158,7 @@ class AgentDAO:
                 ).fetchone()
 
                 new_version = 1 if row[0] is None else row[0] + 1
-                ts = datetime.now(UTC).isoformat()
+                ts = datetime.now(timezone.utc).isoformat()
 
                 cur = conn.execute(
                     """
@@ -338,7 +338,7 @@ class AgentDAO:
 
                 new_version = 1 if row[0] is None else row[0] + 1
 
-                ts = datetime.now(UTC).isoformat()
+                ts = datetime.now(timezone.utc).isoformat()
                 metadata_json = json.dumps(metadata or {})
 
                 conn.execute(
