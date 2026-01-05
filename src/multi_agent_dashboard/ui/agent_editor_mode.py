@@ -12,6 +12,7 @@ from multi_agent_dashboard.config import UI_COLORS
 from multi_agent_dashboard.ui.cache import (
     cached_load_agents,
     cached_load_prompt_versions,
+    cached_load_agent_snapshots,
     get_agent_service,
     invalidate_agents,
 )
@@ -297,6 +298,95 @@ def render_agent_editor():
                     st.code(v["prompt"])
                     if v.get("metadata"):
                         st.json(v["metadata"])
+
+            st.markdown("### Snapshots")
+
+            # Optional note for a snapshot
+            snapshot_note_key = f"agent_snapshot_note_{state['name']}"
+            if snapshot_note_key not in st.session_state:
+                st.session_state[snapshot_note_key] = ""
+
+            st.text_input(
+                "Snapshot note (optional)",
+                key=snapshot_note_key,
+                placeholder="Short note about this snapshot",
+            )
+
+            if st.button("📸 Create Snapshot", key=f"create_snapshot_{state['name']}"):
+                # Build snapshot dict based on current editor state
+                snapshot = {
+                    "model": state["model"],
+                    "prompt_template": state["prompt"],
+                    "system_prompt_template": state.get("system_prompt", "") or None,
+                    "role": state["role"],
+                    "input_vars": state["input_vars"],
+                    "output_vars": state["output_vars"],
+                    "color": state["color"],
+                    "symbol": state["symbol"],
+                    "tools": state["tools"],
+                    "reasoning_effort": state.get("reasoning_effort"),
+                    "reasoning_summary": state.get("reasoning_summary"),
+                }
+                note = st.session_state.get(snapshot_note_key) or ""
+                try:
+                    get_agent_service().save_snapshot(
+                        state["name"],
+                        snapshot,
+                        metadata={"note": note} if note else {},
+                        is_auto=False,
+                    )
+                    invalidate_agents()
+                    st.success("Snapshot saved")
+                    st.rerun()
+                except Exception:
+                    logger.exception("Failed to save snapshot")
+                    st.error("Failed to save snapshot to database")
+
+            snapshots = cached_load_agent_snapshots(state["name"])
+            if not snapshots:
+                st.info("No snapshots available.")
+            for snap in snapshots:
+                with st.expander(f"Snapshot v{snap['version']} — {snap['created_at']}", expanded=False):
+                    st.subheader("Snapshot")
+                    st.json(snap["snapshot"])
+                    if snap.get("metadata"):
+                        st.subheader("Metadata")
+                        st.json(snap["metadata"])
+
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        if st.button("Revert", key=f"revert_snap_{snap['id']}"):
+                            # Load snapshot into editor state (do not auto-save)
+                            s = snap.get("snapshot") or {}
+                            # Update the editor state before widgets are re-created on rerun
+                            st.session_state.agent_editor_state.update(
+                                {
+                                    "name": state.get("name", "") or "",
+                                    "model": s.get("model", "gpt-4.1-nano"),
+                                    "role": s.get("role", ""),
+                                    "prompt": s.get("prompt_template", "") or "",
+                                    "system_prompt": s.get("system_prompt_template", "") or "",
+                                    "input_vars": s.get("input_vars", []) or [],
+                                    "output_vars": s.get("output_vars", []) or [],
+                                    "color": s.get("color", DEFAULT_COLOR) or DEFAULT_COLOR,
+                                    "symbol": s.get("symbol", DEFAULT_SYMBOL) or DEFAULT_SYMBOL,
+                                    "tools": s.get("tools") or {"enabled": False, "tools": []},
+                                    "reasoning_effort": s.get("reasoning_effort"),
+                                    "reasoning_summary": s.get("reasoning_summary"),
+                                }
+                            )
+                            st.session_state.agent_editor_state_changed_this_run = True
+                            st.success(f"Snapshot v{snap['version']} loaded into editor. Click Save to persist.")
+                            st.rerun()
+                    with col_b:
+                        export_payload = json.dumps({"snapshot": snap.get("snapshot"), "metadata": snap.get("metadata")}, indent=2)
+                        st.download_button(
+                            "Export JSON",
+                            data=export_payload,
+                            file_name=f"{state['name']}_snapshot_v{snap['version']}.json",
+                            mime="application/json",
+                            key=f"export_snap_{snap['id']}",
+                        )
 
     # ----- Advanced tab -----
     with adv_tab:

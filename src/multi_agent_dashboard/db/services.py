@@ -4,7 +4,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from multi_agent_dashboard.db.runs import RunDAO, run_dao
 from multi_agent_dashboard.db.agents import AgentDAO, agent_dao
 from multi_agent_dashboard.db.pipelines import PipelineDAO, pipeline_dao
-
+from multi_agent_dashboard.config import AGENT_SNAPSHOTS_AUTO
 
 # -----------------------
 # Run Service
@@ -147,6 +147,28 @@ class AgentService:
                     meta,
                 )
 
+            # Optional automatic snapshot (configurable)
+            if AGENT_SNAPSHOTS_AUTO:
+                snapshot = {
+                    "model": model,
+                    "prompt_template": prompt,
+                    "system_prompt_template": system_prompt,
+                    "role": role,
+                    "input_vars": input_vars,
+                    "output_vars": output_vars,
+                    "color": color,
+                    "symbol": symbol,
+                    "tools": tools,
+                    "reasoning_effort": reasoning_effort,
+                    "reasoning_summary": reasoning_summary,
+                }
+                try:
+                    dao.save_snapshot(name, snapshot, metadata={"event": "auto_save"}, is_auto=True)
+                except Exception:
+                    # Non-fatal; transaction will still commit the agent save.
+                    logger = __import__("logging").getLogger(__name__)
+                    logger.exception("Failed to create automatic snapshot for %s", name)
+
     def rename_agent_atomic(self, old_name: str, new_name: str) -> None:
         """Atomically rename an agent."""
         with agent_dao(self.db_path) as dao:
@@ -156,6 +178,21 @@ class AgentService:
         """Atomically delete an agent."""
         with agent_dao(self.db_path) as dao:
             dao.delete(name)
+
+    # -----------------------
+    # Snapshot wrappers
+    # -----------------------
+    def save_snapshot(self, agent_name: str, snapshot: dict, metadata: Optional[dict] = None, is_auto: bool = False) -> int:
+        return AgentDAO(self.db_path).save_snapshot(agent_name, snapshot, metadata=metadata, is_auto=is_auto)
+
+    def list_snapshots(self, agent_name: str) -> List[dict]:
+        return AgentDAO(self.db_path).list_snapshots(agent_name)
+
+    def get_snapshot(self, snapshot_id: int) -> Optional[dict]:
+        return AgentDAO(self.db_path).get_snapshot_by_id(snapshot_id)
+
+    def delete_snapshot(self, snapshot_id: int) -> None:
+        return AgentDAO(self.db_path).delete_snapshot(snapshot_id)
 
 
 # -----------------------

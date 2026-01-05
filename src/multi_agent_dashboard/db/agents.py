@@ -135,6 +135,127 @@ class AgentDAO:
         return versions
 
     # -----------------------
+    # Snapshot operations
+    # -----------------------
+
+    def save_snapshot(
+        self,
+        agent_name: str,
+        snapshot: dict,
+        metadata: Optional[dict] = None,
+        is_auto: bool = False,
+    ) -> int:
+        """
+        Save a full JSON snapshot for an agent.
+        Returns the snapshot row id.
+        """
+        logger.info("Saving snapshot for %s to DB", agent_name)
+        try:
+            with self._connection() as conn:
+                row = conn.execute(
+                    "SELECT MAX(version) FROM agent_snapshots WHERE agent_name = ?",
+                    (agent_name,),
+                ).fetchone()
+
+                new_version = 1 if row[0] is None else row[0] + 1
+                ts = datetime.now(UTC).isoformat()
+
+                cur = conn.execute(
+                    """
+                    INSERT INTO agent_snapshots
+                        (agent_name, version, snapshot_json, metadata_json, is_auto, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        agent_name,
+                        new_version,
+                        json.dumps(snapshot),
+                        json.dumps(metadata or {}),
+                        1 if is_auto else 0,
+                        ts,
+                    ),
+                )
+                return cur.lastrowid
+        except Exception:
+            logger.exception("Failed to save snapshot for %s to DB", agent_name)
+            raise
+
+    def list_snapshots(self, agent_name: str) -> list[dict]:
+        """
+        List snapshots for an agent ordered by version DESC.
+        """
+        logger.debug("Loading snapshots for %s from DB", agent_name)
+        try:
+            with self._connection() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT id, version, snapshot_json, metadata_json, is_auto, created_at
+                    FROM agent_snapshots
+                    WHERE agent_name = ?
+                    ORDER BY version DESC
+                    """,
+                    (agent_name,),
+                ).fetchall()
+        except Exception:
+            logger.exception("Failed to load snapshots for %s from DB", agent_name)
+            raise
+
+        out = []
+        for r in rows:
+            out.append(
+                {
+                    "id": r["id"],
+                    "version": r["version"],
+                    "snapshot": safe_json_loads(r["snapshot_json"], {}),
+                    "metadata": safe_json_loads(r["metadata_json"], {}),
+                    "is_auto": bool(r["is_auto"]),
+                    "created_at": r["created_at"],
+                }
+            )
+        return out
+
+    def get_snapshot_by_id(self, snapshot_id: int) -> Optional[dict]:
+        logger.debug("Fetching snapshot id=%s from DB", snapshot_id)
+        try:
+            with self._connection() as conn:
+                row = conn.execute(
+                    """
+                    SELECT id, agent_name, version, snapshot_json, metadata_json, is_auto, created_at
+                    FROM agent_snapshots
+                    WHERE id = ?
+                    """,
+                    (snapshot_id,),
+                ).fetchone()
+        except Exception:
+            logger.exception("Failed to fetch snapshot id=%s from DB", snapshot_id)
+            raise
+
+        if not row:
+            return None
+
+        return {
+            "id": row["id"],
+            "agent_name": row["agent_name"],
+            "version": row["version"],
+            "snapshot": safe_json_loads(row["snapshot_json"], {}),
+            "metadata": safe_json_loads(row["metadata_json"], {}),
+            "is_auto": bool(row["is_auto"]),
+            "created_at": row["created_at"],
+        }
+
+    def delete_snapshot(self, snapshot_id: int) -> None:
+        logger.info("Deleting snapshot %s from DB", snapshot_id)
+        try:
+            with self._connection() as conn:
+                conn.execute(
+                    "DELETE FROM agent_snapshots WHERE id = ?",
+                    (snapshot_id,),
+                )
+        except Exception:
+            logger.exception("Failed to delete snapshot %s from DB", snapshot_id)
+            raise
+
+    # -----------------------
     # WRITE operations
     # -----------------------
 
@@ -283,6 +404,17 @@ class AgentDAO:
                     "UPDATE agent_run_configs SET agent_name = ? WHERE agent_name = ?",
                     (new_name, old_name),
                 )
+
+                # Attempt to update any stored snapshots. This is non-fatal if the
+                # agent_snapshots table does not yet exist (older DBs).
+                try:
+                    conn.execute(
+                        "UPDATE agent_snapshots SET agent_name = ? WHERE agent_name = ?",
+                        (new_name, old_name),
+                    )
+                except Exception:
+                    # Snapshots table may be missing on older DBs; skip silently.
+                    logger.debug("agent_snapshots table not present; skipping snapshot rename")
 
                 rows = conn.execute(
                     "SELECT pipeline_name, steps_json FROM pipelines"

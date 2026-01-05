@@ -53,6 +53,20 @@ SCHEMA = {
         #   agent_name could reference agents(agent_name)
     },
 
+    # Reversible, full agent snapshots
+    "agent_snapshots": {
+        "columns": {
+            "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+            "agent_name": "TEXT",          # store text so snapshots survive agent deletion if desired
+            "version": "INTEGER",          # per-agent increasing version number
+            "snapshot_json": "TEXT",       # full AgentSpec-like JSON blob
+            "metadata_json": "TEXT",       # freeform metadata (who/why)
+            "is_auto": "INTEGER DEFAULT 0",# 1 if snapshot was automatically created
+            "created_at": "TEXT",
+        },
+        # Intentionally no foreign key: keep snapshots decoupled from agents lifecycle
+    },
+
     "agents": {
         "columns": {
             "agent_name": "TEXT PRIMARY KEY",
@@ -64,7 +78,6 @@ SCHEMA = {
             "color": "TEXT",
             "symbol": "TEXT",
             # tool & reasoning config (backward compatible: all nullable/text)
-            # JSON string with e.g. {"enabled": true, "tools": ["web_search"]}
             "tools_json": "TEXT",
             # Reasoning effort: none|low|medium|high|xhigh
             "reasoning_effort": "TEXT",

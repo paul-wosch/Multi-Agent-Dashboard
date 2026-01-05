@@ -66,6 +66,20 @@ def cached_load_prompt_versions(agent_name: str) -> List[dict]:
     return svc.load_prompt_versions(agent_name)
 
 
+@st.cache_data(ttl=60)
+def cached_load_agent_snapshots(agent_name: str) -> List[dict]:
+    """
+    Cached loader for agent snapshots. Returns [] on error to keep UI resilient
+    if migrations have not yet been applied.
+    """
+    try:
+        svc = get_agent_service()
+        return svc.list_snapshots(agent_name)
+    except Exception:
+        # If the agent_snapshots table doesn't exist yet (older DB), don't blow up the UI
+        return []
+
+
 # Cache invalidation helpers (moved from app.py)
 def invalidate_caches(*names: str):
     """
@@ -76,6 +90,7 @@ def invalidate_caches(*names: str):
       - pipelines
       - runs
       - run_details
+      - snapshots
       - all
     """
     if "all" in names:
@@ -84,6 +99,7 @@ def invalidate_caches(*names: str):
         cached_load_pipelines.clear()
         cached_load_runs.clear()
         cached_load_run_details.clear()
+        cached_load_agent_snapshots.clear()
         return
 
     for name in names:
@@ -97,11 +113,13 @@ def invalidate_caches(*names: str):
             cached_load_runs.clear()
         elif name == "run_details":
             cached_load_run_details.clear()
+        elif name == "snapshots":
+            cached_load_agent_snapshots.clear()
 
 
 def invalidate_agents():
     """Invalidate caches related to agents and prompt versions."""
-    invalidate_caches("agents", "prompt_versions")
+    invalidate_caches("agents", "prompt_versions", "snapshots")
 
 
 def invalidate_pipelines():

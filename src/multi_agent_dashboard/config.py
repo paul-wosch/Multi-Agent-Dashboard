@@ -45,6 +45,10 @@ LOG_FILE_PATH = (LOGS_PATH / LOG_FILE).resolve()
 AGENT_INPUT_CAP = 40_000
 AGENT_OUTPUT_CAP = 50_000
 
+# Control whether saving an agent automatically creates a snapshot.
+# Default is False to remain backwards-compatible.
+AGENT_SNAPSHOTS_AUTO = False
+
 OPENAI_PRICING = {
     # https://platform.openai.com/docs/pricing
     # latest update: 251230
