@@ -9,7 +9,7 @@ Support for atomic multi-step operations:
 
 with agent_dao(db_path) as dao:
     dao.save(...)
-    dao.save_prompt_version(...)
+    dao.save_snapshot(...)
     dao.rename(...)
 """
 import json
@@ -103,36 +103,6 @@ class AgentDAO:
                 }
             )
         return agents
-
-    def load_prompt_versions(self, agent_name: str) -> list[dict]:
-        logger.debug("Loading prompt versions for %s from DB", agent_name)
-        try:
-            with self._connection() as conn:
-                rows = conn.execute(
-                    """
-                    SELECT id, version, prompt, metadata_json, timestamp
-                    FROM agent_prompt_versions
-                    WHERE agent_name = ?
-                    ORDER BY version DESC
-                    """,
-                    (agent_name,),
-                ).fetchall()
-        except Exception:
-            logger.exception("Failed to load prompt versions for %s from DB", agent_name)
-            raise
-
-        versions = []
-        for row in rows:
-            versions.append(
-                {
-                    "id": row["id"],
-                    "version": row["version"],
-                    "prompt": row["prompt"],
-                    "metadata": safe_json_loads(row["metadata_json"], {}),
-                    "created_at": row["timestamp"],
-                }
-            )
-        return versions
 
     # -----------------------
     # Snapshot operations
@@ -322,45 +292,6 @@ class AgentDAO:
             logger.exception("Failed to save %s to DB", agent_name)
             raise
 
-    def save_prompt_version(
-        self,
-        agent_name: str,
-        prompt_text: str,
-        metadata: Optional[dict] = None,
-    ) -> int:
-        logger.info("Saving prompt version for %s to DB", agent_name)
-        try:
-            with self._connection() as conn:
-                row = conn.execute(
-                    "SELECT MAX(version) FROM agent_prompt_versions WHERE agent_name = ?",
-                    (agent_name,),
-                ).fetchone()
-
-                new_version = 1 if row[0] is None else row[0] + 1
-
-                ts = datetime.now(timezone.utc).isoformat()
-                metadata_json = json.dumps(metadata or {})
-
-                conn.execute(
-                    """
-                    INSERT INTO agent_prompt_versions
-                        (agent_name, version, prompt, metadata_json, timestamp)
-                    VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (
-                        agent_name,
-                        new_version,
-                        prompt_text,
-                        metadata_json,
-                        ts,
-                    ),
-                )
-        except Exception:
-            logger.exception("Failed to save prompt version for %s to DB", agent_name)
-            raise
-
-        return new_version
-
     def rename(self, old_name: str, new_name: str) -> None:
         if old_name == new_name:
             return
@@ -377,11 +308,6 @@ class AgentDAO:
 
                 conn.execute(
                     "UPDATE agents SET agent_name = ? WHERE agent_name = ?",
-                    (new_name, old_name),
-                )
-
-                conn.execute(
-                    "UPDATE agent_prompt_versions SET agent_name = ? WHERE agent_name = ?",
                     (new_name, old_name),
                 )
 
@@ -482,28 +408,12 @@ def load_agents_from_db(db_path: str) -> list[dict]:
     return AgentDAO(db_path=db_path).list()
 
 
-def load_prompt_versions(db_path: str, agent_name: str):
-    warnings.warn(
-        "load_prompt_versions is deprecated; use AgentDAO.load_prompt_versions",
-        DeprecationWarning,
-    )
-    return AgentDAO(db_path=db_path).load_prompt_versions(agent_name)
-
-
 def save_agent_to_db(db_path: str, *args, **kwargs):
     warnings.warn(
         "save_agent_to_db is deprecated; use AgentDAO.save",
         DeprecationWarning,
     )
     return AgentDAO(db_path=db_path).save(*args, **kwargs)
-
-
-def save_prompt_version(db_path: str, *args, **kwargs):
-    warnings.warn(
-        "save_prompt_version is deprecated; use AgentDAO.save_prompt_version",
-        DeprecationWarning,
-    )
-    return AgentDAO(db_path=db_path).save_prompt_version(*args, **kwargs)
 
 
 def rename_agent_in_db(db_path: str, *args, **kwargs):

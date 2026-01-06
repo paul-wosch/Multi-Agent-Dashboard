@@ -11,7 +11,6 @@ import streamlit as st
 from multi_agent_dashboard.config import UI_COLORS, AGENT_SNAPSHOT_PRUNE_KEEP
 from multi_agent_dashboard.ui.cache import (
     cached_load_agents,
-    cached_load_prompt_versions,
     cached_load_agent_snapshots,
     get_agent_service,
     invalidate_agents,
@@ -173,11 +172,11 @@ def render_agent_editor():
             "2️⃣ Prompt",
             "3️⃣ Inputs / Outputs",
             "⚙️ Advanced",
-            "📚 Versions",
+            "📚 Snapshots",
         ]
     )
 
-    basics_tab, prompt_tab, io_tab, adv_tab, versions_tab = tabs
+    basics_tab, prompt_tab, io_tab, adv_tab, snapshots_tab = tabs
 
     # ----- Basics tab -----
     with basics_tab:
@@ -287,149 +286,139 @@ def render_agent_editor():
                 value="\n".join(state["output_vars"]),
             )
 
-    # ----- Versions tab -----
-    with versions_tab:
-        if not is_new:
-            versions = cached_load_prompt_versions(state["name"])
-            for v in versions:
-                with st.expander(
-                    f"Version {v['version']} — {v['created_at']}",
-                ):
-                    st.code(v["prompt"])
-                    if v.get("metadata"):
-                        st.json(v["metadata"])
+    # ----- Snapshots tab -----
+    with snapshots_tab:
+        st.markdown("### Snapshots")
 
-            st.markdown("### Snapshots")
+        # Optional note for a snapshot
+        snapshot_note_key = f"agent_snapshot_note_{state['name']}"
+        if snapshot_note_key not in st.session_state:
+            st.session_state[snapshot_note_key] = ""
 
-            # Optional note for a snapshot
-            snapshot_note_key = f"agent_snapshot_note_{state['name']}"
-            if snapshot_note_key not in st.session_state:
-                st.session_state[snapshot_note_key] = ""
+        st.text_input(
+            "Snapshot note (optional)",
+            key=snapshot_note_key,
+            placeholder="Short note about this snapshot",
+        )
 
-            st.text_input(
-                "Snapshot note (optional)",
-                key=snapshot_note_key,
-                placeholder="Short note about this snapshot",
-            )
+        if st.button("📸 Create Snapshot", key=f"create_snapshot_{state['name']}"):
+            # Build snapshot dict based on current editor state
+            snapshot = {
+                "model": state["model"],
+                "prompt_template": state["prompt"],
+                "system_prompt_template": state.get("system_prompt", "") or None,
+                "role": state["role"],
+                "input_vars": state["input_vars"],
+                "output_vars": state["output_vars"],
+                "color": state["color"],
+                "symbol": state["symbol"],
+                "tools": state["tools"],
+                "reasoning_effort": state.get("reasoning_effort"),
+                "reasoning_summary": state.get("reasoning_summary"),
+            }
+            note = st.session_state.get(snapshot_note_key) or ""
+            try:
+                get_agent_service().save_snapshot(
+                    state["name"],
+                    snapshot,
+                    metadata={"note": note} if note else {},
+                    is_auto=False,
+                )
+                invalidate_agents()
+                st.success("Snapshot saved")
+                st.rerun()
+            except Exception:
+                logger.exception("Failed to save snapshot")
+                st.error("Failed to save snapshot to database")
 
-            if st.button("📸 Create Snapshot", key=f"create_snapshot_{state['name']}"):
-                # Build snapshot dict based on current editor state
-                snapshot = {
-                    "model": state["model"],
-                    "prompt_template": state["prompt"],
-                    "system_prompt_template": state.get("system_prompt", "") or None,
-                    "role": state["role"],
-                    "input_vars": state["input_vars"],
-                    "output_vars": state["output_vars"],
-                    "color": state["color"],
-                    "symbol": state["symbol"],
-                    "tools": state["tools"],
-                    "reasoning_effort": state.get("reasoning_effort"),
-                    "reasoning_summary": state.get("reasoning_summary"),
-                }
-                note = st.session_state.get(snapshot_note_key) or ""
+        # Manual prune controls
+        st.markdown("### Prune old snapshots")
+        st.caption(
+            "Remove older snapshots and keep the most recent N per agent. Changes are permanent."
+        )
+        keep_key = f"prune_keep_{state['name']}"
+        # initialize session_state default for the number input to avoid changing on every rerun
+        if keep_key not in st.session_state:
+            st.session_state[keep_key] = AGENT_SNAPSHOT_PRUNE_KEEP
+
+        # Create the number input using the session state's value as the authoritative initial value.
+        # Important: do not pass the `value=` parameter when the session state key has been initialized,
+        # because Streamlit throws a warning if a widget is created with a default value while the
+        # Session State API already set the key. Using only key=keep_key follows Streamlit guidance.
+        keep_val = st.number_input(
+            "Keep latest N snapshots per agent",
+            min_value=0,
+            step=1,
+            key=keep_key,
+        )
+
+        col_prune_a, col_prune_b = st.columns(2)
+        with col_prune_a:
+            if st.button("🧹 Prune snapshots for this agent", key=f"prune_agent_{state['name']}"):
                 try:
-                    get_agent_service().save_snapshot(
-                        state["name"],
-                        snapshot,
-                        metadata={"note": note} if note else {},
-                        is_auto=False,
-                    )
+                    deleted = get_agent_service().prune_snapshots(agent_name=state["name"], keep=int(keep_val))
                     invalidate_agents()
-                    st.success("Snapshot saved")
+                    st.success(f"Pruned {deleted} snapshots for {state['name']}")
                     st.rerun()
                 except Exception:
-                    logger.exception("Failed to save snapshot")
-                    st.error("Failed to save snapshot to database")
+                    logger.exception("Failed to prune snapshots for %s", state["name"])
+                    st.error("Failed to prune snapshots; check logs for details")
+        with col_prune_b:
+            if st.button("🧹 Prune snapshots for all agents", key=f"prune_all_{state['name']}"):
+                try:
+                    deleted = get_agent_service().prune_snapshots(agent_name=None, keep=int(keep_val))
+                    invalidate_agents()
+                    st.success(f"Pruned {deleted} snapshots across all agents")
+                    st.rerun()
+                except Exception:
+                    logger.exception("Failed to prune snapshots for all agents")
+                    st.error("Failed to prune snapshots; check logs for details")
 
-            # Manual prune controls
-            st.markdown("### Prune old snapshots")
-            st.caption(
-                "Remove older snapshots and keep the most recent N per agent. Changes are permanent."
-            )
-            keep_key = f"prune_keep_{state['name']}"
-            # initialize session_state default for the number input to avoid changing on every rerun
-            if keep_key not in st.session_state:
-                st.session_state[keep_key] = AGENT_SNAPSHOT_PRUNE_KEEP
+        snapshots = cached_load_agent_snapshots(state["name"])
+        if not snapshots:
+            st.info("No snapshots available.")
+        for snap in snapshots:
+            with st.expander(f"Snapshot v{snap['version']} — {snap['created_at']}", expanded=False):
+                st.subheader("Snapshot")
+                st.json(snap["snapshot"])
+                if snap.get("metadata"):
+                    st.subheader("Metadata")
+                    st.json(snap["metadata"])
 
-            # Create the number input using the session state's value as the authoritative initial value.
-            # Important: do not pass the `value=` parameter when the session state key has been initialized,
-            # because Streamlit throws a warning if a widget is created with a default value while the
-            # Session State API already set the key. Using only key=keep_key follows Streamlit guidance.
-            keep_val = st.number_input(
-                "Keep latest N snapshots per agent",
-                min_value=0,
-                step=1,
-                key=keep_key,
-            )
-
-            col_prune_a, col_prune_b = st.columns(2)
-            with col_prune_a:
-                if st.button("🧹 Prune snapshots for this agent", key=f"prune_agent_{state['name']}"):
-                    try:
-                        deleted = get_agent_service().prune_snapshots(agent_name=state["name"], keep=int(keep_val))
-                        invalidate_agents()
-                        st.success(f"Pruned {deleted} snapshots for {state['name']}")
-                        st.rerun()
-                    except Exception:
-                        logger.exception("Failed to prune snapshots for %s", state["name"])
-                        st.error("Failed to prune snapshots; check logs for details")
-            with col_prune_b:
-                if st.button("🧹 Prune snapshots for all agents", key=f"prune_all_{state['name']}"):
-                    try:
-                        deleted = get_agent_service().prune_snapshots(agent_name=None, keep=int(keep_val))
-                        invalidate_agents()
-                        st.success(f"Pruned {deleted} snapshots across all agents")
-                        st.rerun()
-                    except Exception:
-                        logger.exception("Failed to prune snapshots for all agents")
-                        st.error("Failed to prune snapshots; check logs for details")
-
-            snapshots = cached_load_agent_snapshots(state["name"])
-            if not snapshots:
-                st.info("No snapshots available.")
-            for snap in snapshots:
-                with st.expander(f"Snapshot v{snap['version']} — {snap['created_at']}", expanded=False):
-                    st.subheader("Snapshot")
-                    st.json(snap["snapshot"])
-                    if snap.get("metadata"):
-                        st.subheader("Metadata")
-                        st.json(snap["metadata"])
-
-                    col_a, col_b = st.columns(2)
-                    with col_a:
-                        if st.button("Revert", key=f"revert_snap_{snap['id']}"):
-                            # Load snapshot into editor state (do not auto-save)
-                            s = snap.get("snapshot") or {}
-                            # Update the editor state before widgets are re-created on rerun
-                            st.session_state.agent_editor_state.update(
-                                {
-                                    "name": state.get("name", "") or "",
-                                    "model": s.get("model", "gpt-4.1-nano"),
-                                    "role": s.get("role", ""),
-                                    "prompt": s.get("prompt_template", "") or "",
-                                    "system_prompt": s.get("system_prompt_template", "") or "",
-                                    "input_vars": s.get("input_vars", []) or [],
-                                    "output_vars": s.get("output_vars", []) or [],
-                                    "color": s.get("color", DEFAULT_COLOR) or DEFAULT_COLOR,
-                                    "symbol": s.get("symbol", DEFAULT_SYMBOL) or DEFAULT_SYMBOL,
-                                    "tools": s.get("tools") or {"enabled": False, "tools": []},
-                                    "reasoning_effort": s.get("reasoning_effort"),
-                                    "reasoning_summary": s.get("reasoning_summary"),
-                                }
-                            )
-                            st.session_state.agent_editor_state_changed_this_run = True
-                            st.success(f"Snapshot v{snap['version']} loaded into editor. Click Save to persist.")
-                            st.rerun()
-                    with col_b:
-                        export_payload = json.dumps({"snapshot": snap.get("snapshot"), "metadata": snap.get("metadata")}, indent=2)
-                        st.download_button(
-                            "Export JSON",
-                            data=export_payload,
-                            file_name=f"{state['name']}_snapshot_v{snap['version']}.json",
-                            mime="application/json",
-                            key=f"export_snap_{snap['id']}",
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    if st.button("Revert", key=f"revert_snap_{snap['id']}"):
+                        # Load snapshot into editor state (do not auto-save)
+                        s = snap.get("snapshot") or {}
+                        # Update the editor state before widgets are re-created on rerun
+                        st.session_state.agent_editor_state.update(
+                            {
+                                "name": state.get("name", "") or "",
+                                "model": s.get("model", "gpt-4.1-nano"),
+                                "role": s.get("role", ""),
+                                "prompt": s.get("prompt_template", "") or "",
+                                "system_prompt": s.get("system_prompt_template", "") or "",
+                                "input_vars": s.get("input_vars", []) or [],
+                                "output_vars": s.get("output_vars", []) or [],
+                                "color": s.get("color", DEFAULT_COLOR) or DEFAULT_COLOR,
+                                "symbol": s.get("symbol", DEFAULT_SYMBOL) or DEFAULT_SYMBOL,
+                                "tools": s.get("tools") or {"enabled": False, "tools": []},
+                                "reasoning_effort": s.get("reasoning_effort"),
+                                "reasoning_summary": s.get("reasoning_summary"),
+                            }
                         )
+                        st.session_state.agent_editor_state_changed_this_run = True
+                        st.success(f"Snapshot v{snap['version']} loaded into editor. Click Save to persist.")
+                        st.rerun()
+                with col_b:
+                    export_payload = json.dumps({"snapshot": snap.get("snapshot"), "metadata": snap.get("metadata")}, indent=2)
+                    st.download_button(
+                        "Export JSON",
+                        data=export_payload,
+                        file_name=f"{state['name']}_snapshot_v{snap['version']}.json",
+                        mime="application/json",
+                        key=f"export_snap_{snap['id']}",
+                    )
 
     # ----- Advanced tab -----
     with adv_tab:

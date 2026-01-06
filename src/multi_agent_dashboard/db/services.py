@@ -88,17 +88,14 @@ class AgentService:
             system_prompt_template=system_prompt,
         )
 
-    def save_prompt_version(self, agent_name: str, prompt_text: str, metadata: Optional[dict] = None) -> int:
-        return AgentDAO(self.db_path).save_prompt_version(agent_name, prompt_text, metadata)
+    # Note: old prompt-versioning has been removed. If external code calls
+    # save_prompt_version/load_prompt_versions, adapt to use snapshots instead.
 
     def rename_agent(self, old_name: str, new_name: str) -> None:
         AgentDAO(self.db_path).rename(old_name, new_name)
 
     def delete_agent(self, name: str) -> None:
         AgentDAO(self.db_path).delete(name)
-
-    def load_prompt_versions(self, agent_name: str) -> List[dict]:
-        return AgentDAO(self.db_path).load_prompt_versions(agent_name)
 
     def save_agent_atomic(
             self,
@@ -118,7 +115,10 @@ class AgentService:
             reasoning_summary: Optional[str] = None,
             system_prompt: Optional[str] = None,
     ) -> None:
-        """Atomically save agent metadata and optionally create a prompt version."""
+        """Atomically save agent metadata. The legacy 'prompt version' system
+        has been removed in favour of agent snapshots. The `save_prompt_version`
+        parameter is retained for API compatibility but is ignored.
+        """
         with agent_dao(self.db_path) as dao:
             dao.save(
                 name,
@@ -134,18 +134,6 @@ class AgentService:
                 reasoning_summary=reasoning_summary,
                 system_prompt_template=system_prompt,
             )
-
-            if save_prompt_version:
-                # Include system_prompt in the prompt version metadata so versions
-                # capture the full agent configuration used to generate outputs.
-                meta = dict(metadata or {})
-                if system_prompt:
-                    meta["system_prompt"] = system_prompt
-                dao.save_prompt_version(
-                    name,
-                    prompt,
-                    meta,
-                )
 
             # Optional automatic snapshot (configurable)
             if AGENT_SNAPSHOTS_AUTO:

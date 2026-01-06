@@ -61,12 +61,6 @@ def cached_load_run_details(run_id: int) -> Tuple[dict, List[dict], List[dict], 
 
 
 @st.cache_data(ttl=60)
-def cached_load_prompt_versions(agent_name: str) -> List[dict]:
-    svc = get_agent_service()
-    return svc.load_prompt_versions(agent_name)
-
-
-@st.cache_data(ttl=60)
 def cached_load_agent_snapshots(agent_name: str) -> List[dict]:
     """
     Cached loader for agent snapshots. Returns [] on error to keep UI resilient
@@ -86,7 +80,6 @@ def invalidate_caches(*names: str):
     Centralized cache invalidation helper.
     Allowed names:
       - agents
-      - prompt_versions
       - pipelines
       - runs
       - run_details
@@ -95,7 +88,6 @@ def invalidate_caches(*names: str):
     """
     if "all" in names:
         cached_load_agents.clear()
-        cached_load_prompt_versions.clear()
         cached_load_pipelines.clear()
         cached_load_runs.clear()
         cached_load_run_details.clear()
@@ -105,8 +97,6 @@ def invalidate_caches(*names: str):
     for name in names:
         if name == "agents":
             cached_load_agents.clear()
-        elif name == "prompt_versions":
-            cached_load_prompt_versions.clear()
         elif name == "pipelines":
             cached_load_pipelines.clear()
         elif name == "runs":
@@ -118,8 +108,8 @@ def invalidate_caches(*names: str):
 
 
 def invalidate_agents():
-    """Invalidate caches related to agents and prompt versions."""
-    invalidate_caches("agents", "prompt_versions", "snapshots")
+    """Invalidate caches related to agents and snapshots."""
+    invalidate_caches("agents", "snapshots")
 
 
 def invalidate_pipelines():
