@@ -1,4 +1,4 @@
-# db/maintenance.py
+# db/infra/maintenance.py
 """
 Database maintenance helpers.
 """

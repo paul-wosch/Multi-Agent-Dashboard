@@ -200,7 +200,7 @@ class AgentService:
         If keep is None, fall back to AGENT_SNAPSHOT_PRUNE_KEEP from config.
         Returns number of deleted rows.
         """
-        from multi_agent_dashboard.db.maintenance import prune_agent_snapshots
+        from multi_agent_dashboard.db.infra.maintenance import prune_agent_snapshots
         if keep is None:
             keep = AGENT_SNAPSHOT_PRUNE_KEEP
         return prune_agent_snapshots(agent_name=agent_name, keep=keep)

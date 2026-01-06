@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# db/infra/prune_snapshots.py
 """
 prune_snapshots.py
 
@@ -29,7 +30,7 @@ from typing import Optional, Dict, List, Any
 
 from multi_agent_dashboard.config import DB_FILE_PATH, AGENT_SNAPSHOT_PRUNE_KEEP
 from multi_agent_dashboard.db.infra.core import get_conn
-import multi_agent_dashboard.db.maintenance as maintenance
+import multi_agent_dashboard.db.infra.maintenance as maintenance
 
 
 def _preview_deletions(conn, agent_name: Optional[str], keep: int) -> Dict[str, List[Dict[str, Any]]]:

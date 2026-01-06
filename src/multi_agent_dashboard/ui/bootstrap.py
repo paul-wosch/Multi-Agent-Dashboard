@@ -106,9 +106,9 @@ def bootstrap_default_agents(defaults: Dict[str, dict]):
     - Use the AgentService directly to avoid reading a cached empty list from
       cached_load_agents() on first run (which would mask newly-inserted rows).
     - Use save_agent_atomic to persist agent metadata and create a prompt version
-      in a single transaction.
+    in a single transaction.
     - Invalidate the agents cache after inserting so subsequent cached reads
-      (reload_agents_into_engine) will pick up the inserted agents.
+    (reload_agents_into_engine) will pick up the inserted agents.
     """
     svc = get_agent_service()
     # Read DB directly (bypass st.cache_data) to detect empty DB reliably.
@@ -193,7 +193,7 @@ def app_start():
     # Optional automatic pruning of old snapshots at startup (configurable)
     if AGENT_SNAPSHOT_PRUNE_AUTO:
         try:
-            from multi_agent_dashboard.db.maintenance import prune_agent_snapshots
+            from multi_agent_dashboard.db.infra.maintenance import prune_agent_snapshots
 
             deleted = prune_agent_snapshots(agent_name=None, keep=AGENT_SNAPSHOT_PRUNE_KEEP)
             logging.getLogger(__name__).info(
