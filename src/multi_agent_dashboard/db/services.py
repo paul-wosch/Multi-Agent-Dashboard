@@ -4,7 +4,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from multi_agent_dashboard.db.runs import RunDAO, run_dao
 from multi_agent_dashboard.db.agents import AgentDAO, agent_dao
 from multi_agent_dashboard.db.pipelines import PipelineDAO, pipeline_dao
-
+from multi_agent_dashboard.config import AGENT_SNAPSHOTS_AUTO, AGENT_SNAPSHOT_PRUNE_KEEP
 
 # -----------------------
 # Run Service
@@ -88,17 +88,14 @@ class AgentService:
             system_prompt_template=system_prompt,
         )
 
-    def save_prompt_version(self, agent_name: str, prompt_text: str, metadata: Optional[dict] = None) -> int:
-        return AgentDAO(self.db_path).save_prompt_version(agent_name, prompt_text, metadata)
+    # Note: old prompt-versioning has been removed. If external code calls
+    # save_prompt_version/load_prompt_versions, adapt to use snapshots instead.
 
     def rename_agent(self, old_name: str, new_name: str) -> None:
         AgentDAO(self.db_path).rename(old_name, new_name)
 
     def delete_agent(self, name: str) -> None:
         AgentDAO(self.db_path).delete(name)
-
-    def load_prompt_versions(self, agent_name: str) -> List[dict]:
-        return AgentDAO(self.db_path).load_prompt_versions(agent_name)
 
     def save_agent_atomic(
             self,
@@ -118,7 +115,10 @@ class AgentService:
             reasoning_summary: Optional[str] = None,
             system_prompt: Optional[str] = None,
     ) -> None:
-        """Atomically save agent metadata and optionally create a prompt version."""
+        """Atomically save agent metadata. The legacy 'prompt version' system
+        has been removed in favour of agent snapshots. The `save_prompt_version`
+        parameter is retained for API compatibility but is ignored.
+        """
         with agent_dao(self.db_path) as dao:
             dao.save(
                 name,
@@ -135,17 +135,27 @@ class AgentService:
                 system_prompt_template=system_prompt,
             )
 
-            if save_prompt_version:
-                # Include system_prompt in the prompt version metadata so versions
-                # capture the full agent configuration used to generate outputs.
-                meta = dict(metadata or {})
-                if system_prompt:
-                    meta["system_prompt"] = system_prompt
-                dao.save_prompt_version(
-                    name,
-                    prompt,
-                    meta,
-                )
+            # Optional automatic snapshot (configurable)
+            if AGENT_SNAPSHOTS_AUTO:
+                snapshot = {
+                    "model": model,
+                    "prompt_template": prompt,
+                    "system_prompt_template": system_prompt,
+                    "role": role,
+                    "input_vars": input_vars,
+                    "output_vars": output_vars,
+                    "color": color,
+                    "symbol": symbol,
+                    "tools": tools,
+                    "reasoning_effort": reasoning_effort,
+                    "reasoning_summary": reasoning_summary,
+                }
+                try:
+                    dao.save_snapshot(name, snapshot, metadata={"event": "auto_save"}, is_auto=True)
+                except Exception:
+                    # Non-fatal; transaction will still commit the agent save.
+                    logger = __import__("logging").getLogger(__name__)
+                    logger.exception("Failed to create automatic snapshot for %s", name)
 
     def rename_agent_atomic(self, old_name: str, new_name: str) -> None:
         """Atomically rename an agent."""
@@ -156,6 +166,32 @@ class AgentService:
         """Atomically delete an agent."""
         with agent_dao(self.db_path) as dao:
             dao.delete(name)
+
+    # -----------------------
+    # Snapshot wrappers
+    # -----------------------
+    def save_snapshot(self, agent_name: str, snapshot: dict, metadata: Optional[dict] = None, is_auto: bool = False) -> int:
+        return AgentDAO(self.db_path).save_snapshot(agent_name, snapshot, metadata=metadata, is_auto=is_auto)
+
+    def list_snapshots(self, agent_name: str) -> List[dict]:
+        return AgentDAO(self.db_path).list_snapshots(agent_name)
+
+    def get_snapshot(self, snapshot_id: int) -> Optional[dict]:
+        return AgentDAO(self.db_path).get_snapshot_by_id(snapshot_id)
+
+    def delete_snapshot(self, snapshot_id: int) -> None:
+        return AgentDAO(self.db_path).delete_snapshot(snapshot_id)
+
+    def prune_snapshots(self, agent_name: Optional[str] = None, keep: Optional[int] = None) -> int:
+        """
+        Prune agent snapshots using the DB maintenance helper.
+        If keep is None, fall back to AGENT_SNAPSHOT_PRUNE_KEEP from config.
+        Returns number of deleted rows.
+        """
+        from multi_agent_dashboard.db.infra.maintenance import prune_agent_snapshots
+        if keep is None:
+            keep = AGENT_SNAPSHOT_PRUNE_KEEP
+        return prune_agent_snapshots(agent_name=agent_name, keep=keep)
 
 
 # -----------------------

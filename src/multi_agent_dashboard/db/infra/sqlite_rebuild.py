@@ -25,7 +25,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Set
 
 from multi_agent_dashboard.db.infra.schema import SCHEMA

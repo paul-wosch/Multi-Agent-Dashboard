@@ -15,7 +15,7 @@ with run_dao(db_path) as dao:
 import json
 import logging
 import warnings
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from typing import Dict, List, Any, Tuple, Optional
 from contextlib import contextmanager
 
@@ -167,7 +167,7 @@ class RunDAO:
             agent_metrics: Dict[str, Dict[str, Any]] | None = None,
             tool_usages: Dict[str, List[Dict[str, Any]]] | None = None,
     ) -> int:
-        ts = datetime.now(UTC).isoformat()
+        ts = datetime.now(timezone.utc).isoformat()
         agent_models = agent_models or {}
         agent_configs = agent_configs or {}
         agent_metrics = agent_metrics or {}

@@ -4,8 +4,9 @@ from __future__ import annotations
 from typing import Dict
 
 import streamlit as st
+import logging
 
-from multi_agent_dashboard.config import DB_FILE_PATH, OPENAI_API_KEY, configure_logging
+from multi_agent_dashboard.config import DB_FILE_PATH, OPENAI_API_KEY, configure_logging, AGENT_SNAPSHOT_PRUNE_AUTO, AGENT_SNAPSHOT_PRUNE_KEEP
 from multi_agent_dashboard.db.db import init_db
 from multi_agent_dashboard.engine import MultiAgentEngine
 from multi_agent_dashboard.llm_client import LLMClient
@@ -105,9 +106,9 @@ def bootstrap_default_agents(defaults: Dict[str, dict]):
     - Use the AgentService directly to avoid reading a cached empty list from
       cached_load_agents() on first run (which would mask newly-inserted rows).
     - Use save_agent_atomic to persist agent metadata and create a prompt version
-      in a single transaction.
+    in a single transaction.
     - Invalidate the agents cache after inserting so subsequent cached reads
-      (reload_agents_into_engine) will pick up the inserted agents.
+    (reload_agents_into_engine) will pick up the inserted agents.
     """
     svc = get_agent_service()
     # Read DB directly (bypass st.cache_data) to detect empty DB reliably.
@@ -188,3 +189,17 @@ def app_start():
 
     # Optionally keep client in session state for custom use
     st.session_state.llm_client = llm_client
+
+    # Optional automatic pruning of old snapshots at startup (configurable)
+    if AGENT_SNAPSHOT_PRUNE_AUTO:
+        try:
+            from multi_agent_dashboard.db.infra.maintenance import prune_agent_snapshots
+
+            deleted = prune_agent_snapshots(agent_name=None, keep=AGENT_SNAPSHOT_PRUNE_KEEP)
+            logging.getLogger(__name__).info(
+                "Automatic startup prune: removed %d snapshots (keep=%d)",
+                deleted,
+                AGENT_SNAPSHOT_PRUNE_KEEP,
+            )
+        except Exception:
+            logging.getLogger(__name__).exception("Failed to run automatic snapshot pruning at startup")

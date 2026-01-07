@@ -45,6 +45,19 @@ LOG_FILE_PATH = (LOGS_PATH / LOG_FILE).resolve()
 AGENT_INPUT_CAP = 40_000
 AGENT_OUTPUT_CAP = 50_000
 
+# Control whether saving an agent automatically creates a snapshot.
+# Default is False to remain backwards-compatible.
+AGENT_SNAPSHOTS_AUTO = False
+
+# Control whether automatic pruning runs at app start.
+# Set to True to run pruning automatically when the app bootstraps.
+# Default: False (do not run automatic prune).
+AGENT_SNAPSHOT_PRUNE_AUTO = False
+
+# Default number of snapshots to keep per agent when pruning.
+# You can override this value when calling the prune helper from the UI.
+AGENT_SNAPSHOT_PRUNE_KEEP = 100
+
 OPENAI_PRICING = {
     # https://platform.openai.com/docs/pricing
     # latest update: 251230

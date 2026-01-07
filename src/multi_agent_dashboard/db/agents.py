@@ -9,13 +9,13 @@ Support for atomic multi-step operations:
 
 with agent_dao(db_path) as dao:
     dao.save(...)
-    dao.save_prompt_version(...)
+    dao.save_snapshot(...)
     dao.rename(...)
 """
 import json
 import logging
 import warnings
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from typing import List, Optional
 from contextlib import contextmanager
 
@@ -104,35 +104,126 @@ class AgentDAO:
             )
         return agents
 
-    def load_prompt_versions(self, agent_name: str) -> list[dict]:
-        logger.debug("Loading prompt versions for %s from DB", agent_name)
+    # -----------------------
+    # Snapshot operations
+    # -----------------------
+
+    def save_snapshot(
+        self,
+        agent_name: str,
+        snapshot: dict,
+        metadata: Optional[dict] = None,
+        is_auto: bool = False,
+    ) -> int:
+        """
+        Save a full JSON snapshot for an agent.
+        Returns the snapshot row id.
+        """
+        logger.info("Saving snapshot for %s to DB", agent_name)
+        try:
+            with self._connection() as conn:
+                row = conn.execute(
+                    "SELECT MAX(version) FROM agent_snapshots WHERE agent_name = ?",
+                    (agent_name,),
+                ).fetchone()
+
+                new_version = 1 if row[0] is None else row[0] + 1
+                ts = datetime.now(timezone.utc).isoformat()
+
+                cur = conn.execute(
+                    """
+                    INSERT INTO agent_snapshots
+                        (agent_name, version, snapshot_json, metadata_json, is_auto, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        agent_name,
+                        new_version,
+                        json.dumps(snapshot),
+                        json.dumps(metadata or {}),
+                        1 if is_auto else 0,
+                        ts,
+                    ),
+                )
+                return cur.lastrowid
+        except Exception:
+            logger.exception("Failed to save snapshot for %s to DB", agent_name)
+            raise
+
+    def list_snapshots(self, agent_name: str) -> list[dict]:
+        """
+        List snapshots for an agent ordered by version DESC.
+        """
+        logger.debug("Loading snapshots for %s from DB", agent_name)
         try:
             with self._connection() as conn:
                 rows = conn.execute(
                     """
-                    SELECT id, version, prompt, metadata_json, timestamp
-                    FROM agent_prompt_versions
+                    SELECT id, version, snapshot_json, metadata_json, is_auto, created_at
+                    FROM agent_snapshots
                     WHERE agent_name = ?
                     ORDER BY version DESC
                     """,
                     (agent_name,),
                 ).fetchall()
         except Exception:
-            logger.exception("Failed to load prompt versions for %s from DB", agent_name)
+            logger.exception("Failed to load snapshots for %s from DB", agent_name)
             raise
 
-        versions = []
-        for row in rows:
-            versions.append(
+        out = []
+        for r in rows:
+            out.append(
                 {
-                    "id": row["id"],
-                    "version": row["version"],
-                    "prompt": row["prompt"],
-                    "metadata": safe_json_loads(row["metadata_json"], {}),
-                    "created_at": row["timestamp"],
+                    "id": r["id"],
+                    "version": r["version"],
+                    "snapshot": safe_json_loads(r["snapshot_json"], {}),
+                    "metadata": safe_json_loads(r["metadata_json"], {}),
+                    "is_auto": bool(r["is_auto"]),
+                    "created_at": r["created_at"],
                 }
             )
-        return versions
+        return out
+
+    def get_snapshot_by_id(self, snapshot_id: int) -> Optional[dict]:
+        logger.debug("Fetching snapshot id=%s from DB", snapshot_id)
+        try:
+            with self._connection() as conn:
+                row = conn.execute(
+                    """
+                    SELECT id, agent_name, version, snapshot_json, metadata_json, is_auto, created_at
+                    FROM agent_snapshots
+                    WHERE id = ?
+                    """,
+                    (snapshot_id,),
+                ).fetchone()
+        except Exception:
+            logger.exception("Failed to fetch snapshot id=%s from DB", snapshot_id)
+            raise
+
+        if not row:
+            return None
+
+        return {
+            "id": row["id"],
+            "agent_name": row["agent_name"],
+            "version": row["version"],
+            "snapshot": safe_json_loads(row["snapshot_json"], {}),
+            "metadata": safe_json_loads(row["metadata_json"], {}),
+            "is_auto": bool(row["is_auto"]),
+            "created_at": row["created_at"],
+        }
+
+    def delete_snapshot(self, snapshot_id: int) -> None:
+        logger.info("Deleting snapshot %s from DB", snapshot_id)
+        try:
+            with self._connection() as conn:
+                conn.execute(
+                    "DELETE FROM agent_snapshots WHERE id = ?",
+                    (snapshot_id,),
+                )
+        except Exception:
+            logger.exception("Failed to delete snapshot %s from DB", snapshot_id)
+            raise
 
     # -----------------------
     # WRITE operations
@@ -201,45 +292,6 @@ class AgentDAO:
             logger.exception("Failed to save %s to DB", agent_name)
             raise
 
-    def save_prompt_version(
-        self,
-        agent_name: str,
-        prompt_text: str,
-        metadata: Optional[dict] = None,
-    ) -> int:
-        logger.info("Saving prompt version for %s to DB", agent_name)
-        try:
-            with self._connection() as conn:
-                row = conn.execute(
-                    "SELECT MAX(version) FROM agent_prompt_versions WHERE agent_name = ?",
-                    (agent_name,),
-                ).fetchone()
-
-                new_version = 1 if row[0] is None else row[0] + 1
-
-                ts = datetime.now(UTC).isoformat()
-                metadata_json = json.dumps(metadata or {})
-
-                conn.execute(
-                    """
-                    INSERT INTO agent_prompt_versions
-                        (agent_name, version, prompt, metadata_json, timestamp)
-                    VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (
-                        agent_name,
-                        new_version,
-                        prompt_text,
-                        metadata_json,
-                        ts,
-                    ),
-                )
-        except Exception:
-            logger.exception("Failed to save prompt version for %s to DB", agent_name)
-            raise
-
-        return new_version
-
     def rename(self, old_name: str, new_name: str) -> None:
         if old_name == new_name:
             return
@@ -256,11 +308,6 @@ class AgentDAO:
 
                 conn.execute(
                     "UPDATE agents SET agent_name = ? WHERE agent_name = ?",
-                    (new_name, old_name),
-                )
-
-                conn.execute(
-                    "UPDATE agent_prompt_versions SET agent_name = ? WHERE agent_name = ?",
                     (new_name, old_name),
                 )
 
@@ -283,6 +330,17 @@ class AgentDAO:
                     "UPDATE agent_run_configs SET agent_name = ? WHERE agent_name = ?",
                     (new_name, old_name),
                 )
+
+                # Attempt to update any stored snapshots. This is non-fatal if the
+                # agent_snapshots table does not yet exist (older DBs).
+                try:
+                    conn.execute(
+                        "UPDATE agent_snapshots SET agent_name = ? WHERE agent_name = ?",
+                        (new_name, old_name),
+                    )
+                except Exception:
+                    # Snapshots table may be missing on older DBs; skip silently.
+                    logger.debug("agent_snapshots table not present; skipping snapshot rename")
 
                 rows = conn.execute(
                     "SELECT pipeline_name, steps_json FROM pipelines"
@@ -350,28 +408,12 @@ def load_agents_from_db(db_path: str) -> list[dict]:
     return AgentDAO(db_path=db_path).list()
 
 
-def load_prompt_versions(db_path: str, agent_name: str):
-    warnings.warn(
-        "load_prompt_versions is deprecated; use AgentDAO.load_prompt_versions",
-        DeprecationWarning,
-    )
-    return AgentDAO(db_path=db_path).load_prompt_versions(agent_name)
-
-
 def save_agent_to_db(db_path: str, *args, **kwargs):
     warnings.warn(
         "save_agent_to_db is deprecated; use AgentDAO.save",
         DeprecationWarning,
     )
     return AgentDAO(db_path=db_path).save(*args, **kwargs)
-
-
-def save_prompt_version(db_path: str, *args, **kwargs):
-    warnings.warn(
-        "save_prompt_version is deprecated; use AgentDAO.save_prompt_version",
-        DeprecationWarning,
-    )
-    return AgentDAO(db_path=db_path).save_prompt_version(*args, **kwargs)
 
 
 def rename_agent_in_db(db_path: str, *args, **kwargs):

@@ -61,9 +61,17 @@ def cached_load_run_details(run_id: int) -> Tuple[dict, List[dict], List[dict], 
 
 
 @st.cache_data(ttl=60)
-def cached_load_prompt_versions(agent_name: str) -> List[dict]:
-    svc = get_agent_service()
-    return svc.load_prompt_versions(agent_name)
+def cached_load_agent_snapshots(agent_name: str) -> List[dict]:
+    """
+    Cached loader for agent snapshots. Returns [] on error to keep UI resilient
+    if migrations have not yet been applied.
+    """
+    try:
+        svc = get_agent_service()
+        return svc.list_snapshots(agent_name)
+    except Exception:
+        # If the agent_snapshots table doesn't exist yet (older DB), don't blow up the UI
+        return []
 
 
 # Cache invalidation helpers (moved from app.py)
@@ -72,36 +80,36 @@ def invalidate_caches(*names: str):
     Centralized cache invalidation helper.
     Allowed names:
       - agents
-      - prompt_versions
       - pipelines
       - runs
       - run_details
+      - snapshots
       - all
     """
     if "all" in names:
         cached_load_agents.clear()
-        cached_load_prompt_versions.clear()
         cached_load_pipelines.clear()
         cached_load_runs.clear()
         cached_load_run_details.clear()
+        cached_load_agent_snapshots.clear()
         return
 
     for name in names:
         if name == "agents":
             cached_load_agents.clear()
-        elif name == "prompt_versions":
-            cached_load_prompt_versions.clear()
         elif name == "pipelines":
             cached_load_pipelines.clear()
         elif name == "runs":
             cached_load_runs.clear()
         elif name == "run_details":
             cached_load_run_details.clear()
+        elif name == "snapshots":
+            cached_load_agent_snapshots.clear()
 
 
 def invalidate_agents():
-    """Invalidate caches related to agents and prompt versions."""
-    invalidate_caches("agents", "prompt_versions")
+    """Invalidate caches related to agents and snapshots."""
+    invalidate_caches("agents", "snapshots")
 
 
 def invalidate_pipelines():

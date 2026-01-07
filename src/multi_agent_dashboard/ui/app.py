@@ -18,7 +18,7 @@ from multi_agent_dashboard.ui.cache import (
     cached_load_pipelines,
     cached_load_runs,
     cached_load_run_details,
-    cached_load_prompt_versions,
+    cached_load_agent_snapshots,
     invalidate_agents,
     invalidate_pipelines,
     invalidate_runs,
@@ -123,7 +123,7 @@ st.markdown(
 # ======================================================
 
 st.title("🧠 Multi-Agent Pipeline Dashboard")
-st.caption("Design pipelines, run tasks, inspect agent behavior, and manage prompt versions.")
+st.caption("Design pipelines, run tasks, inspect agent behavior, and manage agent snapshots.")
 
 MODE_RUN = "▶️ Run Pipeline"
 MODE_AGENTS = "🧠 Manage Agents"
