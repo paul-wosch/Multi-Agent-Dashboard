@@ -1,8 +1,8 @@
-# schema_diff_constraints.py
-
+# multi_agent_dashboard/db/infra/schema_diff_constraints.py
 import sqlite3
 from typing import Dict, List, Any, TypedDict
 
+from multi_agent_dashboard.db.infra.sql_utils import quote_ident
 
 class ForeignKeyDef(TypedDict, total=False):
     column: str
@@ -16,12 +16,15 @@ def get_db_foreign_keys(conn: sqlite3.Connection) -> Dict[str, List[ForeignKeyDe
     {
         table: [
             {
-                column: str,
-                references: "other_table(col)",
+                column: str,                 # comma-separated columns if composite
+                references: "other_table(col1,col2)",
                 on_delete: str | None,
             }
         ]
     }
+
+    This implementation groups PRAGMA foreign_key_list rows by the 'id' column to
+    correctly represent composite foreign keys.
     """
     fks: Dict[str, List[ForeignKeyDef]] = {}
 
@@ -31,23 +34,31 @@ def get_db_foreign_keys(conn: sqlite3.Connection) -> Dict[str, List[ForeignKeyDe
 
     for (table,) in tables:
         rows = conn.execute(
-            f"PRAGMA foreign_key_list({table})"
+            f"PRAGMA foreign_key_list({quote_ident(table)})"
         ).fetchall()
 
         if not rows:
             continue
 
-        table_fks: List[ForeignKeyDef] = []
+        # rows have columns: id, seq, table, from, to, on_update, on_delete, match
+        groups: Dict[int, List[Any]] = {}
         for r in rows:
-            # SQLite pragma columns:
-            # id, seq, table, from, to, on_update, on_delete, match
-            on_delete = r[6]
+            fk_id = int(r[0])
+            groups.setdefault(fk_id, []).append(r)
+
+        table_fks: List[ForeignKeyDef] = []
+        for fk_rows in groups.values():
+            # Each fk_rows corresponds to one logical FK (possibly composite)
+            referenced_table = fk_rows[0][2]
+            from_cols = [r[3] for r in fk_rows]
+            to_cols = [r[4] for r in fk_rows]
+            on_delete = fk_rows[0][6]
             if on_delete == "NO ACTION":
                 on_delete = None
 
             table_fks.append({
-                "column": r[3],
-                "references": f"{r[2]}({r[4]})",
+                "column": ",".join(from_cols),
+                "references": f"{referenced_table}({','.join(to_cols)})",
                 "on_delete": on_delete,
             })
 
@@ -58,10 +69,9 @@ def get_db_foreign_keys(conn: sqlite3.Connection) -> Dict[str, List[ForeignKeyDe
 
 def _fk_key(fk: ForeignKeyDef) -> tuple[str, str]:
     """
-    Logical identity of a FK: table column + referenced target.
-    on_delete is *not* part of identity, because changing it
-    should be detected as a "change", not an add/remove of a
-    different FK.
+    Logical identity of a FK: table columns (possibly comma-separated) + referenced target.
+    on_delete is *not* part of identity, because changing it should be detected as a "change",
+    not an add/remove of a different FK.
     """
     return (fk["column"], fk["references"])
 
@@ -69,7 +79,7 @@ def _fk_key(fk: ForeignKeyDef) -> tuple[str, str]:
 def diff_foreign_keys(
     schema_constraints: Dict[str, Dict[str, Any]],
     db_constraints: Dict[str, List[ForeignKeyDef]],
-) -> Dict[str, Dict[str, List[ForeignKeyDef]]]:
+) -> Dict[str, Dict[str, Any]]:
     """
     Compute foreign key differences between desired schema and DB.
 
@@ -88,11 +98,6 @@ def diff_foreign_keys(
             "existing_in_db": bool,    # True if table already exists in DB
         }
     }
-
-    Notes:
-    - Adding/removing/changing FKs on existing SQLite tables requires a rebuild.
-    - For *new* tables (not present in db_constraints), these FKs can be added
-      directly in the CREATE TABLE statement; no rebuild note is necessary.
     """
     result: Dict[str, Dict[str, Any]] = {}
 

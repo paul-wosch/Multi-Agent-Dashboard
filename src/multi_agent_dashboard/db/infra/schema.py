@@ -40,19 +40,6 @@ SCHEMA = {
         },
     },
 
-    "agent_prompt_versions": {
-        "columns": {
-            "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
-            "agent_name": "TEXT",
-            "version": "INTEGER",
-            "prompt": "TEXT",
-            "metadata_json": "TEXT",
-            "timestamp": "TEXT",
-        },
-        # TODO: Optional but future-safe
-        #   agent_name could reference agents(agent_name)
-    },
-
     # Reversible, full agent snapshots
     "agent_snapshots": {
         "columns": {

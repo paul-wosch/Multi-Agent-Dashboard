@@ -1,0 +1,6 @@
+-- MIGRATION-META: {"created_at":"2026-01-10T12:06:56.140936+00:00","diff":{"columns":{"agent_metrics":{"added":[],"removed":[],"renamed":[],"type_changed":[]},"agent_outputs":{"added":[],"removed":[],"renamed":[],"type_changed":[]},"agent_run_configs":{"added":[],"removed":[],"renamed":[],"type_changed":[]},"agent_snapshots":{"added":[],"removed":[],"renamed":[],"type_changed":[]},"agents":{"added":[],"removed":[],"renamed":[],"type_changed":[]},"pipelines":{"added":[],"removed":[],"renamed":[],"type_changed":[]},"runs":{"added":[],"removed":[],"renamed":[],"type_changed":[]},"tool_usages":{"added":[],"removed":[],"renamed":[],"type_changed":[]}},"foreign_keys":{},"indexes":{},"tables":{"added":[],"removed":["agent_prompt_versions"],"renamed":[]},"triggers":{},"views":{"both":[],"db_only":[],"schema_only":[]}},"generator_options":{"allow_drop_column":false,"allow_drop_table":true,"assume_rename_column":[],"assume_rename_table":[],"sqlite_capabilities":{"added_constraint_testing":true,"drop_column":true,"rename_column":true},"sqlite_version":"3.51.0"},"id":"012_drop_agent_prompt_versions","safe_sql":["DROP TABLE \"agent_prompt_versions\";"]}
+
+-- auto-generated migration
+
+DROP TABLE "agent_prompt_versions";
+
