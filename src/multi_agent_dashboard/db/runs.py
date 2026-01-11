@@ -152,6 +152,144 @@ class RunDAO:
         )
 
     # -----------------------
+    # Cost summary helpers (SQL-backed, independent of UI)
+    # -----------------------
+
+    def get_cost_total_for_period(self, period: str = "monthly") -> float:
+        """
+        Return the total cost for the 'current' period.
+
+        Supported periods:
+          - 'daily'   -> today (YYYY-MM-DD)
+          - 'weekly'  -> ISO-like week key (YYYY-WW using %W)
+          - 'monthly' -> current month (YYYY-MM)
+          - 'yearly'  -> current year (YYYY)
+          - 'total'   -> all time total (no timestamp filtering)
+
+        The implementation uses SQLite expressions to extract a period key from
+        runs.timestamp (stored as ISO-like strings). For safety against differing
+        timestamp formats, substr() is used for daily/monthly/yearly extraction,
+        while weekly uses strftime on the date portion.
+
+        Returns 0.0 when no rows found.
+        """
+        period = (period or "monthly").lower()
+        now = datetime.now(timezone.utc)
+
+        if period == "total":
+            try:
+                with self._connection() as conn:
+                    row = conn.execute(
+                        "SELECT SUM(cost) AS total_cost FROM agent_metrics"
+                    ).fetchone()
+                    total = row[0] if row and row[0] is not None else 0.0
+                    return float(total)
+            except Exception:
+                logger.exception("Failed to compute total cost from DB")
+                raise
+
+        # Mapping: SQL expression to extract a period key from runs.timestamp
+        period_expr_map = {
+            "daily": "substr(r.timestamp,1,10)",     # YYYY-MM-DD
+            "monthly": "substr(r.timestamp,1,7)",    # YYYY-MM
+            "yearly": "substr(r.timestamp,1,4)",     # YYYY
+            "weekly": "strftime('%Y-%W', substr(r.timestamp,1,10))",  # YYYY-WW
+        }
+
+        if period not in period_expr_map:
+            raise ValueError(f"Unsupported period: {period}")
+
+        if period == "daily":
+            period_value = now.strftime("%Y-%m-%d")
+        elif period == "monthly":
+            period_value = now.strftime("%Y-%m")
+        elif period == "yearly":
+            period_value = now.strftime("%Y")
+        elif period == "weekly":
+            period_value = now.strftime("%Y-%W")
+        else:
+            period_value = now.strftime("%Y-%m")  # fallback
+
+        expr = period_expr_map[period]
+
+        sql = f"""
+            SELECT SUM(am.cost) AS total_cost
+            FROM agent_metrics am
+            JOIN runs r ON r.id = am.run_id
+            WHERE r.timestamp IS NOT NULL AND ({expr}) = ?
+        """
+
+        try:
+            with self._connection() as conn:
+                row = conn.execute(sql, (period_value,)).fetchone()
+                total = row[0] if row and row[0] is not None else 0.0
+                return float(total)
+        except Exception:
+            logger.exception("Failed to compute cost for period=%s", period)
+            raise
+
+    def get_costs_by_period(self, period: str = "monthly", limit: int = 12) -> List[Dict[str, Any]]:
+        """
+        Return a list of cost totals keyed by period_value for recent periods.
+
+        Example returned list:
+          [
+            {"period": "2026-01", "total_cost": 1.23},
+            {"period": "2025-12", "total_cost": 4.56},
+            ...
+          ]
+
+        This is useful for historical trend displays. The query groups agent_metrics
+        by the chosen period expression and orders by period DESC.
+
+        Limit is applied to number of returned periods.
+        """
+        period = (period or "monthly").lower()
+
+        if period == "total":
+            try:
+                with self._connection() as conn:
+                    row = conn.execute("SELECT SUM(cost) AS total_cost FROM agent_metrics").fetchone()
+                    total = row[0] if row and row[0] is not None else 0.0
+                    return [{"period": "all", "total_cost": float(total)}]
+            except Exception:
+                logger.exception("Failed to compute all-time cost breakdown")
+                raise
+
+        period_expr_map = {
+            "daily": "substr(r.timestamp,1,10)",
+            "monthly": "substr(r.timestamp,1,7)",
+            "yearly": "substr(r.timestamp,1,4)",
+            "weekly": "strftime('%Y-%W', substr(r.timestamp,1,10))",
+        }
+
+        if period not in period_expr_map:
+            raise ValueError(f"Unsupported period: {period}")
+
+        expr = period_expr_map[period]
+
+        sql = f"""
+            SELECT ({expr}) AS period_value, SUM(am.cost) AS total_cost
+            FROM agent_metrics am
+            JOIN runs r ON r.id = am.run_id
+            WHERE r.timestamp IS NOT NULL
+            GROUP BY period_value
+            ORDER BY period_value DESC
+            LIMIT ?
+        """
+
+        try:
+            with self._connection() as conn:
+                rows = conn.execute(sql, (limit,)).fetchall()
+                return [
+                    {"period": r["period_value"], "total_cost": float(r["total_cost"] or 0.0)}
+                    for r in rows
+                ]
+        except Exception:
+            logger.exception("Failed to compute costs by period=%s", period)
+            raise
+
+    # -----------------------
     # WRITE operations
     # -----------------------
 

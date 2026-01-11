@@ -47,6 +47,21 @@ class RunService:
     ) -> Tuple[dict | None, list[dict], list[dict], list[dict], list[dict]]:
         return RunDAO(self.db_path).get(run_id)
 
+    # -----------------------
+    # Cost helpers (exposed by service layer)
+    # -----------------------
+    def get_cost_total_for_period(self, period: str = "monthly") -> float:
+        """
+        Convenience wrapper: compute running total for the current period (monthly by default).
+        """
+        return RunDAO(self.db_path).get_cost_total_for_period(period=period)
+
+    def get_costs_by_period(self, period: str = "monthly", limit: int = 12) -> List[Dict[str, Any]]:
+        """
+        Return a list of recent period breakdowns (period_value + total_cost).
+        """
+        return RunDAO(self.db_path).get_costs_by_period(period=period, limit=limit)
+
 
 # -----------------------
 # Agent Service

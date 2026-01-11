@@ -19,6 +19,7 @@ from multi_agent_dashboard.ui.cache import (
     cached_load_runs,
     cached_load_run_details,
     cached_load_agent_snapshots,
+    cached_load_monthly_costs,
     invalidate_agents,
     invalidate_pipelines,
     invalidate_runs,
@@ -28,6 +29,7 @@ from multi_agent_dashboard.ui.cache import (
 )
 from multi_agent_dashboard.ui.bootstrap import app_start, reload_agents_into_engine
 from multi_agent_dashboard.ui.logging_ui import LOG_LEVEL_STYLES
+from multi_agent_dashboard.ui.metrics_view import format_cost
 
 # ======================================================
 # STREAMLIT PAGE CONFIG (must be first Streamlit call)
@@ -122,19 +124,119 @@ st.markdown(
 # TOP-LEVEL UI
 # ======================================================
 
-st.title("🧠 Multi-Agent Pipeline Dashboard")
-st.caption("Design pipelines, run tasks, inspect agent behavior, and manage agent snapshots.")
+# Heading and Metrics columns
+col_main, col_right = st.columns([7, 2])
+with col_main:
+    st.title("🧠 Multi-Agent Pipeline Dashboard")
+    st.caption("Design pipelines, run tasks, inspect agent behavior, and manage agent snapshots.")
 
-MODE_RUN = "▶️ Run Pipeline"
-MODE_AGENTS = "🧠 Manage Agents"
-MODE_HISTORY = "📜 History"
-MODE_LOGS = "🪵 Logs"
+    MODE_RUN = "▶️ Run Pipeline"
+    MODE_AGENTS = "🧠 Manage Agents"
+    MODE_HISTORY = "📜 History"
+    MODE_LOGS = "🪵 Logs"
 
-mode = st.radio(
-    "Mode",
-    [MODE_RUN, MODE_AGENTS, MODE_HISTORY, MODE_LOGS],
-    horizontal=True,
-)
+    mode = st.radio(
+        "Mode",
+        [MODE_RUN, MODE_AGENTS, MODE_HISTORY, MODE_LOGS],
+        horizontal=True,
+    )
+try:
+    with col_right:
+        try:
+            monthly = cached_load_monthly_costs()
+            total_cost = monthly.get("total_cost")
+            if total_cost is None:
+                st.metric("This month", "–")
+            else:
+                st.metric("This month", format_cost(total_cost))
+        except Exception:
+            # Keep UI resilient: if DB/migrations unavailable, do not fail rendering
+            try:
+                # Fallback small right-hand column so page layout remains stable
+                _, col_right = st.columns([8, 1])
+                with col_right:
+                    st.metric("This month", "–")
+            except Exception:
+                pass
+        # The whole cost UI is inside an expander (default collapsed)
+        with st.expander("Advanced cost tracking", expanded=False):
+            # Small controls row: period selector + last-N selector
+            ctrl_col, limit_col = st.columns([2, 1])
+            with ctrl_col:
+                period = st.selectbox(
+                    "Period",
+                    ["daily", "weekly", "monthly", "yearly", "total"],
+                    index=2,
+                    key="cost_period",
+                    format_func=lambda p: p.capitalize(),
+                )
+            with limit_col:
+                limit = st.number_input(
+                    "Last N",
+                    min_value=2,
+                    max_value=52,
+                    value=12,
+                    step=1,
+                    key="cost_limit",
+                    help="Number of recent periods to show in the sparkline",
+                )
+
+            # Fetch historical totals using the service API prepared server-side.
+            # This returns a list ordered by period DESC (most recent first).
+            svc = get_run_service()
+            try:
+                costs = svc.get_costs_by_period(period=period, limit=int(limit))
+            except Exception:
+                costs = []
+
+            # Friendly labels for the metric header
+            LABEL_MAP = {
+                "daily": "Today",
+                "weekly": "This week",
+                "monthly": "This month",
+                "yearly": "This year",
+                "total": "All time",
+            }
+
+            if not costs:
+                # Resilient fallback when DB/migrations unavailable
+                st.metric(LABEL_MAP.get(period, "Cost"), "–")
+            else:
+                # Most recent period is first element
+                current_total = float(costs[0].get("total_cost", 0.0))
+                previous_total = float(costs[1].get("total_cost", 0.0)) if len(costs) > 1 else None
+
+                # Sparkline: provide values oldest->newest (left->right)
+                chart_data = [float(r.get("total_cost", 0.0)) for r in costs][::-1]
+
+                # Delta: change vs previous period (if available and applicable)
+                delta_display = None
+                if previous_total is not None and period != "total":
+                    delta_value = current_total - previous_total
+                    # Format delta with a leading + for positive changes
+                    if delta_value >= 0:
+                        delta_display = f"+{format_cost(delta_value)}"
+                    else:
+                        delta_display = format_cost(delta_value)
+
+                # Show metric with sparkline and delta
+                st.metric(
+                    LABEL_MAP.get(period, "Cost"),
+                    format_cost(current_total),
+                    delta=delta_display,
+                    chart_data=chart_data,
+                )
+except Exception:
+    # Keep UI resilient: if something goes wrong, fall back to the minimal metric
+    try:
+        _, col_right = st.columns([8, 1])
+        with col_right:
+            with st.expander("Cost tracking", expanded=False):
+                st.metric("This month", "–")
+    except Exception:
+        pass
+
+
 
 strict_mode = st.sidebar.checkbox(
     "Strict output validation",

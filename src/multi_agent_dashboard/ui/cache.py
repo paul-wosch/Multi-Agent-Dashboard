@@ -74,6 +74,24 @@ def cached_load_agent_snapshots(agent_name: str) -> List[dict]:
         return []
 
 
+@st.cache_data(ttl=30)
+def cached_load_monthly_costs() -> dict:
+    """
+    Cached loader that returns running total for the current month.
+
+    Returns a dict {"total_cost": float} or {"total_cost": None} on error.
+    TTL is short so UI will reflect recent runs; explicit cache invalidation is
+    performed when runs are saved (invalidate_runs).
+    """
+    try:
+        svc = get_run_service()
+        total = svc.get_cost_total_for_period("monthly")
+        return {"total_cost": float(total)}
+    except Exception:
+        # Keep UI resilient if migrations not applied or DB unavailable
+        return {"total_cost": None}
+
+
 # Cache invalidation helpers (moved from app.py)
 def invalidate_caches(*names: str):
     """
@@ -84,6 +102,7 @@ def invalidate_caches(*names: str):
       - runs
       - run_details
       - snapshots
+      - monthly_costs
       - all
     """
     if "all" in names:
@@ -92,6 +111,7 @@ def invalidate_caches(*names: str):
         cached_load_runs.clear()
         cached_load_run_details.clear()
         cached_load_agent_snapshots.clear()
+        cached_load_monthly_costs.clear()
         return
 
     for name in names:
@@ -105,6 +125,8 @@ def invalidate_caches(*names: str):
             cached_load_run_details.clear()
         elif name == "snapshots":
             cached_load_agent_snapshots.clear()
+        elif name == "monthly_costs":
+            cached_load_monthly_costs.clear()
 
 
 def invalidate_agents():
@@ -119,4 +141,5 @@ def invalidate_pipelines():
 
 def invalidate_runs():
     """Invalidate caches related to runs and run details."""
-    invalidate_caches("runs", "run_details")
+    # Also invalidate monthly_costs so the top-right metric updates immediately after a run is persisted.
+    invalidate_caches("runs", "run_details", "monthly_costs")
