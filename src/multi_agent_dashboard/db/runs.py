@@ -15,13 +15,76 @@ with run_dao(db_path) as dao:
 import json
 import logging
 import warnings
-from datetime import datetime, timezone
+import calendar
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Any, Tuple, Optional
 from contextlib import contextmanager
 
 from multi_agent_dashboard.db.infra.core import get_conn
 
 logger = logging.getLogger(__name__)
+
+
+def _align_to_period_start(reference: datetime, period: str) -> datetime:
+    period = period.lower()
+    if period == "daily":
+        return reference.replace(hour=0, minute=0, second=0, microsecond=0)
+    if period == "weekly":
+        week_start = reference - timedelta(days=reference.weekday())
+        return week_start.replace(hour=0, minute=0, second=0, microsecond=0)
+    if period == "monthly":
+        return reference.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if period == "yearly":
+        return reference.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    raise ValueError(f"Unsupported period: {period}")
+
+
+def _add_months(base: datetime, months: int) -> datetime:
+    total_months = base.month - 1 + months
+    year = base.year + total_months // 12
+    month = total_months % 12 + 1
+    day = min(base.day, calendar.monthrange(year, month)[1])
+    return base.replace(year=year, month=month, day=day)
+
+
+def _shift_period_start(start: datetime, period: str, steps: int = 1) -> datetime:
+    if steps < 0:
+        raise ValueError("steps must be non-negative")
+    period = period.lower()
+    if period == "daily":
+        return start - timedelta(days=steps)
+    if period == "weekly":
+        return start - timedelta(weeks=steps)
+    if period == "monthly":
+        return _add_months(start, -steps)
+    if period == "yearly":
+        return start.replace(year=start.year - steps)
+    raise ValueError(f"Unsupported period: {period}")
+
+
+def _format_period_value(start: datetime, period: str) -> str:
+    period = period.lower()
+    if period == "daily":
+        return start.strftime("%Y-%m-%d")
+    if period == "weekly":
+        return start.strftime("%Y-%W")
+    if period == "monthly":
+        return start.strftime("%Y-%m")
+    if period == "yearly":
+        return start.strftime("%Y")
+    raise ValueError(f"Unsupported period: {period}")
+
+
+def _build_recent_period_keys(period: str, limit: int, reference: datetime) -> List[str]:
+    period = period.lower()
+    if period not in {"daily", "weekly", "monthly", "yearly"}:
+        raise ValueError(f"Unsupported period: {period}")
+    current = _align_to_period_start(reference, period)
+    keys: List[str] = []
+    for _ in range(limit):
+        keys.append(_format_period_value(current, period))
+        current = _shift_period_start(current, period)
+    return keys
 
 
 class RunDAO:
@@ -266,7 +329,10 @@ class RunDAO:
         if period not in period_expr_map:
             raise ValueError(f"Unsupported period: {period}")
 
+        limit = max(1, int(limit))
         expr = period_expr_map[period]
+        now = datetime.now(timezone.utc)
+        period_keys = _build_recent_period_keys(period, limit, now)
 
         sql = f"""
             SELECT ({expr}) AS period_value, SUM(am.cost) AS total_cost
@@ -281,9 +347,13 @@ class RunDAO:
         try:
             with self._connection() as conn:
                 rows = conn.execute(sql, (limit,)).fetchall()
+                period_totals: Dict[str, float] = {}
+                for row in rows:
+                    row_dict = dict(row)
+                    period_totals[row_dict["period_value"]] = float(row_dict["total_cost"] or 0.0)
                 return [
-                    {"period": r["period_value"], "total_cost": float(r["total_cost"] or 0.0)}
-                    for r in rows
+                    {"period": key, "total_cost": period_totals.get(key, 0.0)}
+                    for key in period_keys
                 ]
         except Exception:
             logger.exception("Failed to compute costs by period=%s", period)
