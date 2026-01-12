@@ -90,6 +90,10 @@ OPENAI_PRICING = {
         "input": 1.25,
         "output": 10.00,
     },
+    "gpt-5.1-codex-mini": {
+        "input": 0.25,
+        "output": 2.00,
+    },
     "text-embedding-3-small": {
         "input": 0.02,
         "output": 0.00,
