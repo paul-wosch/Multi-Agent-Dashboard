@@ -153,6 +153,12 @@ def reload_agents_into_engine():
             reasoning_effort=a.get("reasoning_effort"),
             reasoning_summary=a.get("reasoning_summary"),
             system_prompt_template=a.get("system_prompt_template"),
+            # Provider metadata (Phase 1)
+            provider_id=a.get("provider_id"),
+            model_class=a.get("model_class"),
+            endpoint=a.get("endpoint"),
+            use_responses_api=bool(a.get("use_responses_api")),
+            provider_features=a.get("provider_features") or {},
         )
         engine.add_agent(spec)
 

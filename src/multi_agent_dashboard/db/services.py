@@ -87,6 +87,12 @@ class AgentService:
             reasoning_effort: Optional[str] = None,
             reasoning_summary: Optional[str] = None,
             system_prompt: Optional[str] = None,
+            # Provider metadata 
+            provider_id: Optional[str] = None,
+            model_class: Optional[str] = None,
+            endpoint: Optional[str] = None,
+            use_responses_api: bool = False,
+            provider_features: Optional[dict] = None,
     ) -> None:
         AgentDAO(self.db_path).save(
             name,
@@ -101,6 +107,11 @@ class AgentService:
             reasoning_effort=reasoning_effort,
             reasoning_summary=reasoning_summary,
             system_prompt_template=system_prompt,
+            provider_id=provider_id,
+            model_class=model_class,
+            endpoint=endpoint,
+            use_responses_api=use_responses_api,
+            provider_features=provider_features,
         )
 
     # Note: old prompt-versioning has been removed. If external code calls
@@ -129,6 +140,12 @@ class AgentService:
             reasoning_effort: Optional[str] = None,
             reasoning_summary: Optional[str] = None,
             system_prompt: Optional[str] = None,
+            # Provider metadata 
+            provider_id: Optional[str] = None,
+            model_class: Optional[str] = None,
+            endpoint: Optional[str] = None,
+            use_responses_api: bool = False,
+            provider_features: Optional[dict] = None,
     ) -> None:
         """Atomically save agent metadata. The legacy 'prompt version' system
         has been removed in favour of agent snapshots. The `save_prompt_version`
@@ -148,6 +165,11 @@ class AgentService:
                 reasoning_effort=reasoning_effort,
                 reasoning_summary=reasoning_summary,
                 system_prompt_template=system_prompt,
+                provider_id=provider_id,
+                model_class=model_class,
+                endpoint=endpoint,
+                use_responses_api=use_responses_api,
+                provider_features=provider_features,
             )
 
             # Optional automatic snapshot (configurable)
@@ -164,6 +186,11 @@ class AgentService:
                     "tools": tools,
                     "reasoning_effort": reasoning_effort,
                     "reasoning_summary": reasoning_summary,
+                    "provider_id": provider_id,
+                    "model_class": model_class,
+                    "endpoint": endpoint,
+                    "use_responses_api": use_responses_api,
+                    "provider_features": provider_features,
                 }
                 try:
                     dao.save_snapshot(name, snapshot, metadata={"event": "auto_save"}, is_auto=True)

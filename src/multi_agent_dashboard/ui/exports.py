@@ -43,6 +43,12 @@ def _agent_spec_to_dict_safe(spec) -> dict:
             "reasoning_effort": getattr(spec, "reasoning_effort", None),
             "reasoning_summary": getattr(spec, "reasoning_summary", None),
             "system_prompt_template": getattr(spec, "system_prompt_template", None),
+            # Provider metadata
+            "provider_id": getattr(spec, "provider_id", None),
+            "model_class": getattr(spec, "model_class", None),
+            "endpoint": getattr(spec, "endpoint", None),
+            "use_responses_api": getattr(spec, "use_responses_api", None),
+            "provider_features": getattr(spec, "provider_features", None),
         }
         # Keep prompt keys even if None; drop other keys that are None to keep payload compact
         final = {}
@@ -140,6 +146,14 @@ def build_export_from_engine_result(
                 "summary": getattr(runtime.spec, "reasoning_summary", None)
                 if runtime
                 else None,
+            },
+            # Provider snapshot
+            "provider": {
+                "provider_id": getattr(runtime.spec, "provider_id", None) if runtime else None,
+                "model_class": getattr(runtime.spec, "model_class", None) if runtime else None,
+                "endpoint": getattr(runtime.spec, "endpoint", None) if runtime else None,
+                "use_responses_api": getattr(runtime.spec, "use_responses_api", None) if runtime else None,
+                "provider_features": getattr(runtime.spec, "provider_features", None) if runtime else None,
             },
             # Explicitly expose both prompt templates
             "prompt_template": getattr(runtime.spec, "prompt_template", None) if runtime else None,

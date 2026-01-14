@@ -64,6 +64,12 @@ SCHEMA = {
             "output_vars": "TEXT",
             "color": "TEXT",
             "symbol": "TEXT",
+            # provider metadata
+            "provider_id": "TEXT",                    # e.g., 'openai', 'ollama', 'custom'
+            "model_class": "TEXT",                    # provider-specific class / family hint
+            "endpoint": "TEXT",                       # optional host/URL override
+            "use_responses_api": "INTEGER DEFAULT 1", # boolean flag (0/1)
+            "provider_features_json": "TEXT",         # JSON-encoded capability hints (structured_output, tool_calling, etc.)
             # tool & reasoning config (backward compatible: all nullable/text)
             "tools_json": "TEXT",
             # Reasoning effort: none|low|medium|high|xhigh
@@ -116,6 +122,12 @@ SCHEMA = {
             "run_id": "INTEGER",
             "agent_name": "TEXT",
             "model": "TEXT",
+            # Provider metadata captured at run time for reproducibility
+            "provider_id": "TEXT",
+            "model_class": "TEXT",
+            "endpoint": "TEXT",
+            "use_responses_api": "INTEGER DEFAULT 1",
+            "provider_features_json": "TEXT",
             "prompt_template": "TEXT",
             "role": "TEXT",
             # JSON-encoded lists of variable names at the time of the run

@@ -44,6 +44,12 @@ def render_agent_editor():
             "reasoning_effort": a.get("reasoning_effort"),
             "reasoning_summary": a.get("reasoning_summary"),
             "system_prompt": a.get("system_prompt_template"),
+            # Provider metadata
+            "provider_id": a.get("provider_id"),
+            "model_class": a.get("model_class"),
+            "endpoint": a.get("endpoint"),
+            "use_responses_api": a.get("use_responses_api"),
+            "provider_features": a.get("provider_features") or {},
         }
         for a in agents_raw
     ]
@@ -91,6 +97,12 @@ def render_agent_editor():
             "tools": {"enabled": False, "tools": []},
             "reasoning_effort": None,
             "reasoning_summary": None,
+            # provider defaults
+            "provider_id": "openai",
+            "model_class": None,
+            "endpoint": None,
+            "use_responses_api": True,
+            "provider_features": {},
         }
     state = st.session_state.agent_editor_state
 
@@ -135,6 +147,11 @@ def render_agent_editor():
                 "tools": {"enabled": False, "tools": []},
                 "reasoning_effort": None,
                 "reasoning_summary": None,
+                "provider_id": "openai",
+                "model_class": None,
+                "endpoint": None,
+                "use_responses_api": True,
+                "provider_features": {},
             }
         else:
             base_agent = next(a for a in agents if a["name"] == selected)
@@ -155,6 +172,11 @@ def render_agent_editor():
                 or {"enabled": False, "tools": []},
                 "reasoning_effort": base_agent.get("reasoning_effort"),
                 "reasoning_summary": base_agent.get("reasoning_summary"),
+                "provider_id": base_agent.get("provider_id") or "openai",
+                "model_class": base_agent.get("model_class"),
+                "endpoint": base_agent.get("endpoint"),
+                "use_responses_api": bool(base_agent.get("use_responses_api")),
+                "provider_features": base_agent.get("provider_features") or {},
             }
         )
 
@@ -191,6 +213,32 @@ def render_agent_editor():
         role_val = st.text_input(
             "Role",
             value=state["role"],
+        )
+
+        # Provider selection
+        st.markdown("### Provider (per-agent)")
+        provider_options = ["openai", "ollama", "custom"]
+        provider_display = {"openai": "OpenAI", "ollama": "Ollama (local)", "custom": "Custom"}
+        provider_index = provider_options.index(state.get("provider_id") or "openai") if (state.get("provider_id") or "openai") in provider_options else 0
+        provider_choice = st.selectbox(
+            "Provider",
+            provider_options,
+            index=provider_index,
+            format_func=lambda v: provider_display.get(v, v),
+            help="Select which provider this agent should use. This only records metadata for later runtime wiring.",
+        )
+
+        # Endpoint / host override for custom or local hosts
+        endpoint_val = st.text_input(
+            "Endpoint / Host (optional)",
+            value=state.get("endpoint") or "",
+            help="Optional host or endpoint used to reach the model provider (e.g., http://localhost:11434 for a local Ollama)."
+        )
+
+        use_responses_api_val = st.checkbox(
+            "Use provider Responses-style API when available",
+            value=bool(state.get("use_responses_api")),
+            help="Enable when provider supports a Responses-style structured API (e.g., OpenAI Responses).",
         )
 
         st.markdown("### Appearance")
@@ -315,6 +363,11 @@ def render_agent_editor():
                 "tools": state["tools"],
                 "reasoning_effort": state.get("reasoning_effort"),
                 "reasoning_summary": state.get("reasoning_summary"),
+                "provider_id": state.get("provider_id"),
+                "model_class": state.get("model_class"),
+                "endpoint": state.get("endpoint"),
+                "use_responses_api": state.get("use_responses_api"),
+                "provider_features": state.get("provider_features"),
             }
             note = st.session_state.get(snapshot_note_key) or ""
             try:
@@ -405,6 +458,11 @@ def render_agent_editor():
                                 "tools": s.get("tools") or {"enabled": False, "tools": []},
                                 "reasoning_effort": s.get("reasoning_effort"),
                                 "reasoning_summary": s.get("reasoning_summary"),
+                                "provider_id": s.get("provider_id", "openai"),
+                                "model_class": s.get("model_class"),
+                                "endpoint": s.get("endpoint"),
+                                "use_responses_api": s.get("use_responses_api", True),
+                                "provider_features": s.get("provider_features") or {},
                             }
                         )
                         st.session_state.agent_editor_state_changed_this_run = True
@@ -450,6 +508,25 @@ def render_agent_editor():
 
         effort_options = ["none", "low", "medium", "high", "xhigh"]
         current_effort = state.get("reasoning_effort") or "medium"
+
+        # Determine provider feature hints
+        provider_feats = state.get("provider_features") or {}
+
+        # Structured-output support (keeps existing structured UI decisions intact)
+        structured_supported = bool(provider_feats.get("structured_output", True))
+
+        # Reasoning support should be independent from structured output.
+        # Accept multiple common keys exported by model profiles / provider hints for compatibility.
+        if "reasoning" in provider_feats:
+            reasoning_supported = bool(provider_feats.get("reasoning"))
+        elif "reasoning_output" in provider_feats:
+            reasoning_supported = bool(provider_feats.get("reasoning_output"))
+        elif "supports_reasoning" in provider_feats:
+            reasoning_supported = bool(provider_feats.get("supports_reasoning"))
+        else:
+            # Default to True when no explicit hint is present (backwards compatible)
+            reasoning_supported = True
+
         reasoning_effort_val = st.selectbox(
             "Reasoning Effort",
             options=effort_options,
@@ -457,6 +534,7 @@ def render_agent_editor():
             if current_effort in effort_options
             else effort_options.index("medium"),
             help="Controls depth & cost. 'none' disables special reasoning behavior.",
+            disabled=not reasoning_supported,
         )
 
         summary_options = ["auto", "concise", "detailed", "none"]
@@ -468,7 +546,18 @@ def render_agent_editor():
             if current_summary in summary_options
             else summary_options.index("none"),
             help="Configure reasoning summaries returned by reasoning models.",
+            disabled=not reasoning_supported,
         )
+
+        st.markdown("### Provider features (optional JSON)")
+        st.caption("Provide a small JSON blob that hints at provider capabilities (e.g. {\"structured_output\": true, \"tool_calling\": true}).")
+        pf_default = json.dumps(state.get("provider_features") or {}, indent=2)
+        pf_text = st.text_area("Provider Features (JSON)", value=pf_default, height=100)
+        try:
+            pf_val = json.loads(pf_text) if pf_text and pf_text.strip() else {}
+        except Exception:
+            pf_val = {}
+            st.warning("Provider features JSON invalid; saving will store an empty object.")
 
     st.divider()
 
@@ -497,6 +586,10 @@ def render_agent_editor():
                 },
                 "reasoning_effort": reasoning_effort_val,
                 "reasoning_summary": reasoning_summary_val,
+                "provider_id": provider_choice,
+                "endpoint": endpoint_val or None,
+                "use_responses_api": bool(use_responses_api_val),
+                "provider_features": pf_val or {},
             }
         )
 
@@ -547,6 +640,11 @@ def render_agent_editor():
                 reasoning_effort=state.get("reasoning_effort"),
                 reasoning_summary=state.get("reasoning_summary"),
                 system_prompt=state.get("system_prompt") or None,
+                provider_id=state.get("provider_id"),
+                model_class=state.get("model_class"),
+                endpoint=state.get("endpoint"),
+                use_responses_api=bool(state.get("use_responses_api")),
+                provider_features=state.get("provider_features"),
             )
 
             invalidate_agents()
@@ -574,6 +672,11 @@ def render_agent_editor():
                     reasoning_effort=state.get("reasoning_effort"),
                     reasoning_summary=state.get("reasoning_summary"),
                     system_prompt=state.get("system_prompt") or None,
+                    provider_id=state.get("provider_id"),
+                    model_class=state.get("model_class"),
+                    endpoint=state.get("endpoint"),
+                    use_responses_api=bool(state.get("use_responses_api")),
+                    provider_features=state.get("provider_features"),
                 )
             except Exception:
                 logger.exception("Failed to duplicate agent")
@@ -681,6 +784,11 @@ def render_agent_editor():
                         "output_vars": chosen_agent.get("output_vars", []),
                         "color": DEFAULT_COLOR,
                         "symbol": DEFAULT_SYMBOL,
+                        "provider_id": chosen_agent.get("provider_id", "openai"),
+                        "model_class": chosen_agent.get("model_class"),
+                        "endpoint": chosen_agent.get("endpoint"),
+                        "use_responses_api": chosen_agent.get("use_responses_api", True),
+                        "provider_features": chosen_agent.get("provider_features") or {},
                     }
                 )
 

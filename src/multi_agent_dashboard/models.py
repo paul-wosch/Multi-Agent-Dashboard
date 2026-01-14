@@ -35,6 +35,12 @@ class AgentSpec:
     reasoning_summary: Optional[str] = None
     # Explicit system (developer) prompt
     system_prompt_template: Optional[str] = None
+    # Provider metadata
+    provider_id: Optional[str] = None       # e.g. 'openai', 'ollama', 'custom'
+    model_class: Optional[str] = None       # provider-specific class / family hint
+    endpoint: Optional[str] = None          # optional host/URL override
+    use_responses_api: bool = False         # whether to prefer Responses API or equivalent
+    provider_features: Dict[str, Any] = field(default_factory=dict)  # capability hints
 
 
 @dataclass

@@ -74,7 +74,12 @@ class AgentDAO:
                            tools_json,
                            reasoning_effort,
                            reasoning_summary,
-                           system_prompt_template
+                           system_prompt_template,
+                           provider_id,
+                           model_class,
+                           endpoint,
+                           use_responses_api,
+                           provider_features_json
                     FROM agents
                     """
                 ).fetchall()
@@ -100,6 +105,11 @@ class AgentDAO:
                     "reasoning_effort": row["reasoning_effort"],
                     "reasoning_summary": row["reasoning_summary"],
                     "system_prompt_template": row["system_prompt_template"],
+                    "provider_id": row["provider_id"],
+                    "model_class": row["model_class"],
+                    "endpoint": row["endpoint"],
+                    "use_responses_api": bool(row["use_responses_api"]) if row["use_responses_api"] is not None else False,
+                    "provider_features": safe_json_loads(row["provider_features_json"], {}),
                 }
             )
         return agents
@@ -243,6 +253,12 @@ class AgentDAO:
             reasoning_effort: Optional[str] = None,
             reasoning_summary: Optional[str] = None,
             system_prompt_template: Optional[str] = None,
+            # New provider fields - optional
+            provider_id: Optional[str] = None,
+            model_class: Optional[str] = None,
+            endpoint: Optional[str] = None,
+            use_responses_api: bool = False,
+            provider_features: Optional[dict] = None,
     ) -> None:
         input_json = json.dumps(input_vars or [])
         output_json = json.dumps(output_vars or [])
@@ -252,6 +268,7 @@ class AgentDAO:
         symbol = symbol or DEFAULT_SYMBOL
 
         tools_json = json.dumps(tools or {})
+        provider_features_json = json.dumps(provider_features or {})
 
         logger.info("Saving agent %s to DB", agent_name)
         try:
@@ -267,11 +284,16 @@ class AgentDAO:
                          output_vars,
                          color,
                          symbol,
+                         provider_id,
+                         model_class,
+                         endpoint,
+                         use_responses_api,
+                         provider_features_json,
                          tools_json,
                          reasoning_effort,
                          reasoning_summary,
                          system_prompt_template)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         agent_name,
@@ -282,6 +304,11 @@ class AgentDAO:
                         output_json,
                         color,
                         symbol,
+                        provider_id,
+                        model_class,
+                        endpoint,
+                        1 if use_responses_api else 0,
+                        provider_features_json,
                         tools_json,
                         reasoning_effort,
                         reasoning_summary,
