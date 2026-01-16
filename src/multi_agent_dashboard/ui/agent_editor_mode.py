@@ -5,6 +5,7 @@ from datetime import datetime
 import json
 import logging
 from typing import List, Dict, Any
+from urllib.parse import urlparse
 
 import streamlit as st
 
@@ -21,6 +22,50 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_COLOR = UI_COLORS["default"]["value"]
 DEFAULT_SYMBOL = UI_COLORS["default"]["symbol"]
+
+
+def _parse_endpoint_to_host_port(endpoint: str) -> tuple[str | None, int | None]:
+    """
+    Parse an endpoint to extract host and port if present.
+    Returns (host, port) or (None, None) when not parseable.
+    """
+    if not endpoint:
+        return None, None
+    try:
+        p = urlparse(endpoint if "://" in endpoint else f"http://{endpoint}")
+        host = p.hostname
+        port = p.port
+        return host, port
+    except Exception:
+        return None, None
+
+
+def _compose_endpoint_from_host_port(host: str | None, port: str | None) -> str | None:
+    """
+    Build an endpoint string from host and port values.
+    If host already includes a scheme, preserve it; otherwise default to http://.
+    """
+    if not host:
+        return None
+    host = host.strip().rstrip("/")
+    if not host:
+        return None
+
+    # If host contains scheme, keep it
+    if host.startswith("http://") or host.startswith("https://"):
+        base = host
+    else:
+        base = f"http://{host}"
+
+    if port:
+        port = port.strip()
+        if port:
+            # Avoid double port if user included it
+            h, existing_port = _parse_endpoint_to_host_port(base)
+            if existing_port is None:
+                # append port
+                base = base.rstrip("/") + f":{port}"
+    return base
 
 
 def render_agent_editor():
@@ -101,6 +146,8 @@ def render_agent_editor():
             "provider_id": "openai",
             "model_class": None,
             "endpoint": None,
+            "endpoint_host": None,
+            "endpoint_port": None,
             "use_responses_api": True,
             "provider_features": {},
         }
@@ -150,11 +197,17 @@ def render_agent_editor():
                 "provider_id": "openai",
                 "model_class": None,
                 "endpoint": None,
+                "endpoint_host": None,
+                "endpoint_port": None,
                 "use_responses_api": True,
                 "provider_features": {},
             }
         else:
             base_agent = next(a for a in agents if a["name"] == selected)
+
+        # Parse endpoint to host/port for convenience in the editor
+        endpoint_val = base_agent.get("endpoint")
+        host, port = _parse_endpoint_to_host_port(endpoint_val or "")
 
         state.update(
             {
@@ -174,7 +227,9 @@ def render_agent_editor():
                 "reasoning_summary": base_agent.get("reasoning_summary"),
                 "provider_id": base_agent.get("provider_id") or "openai",
                 "model_class": base_agent.get("model_class"),
-                "endpoint": base_agent.get("endpoint"),
+                "endpoint": endpoint_val,
+                "endpoint_host": host,
+                "endpoint_port": str(port) if port is not None else None,
                 "use_responses_api": bool(base_agent.get("use_responses_api")),
                 "provider_features": base_agent.get("provider_features") or {},
             }
@@ -234,6 +289,26 @@ def render_agent_editor():
             value=state.get("endpoint") or "",
             help="Optional host or endpoint used to reach the model provider (e.g., http://localhost:11434 for a local Ollama)."
         )
+
+        # Show Host / Port fields when provider is local / custom to make it convenient
+        show_host_port = provider_choice in ("ollama", "custom")
+        host_val = state.get("endpoint_host") or ""
+        port_val = state.get("endpoint_port") or ""
+
+        if show_host_port:
+            col_h, col_p = st.columns([3, 1])
+            with col_h:
+                host_val = st.text_input(
+                    "Host (e.g., localhost)",
+                    value=host_val,
+                    help="Host part of endpoint. If left empty, the 'Endpoint' text above is used as-is.",
+                )
+            with col_p:
+                port_val = st.text_input(
+                    "Port (e.g., 11434)",
+                    value=port_val or "",
+                    help="Optional port. If provided, will be combined with Host when saving.",
+                )
 
         use_responses_api_val = st.checkbox(
             "Use provider Responses-style API when available",
@@ -299,6 +374,32 @@ def render_agent_editor():
             value=state.get("symbol", palette_symbol_value) or palette_symbol_value,
             help="Override the symbol for this agent.",
             max_chars=8,
+        )
+
+        # Contextual provider capability hint (short)
+        st.markdown("### Provider capability hints")
+        prov_feats_preview = state.get("provider_features") or {}
+        # Determine a friendly summary
+        def _friendly_caps_summary(pf: dict) -> str:
+            parts = []
+            if pf.get("structured_output"):
+                parts.append("structured output")
+            if pf.get("tool_calling"):
+                parts.append("tool calling")
+            if pf.get("reasoning"):
+                parts.append("reasoning")
+            if not parts:
+                return "No explicit capability hints provided. Edit provider features or use the Advanced tab to set them."
+            return "Detected: " + ", ".join(parts) + "."
+
+        st.caption(_friendly_caps_summary(prov_feats_preview))
+
+        # Link to LangChain content_blocks docs for more info
+        st.markdown(
+            """
+            Providers that expose structured outputs and tool calls usually surface them via LangChain's standardized content blocks (`content_blocks`),
+            which the engine uses to detect tool calls, reasoning traces, and structured responses. See the LangChain standard message content docs in the Advanced tab for details.
+            """
         )
 
     # ----- Prompt tab -----
@@ -444,6 +545,8 @@ def render_agent_editor():
                         # Load snapshot into editor state (do not auto-save)
                         s = snap.get("snapshot") or {}
                         # Update the editor state before widgets are re-created on rerun
+                        # Parse endpoint into host/port again for convenience
+                        host_s, port_s = _parse_endpoint_to_host_port(s.get("endpoint") or "")
                         st.session_state.agent_editor_state.update(
                             {
                                 "name": state.get("name", "") or "",
@@ -461,6 +564,8 @@ def render_agent_editor():
                                 "provider_id": s.get("provider_id", "openai"),
                                 "model_class": s.get("model_class"),
                                 "endpoint": s.get("endpoint"),
+                                "endpoint_host": host_s,
+                                "endpoint_port": str(port_s) if port_s is not None else None,
                                 "use_responses_api": s.get("use_responses_api", True),
                                 "provider_features": s.get("provider_features") or {},
                             }
@@ -480,16 +585,105 @@ def render_agent_editor():
 
     # ----- Advanced tab -----
     with adv_tab:
+        st.markdown("### Provider features (optional)")
+        st.caption("Provide a small JSON blob that hints at provider capabilities (e.g. {\"structured_output\": true, \"tool_calling\": true}). You can also toggle common capability flags below.")
+
+        # Parse current provider_features JSON into pf_val for use in the UI
+        pf_default = json.dumps(state.get("provider_features") or {}, indent=2)
+        # Use a unique session key so editing multiple agents in the same session doesn't collide badly
+        pf_session_key = f"agent_editor_pf_text_{state.get('name','__unknown')}"
+        if pf_session_key not in st.session_state:
+            st.session_state[pf_session_key] = pf_default
+
+        pf_text = st.text_area("Provider Features (JSON)", value=st.session_state[pf_session_key], height=120, key=pf_session_key)
+        try:
+            pf_val = json.loads(pf_text) if pf_text and pf_text.strip() else {}
+        except Exception:
+            pf_val = {}
+            st.warning("Provider features JSON invalid; saving will store an empty object.")
+
+        # Capability toggles: prefill from provider_features if present, else provider defaults
+        # Default heuristics (conservative):
+        default_structured = bool(pf_val.get("structured_output")) if "structured_output" in pf_val else (provider_choice == "openai")
+        default_tool_calling = bool(pf_val.get("tool_calling")) if "tool_calling" in pf_val else (provider_choice in ("openai", "ollama"))
+        default_reasoning = bool(pf_val.get("reasoning")) if "reasoning" in pf_val else True  # default to True for backward compatibility
+
+        col_s, col_t, col_r = st.columns(3)
+        with col_s:
+            structured_checkbox_key = f"agent_editor_pf_structured_{state.get('name','__unknown')}"
+            structured_checked = st.checkbox(
+                "Structured output (content_blocks)",
+                value=st.session_state.get(structured_checkbox_key, default_structured),
+                help="Whether the provider can produce structured outputs via LangChain content_blocks (e.g., for schema'd responses).",
+                key=structured_checkbox_key,
+            )
+        with col_t:
+            tool_calling_checkbox_key = f"agent_editor_pf_tool_calling_{state.get('name','__unknown')}"
+            tool_calling_checked = st.checkbox(
+                "Tool calling",
+                value=st.session_state.get(tool_calling_checkbox_key, default_tool_calling),
+                help="Provider supports server-side tool calls or function/tool invocation exposed through content blocks.",
+                key=tool_calling_checkbox_key,
+            )
+        with col_r:
+            reasoning_checkbox_key = f"agent_editor_pf_reasoning_{state.get('name','__unknown')}"
+            reasoning_checked = st.checkbox(
+                "Reasoning traces",
+                value=st.session_state.get(reasoning_checkbox_key, default_reasoning),
+                help="Provider emits structured reasoning / chain-of-thought blocks exposed through content_blocks.",
+                key=reasoning_checkbox_key,
+            )
+
+        st.markdown("---")
+
+        # Compute the effective provider_feats used to gate UI controls
+        provider_feats = dict(pf_val or {})
+        # Merge the checkbox preferences (checkboxes are authoritative in the UI; they will be persisted into provider_features on Save)
+        provider_feats["structured_output"] = bool(structured_checked)
+        provider_feats["tool_calling"] = bool(tool_calling_checked)
+        provider_feats["reasoning"] = bool(reasoning_checked)
+
+        st.markdown("#### Capability summary")
+        caps = []
+        if provider_feats.get("structured_output"):
+            caps.append("structured output")
+        if provider_feats.get("tool_calling"):
+            caps.append("tool calling")
+        if provider_feats.get("reasoning"):
+            caps.append("reasoning traces")
+        if caps:
+            st.markdown(f"- Detected / selected capabilities: **{', '.join(caps)}**")
+        else:
+            st.markdown("- No capabilities selected.")
+
+        # Small contextual help about content_blocks and where to learn more.
+        st.info(
+            "LangChain standardized message content ('content_blocks') normalizes text, reasoning, tool calls and multimodal outputs across providers. "
+            "When providers expose content_blocks, the dashboard can more reliably detect structured outputs and tool invocations."
+        )
+        st.caption(
+            "Learn more: LangChain standard message content and Messages docs (content_blocks)."
+        )
+        st.markdown(
+            "• LangChain blog: [Standard message content](https://www.blog.langchain.com/standard-message-content/?utm_source=openai).  \n"
+            "• LangChain docs: [Messages / content_blocks](https://docs.langchain.com/oss/python/langchain/messages?utm_source=openai)."
+        )
+
+        # Tools section (respects provider_feat.tool_calling)
         st.markdown("### Tools")
 
         tools_state = state.get("tools") or {}
         tools_enabled_default = bool(tools_state.get("enabled"))
         selected_tools_default = tools_state.get("tools") or []
 
+        # Disable tools enabling if provider clearly doesn't support tool_calling
+        tools_supported = bool(provider_feats.get("tool_calling", False))
+
         tools_enabled = st.checkbox(
             "Enable tool calling",
             value=tools_enabled_default,
             help="Allow this agent to call tools such as web search.",
+            disabled=not tools_supported,
         )
 
         available_tools = ["web_search"]
@@ -509,23 +703,8 @@ def render_agent_editor():
         effort_options = ["none", "low", "medium", "high", "xhigh"]
         current_effort = state.get("reasoning_effort") or "medium"
 
-        # Determine provider feature hints
-        provider_feats = state.get("provider_features") or {}
-
-        # Structured-output support (keeps existing structured UI decisions intact)
-        structured_supported = bool(provider_feats.get("structured_output", True))
-
-        # Reasoning support should be independent from structured output.
-        # Accept multiple common keys exported by model profiles / provider hints for compatibility.
-        if "reasoning" in provider_feats:
-            reasoning_supported = bool(provider_feats.get("reasoning"))
-        elif "reasoning_output" in provider_feats:
-            reasoning_supported = bool(provider_feats.get("reasoning_output"))
-        elif "supports_reasoning" in provider_feats:
-            reasoning_supported = bool(provider_feats.get("supports_reasoning"))
-        else:
-            # Default to True when no explicit hint is present (backwards compatible)
-            reasoning_supported = True
+        # Reasoning support derived above in provider_feats
+        reasoning_supported = bool(provider_feats.get("reasoning", True))
 
         reasoning_effort_val = st.selectbox(
             "Reasoning Effort",
@@ -549,22 +728,25 @@ def render_agent_editor():
             disabled=not reasoning_supported,
         )
 
-        st.markdown("### Provider features (optional JSON)")
-        st.caption("Provide a small JSON blob that hints at provider capabilities (e.g. {\"structured_output\": true, \"tool_calling\": true}).")
-        pf_default = json.dumps(state.get("provider_features") or {}, indent=2)
-        pf_text = st.text_area("Provider Features (JSON)", value=pf_default, height=100)
-        try:
-            pf_val = json.loads(pf_text) if pf_text and pf_text.strip() else {}
-        except Exception:
-            pf_val = {}
-            st.warning("Provider features JSON invalid; saving will store an empty object.")
-
     st.divider()
 
     # -------------------------
     # Reflect edits into state
     # -------------------------
     if not state_changed_this_run:
+        # Decide which endpoint value to persist:
+        # 1) If Endpoint text input provided, use it.
+        # 2) Else if Host provided, compose host[:port] into endpoint.
+        endpoint_final = endpoint_val.strip() if endpoint_val and endpoint_val.strip() else None
+        if not endpoint_final and show_host_port and host_val:
+            endpoint_final = _compose_endpoint_from_host_port(host_val, port_val)
+
+        # Merged provider_features for state: prefer pf_val (parsed JSON), then overlay checkbox toggles
+        merged_pf = dict(pf_val or {})
+        merged_pf["structured_output"] = bool(structured_checked)
+        merged_pf["tool_calling"] = bool(tool_calling_checked)
+        merged_pf["reasoning"] = bool(reasoning_checked)
+
         state.update(
             {
                 "name": name_val.strip(),
@@ -587,9 +769,11 @@ def render_agent_editor():
                 "reasoning_effort": reasoning_effort_val,
                 "reasoning_summary": reasoning_summary_val,
                 "provider_id": provider_choice,
-                "endpoint": endpoint_val or None,
+                "endpoint": endpoint_final,
+                "endpoint_host": host_val or None,
+                "endpoint_port": port_val or None,
                 "use_responses_api": bool(use_responses_api_val),
-                "provider_features": pf_val or {},
+                "provider_features": merged_pf or {},
             }
         )
 
@@ -624,28 +808,44 @@ def render_agent_editor():
                 previous_agent = next(a for a in agents if a["name"] == old_name)
                 previous_prompt = previous_agent["prompt"]
 
-            get_agent_service().save_agent_atomic(
-                new_name,
-                state["model"],
-                state["prompt"],
-                state["role"],
-                state["input_vars"],
-                state["output_vars"],
-                color=state.get("color") or DEFAULT_COLOR,
-                symbol=state.get("symbol") or DEFAULT_SYMBOL,
-                save_prompt_version=(state["prompt"] != previous_prompt),
-                metadata={},
-                tools=state.get("tools")
-                or {"enabled": False, "tools": []},
-                reasoning_effort=state.get("reasoning_effort"),
-                reasoning_summary=state.get("reasoning_summary"),
-                system_prompt=state.get("system_prompt") or None,
-                provider_id=state.get("provider_id"),
-                model_class=state.get("model_class"),
-                endpoint=state.get("endpoint"),
-                use_responses_api=bool(state.get("use_responses_api")),
-                provider_features=state.get("provider_features"),
-            )
+            # Persist provider_features: ensure the checkboxes are merged into JSON
+            provider_features_to_save = state.get("provider_features") or {}
+            # (The state was already updated above, but merge again to be safe)
+            provider_features_to_save["structured_output"] = bool(st.session_state.get(f"agent_editor_pf_structured_{state.get('name','__unknown')}", provider_features_to_save.get("structured_output", False)))
+            provider_features_to_save["tool_calling"] = bool(st.session_state.get(f"agent_editor_pf_tool_calling_{state.get('name','__unknown')}", provider_features_to_save.get("tool_calling", False)))
+            provider_features_to_save["reasoning"] = bool(st.session_state.get(f"agent_editor_pf_reasoning_{state.get('name','__unknown')}", provider_features_to_save.get("reasoning", False)))
+
+            # If host/port were provided and endpoint empty, ensure endpoint stored from host/port (last-resort)
+            ep = state.get("endpoint")
+            if not ep and show_host_port and state.get("endpoint_host"):
+                ep = _compose_endpoint_from_host_port(state.get("endpoint_host"), state.get("endpoint_port"))
+            try:
+                get_agent_service().save_agent_atomic(
+                    new_name,
+                    state["model"],
+                    state["prompt"],
+                    state["role"],
+                    state["input_vars"],
+                    state["output_vars"],
+                    color=state.get("color") or DEFAULT_COLOR,
+                    symbol=state.get("symbol") or DEFAULT_SYMBOL,
+                    save_prompt_version=(state["prompt"] != previous_prompt),
+                    metadata={},
+                    tools=state.get("tools")
+                    or {"enabled": False, "tools": []},
+                    reasoning_effort=state.get("reasoning_effort"),
+                    reasoning_summary=state.get("reasoning_summary"),
+                    system_prompt=state.get("system_prompt") or None,
+                    provider_id=state.get("provider_id"),
+                    model_class=state.get("model_class"),
+                    endpoint=ep,
+                    use_responses_api=bool(state.get("use_responses_api")),
+                    provider_features=provider_features_to_save,
+                )
+            except Exception:
+                logger.exception("Failed to save agent")
+                st.error("Failed to save agent to database")
+                return
 
             invalidate_agents()
             reload_agents_into_engine()
@@ -773,6 +973,10 @@ def render_agent_editor():
 
                 state["selected_name"] = "<New Agent>"
 
+                # Parse endpoint if template provided
+                tpl_endpoint = chosen_agent.get("endpoint")
+                host_tpl, port_tpl = _parse_endpoint_to_host_port(tpl_endpoint or "")
+
                 state.update(
                     {
                         "name": imported_name,
@@ -786,7 +990,9 @@ def render_agent_editor():
                         "symbol": DEFAULT_SYMBOL,
                         "provider_id": chosen_agent.get("provider_id", "openai"),
                         "model_class": chosen_agent.get("model_class"),
-                        "endpoint": chosen_agent.get("endpoint"),
+                        "endpoint": tpl_endpoint,
+                        "endpoint_host": host_tpl,
+                        "endpoint_port": str(port_tpl) if port_tpl is not None else None,
                         "use_responses_api": chosen_agent.get("use_responses_api", True),
                         "provider_features": chosen_agent.get("provider_features") or {},
                     }

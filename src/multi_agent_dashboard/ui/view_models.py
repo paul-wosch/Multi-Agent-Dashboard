@@ -32,8 +32,13 @@ class AgentConfigView(NamedTuple):
     # prompt_template and optional system_prompt_template (developer role).
     prompt_template: Optional[str] = None
     system_prompt_template: Optional[str] = None
-    # Provider features captured for this run (derived or explicit)
+    # Provider metadata captured for this run (derived or explicit)
     provider_features: Optional[dict] = None
+    # Provider identity fields (enable explicit "OpenAI" / "Ollama" display)
+    provider_id: Optional[str] = None
+    model_class: Optional[str] = None
+    endpoint: Optional[str] = None
+    use_responses_api: Optional[bool] = None
     # Raw stored JSON blobs (historic runs)
     raw_tools_config: Optional[dict] = None
     raw_reasoning_config: Optional[dict] = None
@@ -274,6 +279,11 @@ def config_view_from_db_rows(
                 prompt_template=prompt_template,
                 system_prompt_template=system_prompt_template,
                 provider_features=parsed.get("provider_features") or None,
+                # Provider identity snapshot (historic)
+                provider_id=cfg.get("provider_id") or None,
+                model_class=cfg.get("model_class") or None,
+                endpoint=cfg.get("endpoint") or None,
+                use_responses_api=bool(cfg.get("use_responses_api")),
                 raw_tools_config=parsed["tools_config_json"] or None,
                 raw_reasoning_config=parsed["reasoning_config_json"] or None,
                 raw_extra_config=parsed["extra_config_json"] or None,

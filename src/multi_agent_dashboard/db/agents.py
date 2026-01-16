@@ -114,6 +114,67 @@ class AgentDAO:
             )
         return agents
 
+    def get(self, agent_name: str) -> Optional[dict]:
+        """
+        Fetch a single agent by name, returning the same dict shape as list() for one agent.
+        Returns None if agent not found.
+        """
+        logger.debug("Fetching single agent '%s' from DB", agent_name)
+        try:
+            with self._connection() as conn:
+                row = conn.execute(
+                    """
+                    SELECT agent_name,
+                           model,
+                           prompt_template,
+                           role,
+                           input_vars,
+                           output_vars,
+                           color,
+                           symbol,
+                           tools_json,
+                           reasoning_effort,
+                           reasoning_summary,
+                           system_prompt_template,
+                           provider_id,
+                           model_class,
+                           endpoint,
+                           use_responses_api,
+                           provider_features_json
+                    FROM agents
+                    WHERE agent_name = ?
+                    """,
+                    (agent_name,),
+                ).fetchone()
+        except Exception:
+            logger.exception("Failed to fetch agent '%s' from DB", agent_name)
+            raise
+
+        if not row:
+            return None
+
+        color = row["color"] or DEFAULT_COLOR
+        symbol = row["symbol"] or DEFAULT_SYMBOL
+        return {
+            "agent_name": row["agent_name"],
+            "model": row["model"],
+            "prompt_template": row["prompt_template"],
+            "role": row["role"],
+            "input_vars": safe_json_loads(row["input_vars"], []),
+            "output_vars": safe_json_loads(row["output_vars"], []),
+            "color": color,
+            "symbol": symbol,
+            "tools": safe_json_loads(row["tools_json"], {}),
+            "reasoning_effort": row["reasoning_effort"],
+            "reasoning_summary": row["reasoning_summary"],
+            "system_prompt_template": row["system_prompt_template"],
+            "provider_id": row["provider_id"],
+            "model_class": row["model_class"],
+            "endpoint": row["endpoint"],
+            "use_responses_api": bool(row["use_responses_api"]) if row["use_responses_api"] is not None else False,
+            "provider_features": safe_json_loads(row["provider_features_json"], {}),
+        }
+
     # -----------------------
     # Snapshot operations
     # -----------------------

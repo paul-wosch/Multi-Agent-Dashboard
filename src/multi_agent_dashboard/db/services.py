@@ -1,10 +1,14 @@
 # src/multi_agent_dashboard/db/services.py
 from typing import Dict, Any, List, Optional, Tuple
+import json
 
 from multi_agent_dashboard.db.runs import RunDAO, run_dao
 from multi_agent_dashboard.db.agents import AgentDAO, agent_dao
 from multi_agent_dashboard.db.pipelines import PipelineDAO, pipeline_dao
 from multi_agent_dashboard.config import AGENT_SNAPSHOTS_AUTO, AGENT_SNAPSHOT_PRUNE_KEEP
+
+# Runtime hooks (UI registers handlers; services call on changes)
+from multi_agent_dashboard import runtime_hooks
 
 # -----------------------
 # Run Service
@@ -87,14 +91,21 @@ class AgentService:
             reasoning_effort: Optional[str] = None,
             reasoning_summary: Optional[str] = None,
             system_prompt: Optional[str] = None,
-            # Provider metadata 
+            # Provider metadata
             provider_id: Optional[str] = None,
             model_class: Optional[str] = None,
             endpoint: Optional[str] = None,
             use_responses_api: bool = False,
             provider_features: Optional[dict] = None,
     ) -> None:
-        AgentDAO(self.db_path).save(
+        """
+        Save an agent non-atomically. Detect provider metadata changes and, if
+        changed, notify the runtime hooks so the UI/engine can reload runtimes.
+        """
+        dao = AgentDAO(self.db_path)
+        prev = dao.get(name)
+
+        dao.save(
             name,
             model,
             prompt_template,
@@ -113,6 +124,42 @@ class AgentService:
             use_responses_api=use_responses_api,
             provider_features=provider_features,
         )
+
+        # Decide whether provider metadata changed (or a new agent created).
+        def _provider_key_from_row(row: Optional[dict]) -> Optional[tuple]:
+            if not row:
+                return None
+            pf = row.get("provider_features") or {}
+            try:
+                pf_s = json.dumps(pf, sort_keys=True, separators=(",", ":"))
+            except Exception:
+                pf_s = repr(pf)
+            return (
+                row.get("provider_id"),
+                row.get("model_class"),
+                row.get("endpoint"),
+                bool(row.get("use_responses_api")),
+                pf_s,
+            )
+
+        new_row_like = {
+            "provider_id": provider_id,
+            "model_class": model_class,
+            "endpoint": endpoint,
+            "use_responses_api": bool(use_responses_api),
+            "provider_features": provider_features or {},
+        }
+
+        prev_key = _provider_key_from_row(prev)
+        new_key = _provider_key_from_row(new_row_like)
+
+        if prev_key != new_key:
+            # Notify runtime: provider metadata changed (or new agent).
+            try:
+                runtime_hooks.on_agent_change()
+            except Exception:
+                # Avoid bubbling into business logic on hook failures
+                pass
 
     # Note: old prompt-versioning has been removed. If external code calls
     # save_prompt_version/load_prompt_versions, adapt to use snapshots instead.
@@ -140,7 +187,7 @@ class AgentService:
             reasoning_effort: Optional[str] = None,
             reasoning_summary: Optional[str] = None,
             system_prompt: Optional[str] = None,
-            # Provider metadata 
+            # Provider metadata
             provider_id: Optional[str] = None,
             model_class: Optional[str] = None,
             endpoint: Optional[str] = None,
@@ -151,7 +198,11 @@ class AgentService:
         has been removed in favour of agent snapshots. The `save_prompt_version`
         parameter is retained for API compatibility but is ignored.
         """
+        # Use transaction-scoped DAO so callers get atomicity
         with agent_dao(self.db_path) as dao:
+            # Fetch previous row (if any) to detect changes
+            prev = dao.get(name)
+
             dao.save(
                 name,
                 model,
@@ -198,6 +249,41 @@ class AgentService:
                     # Non-fatal; transaction will still commit the agent save.
                     logger = __import__("logging").getLogger(__name__)
                     logger.exception("Failed to create automatic snapshot for %s", name)
+
+        # Decide whether provider metadata changed (or new agent).
+        def _provider_key_from_row(row: Optional[dict]) -> Optional[tuple]:
+            if not row:
+                return None
+            pf = row.get("provider_features") or {}
+            try:
+                pf_s = json.dumps(pf, sort_keys=True, separators=(",", ":"))
+            except Exception:
+                pf_s = repr(pf)
+            return (
+                row.get("provider_id"),
+                row.get("model_class"),
+                row.get("endpoint"),
+                bool(row.get("use_responses_api")),
+                pf_s,
+            )
+
+        prev_key = _provider_key_from_row(prev)
+
+        new_like = {
+            "provider_id": provider_id,
+            "model_class": model_class,
+            "endpoint": endpoint,
+            "use_responses_api": bool(use_responses_api),
+            "provider_features": provider_features or {},
+        }
+        new_key = _provider_key_from_row(new_like)
+
+        if prev_key != new_key:
+            # Notify runtime: provider metadata changed (or new agent).
+            try:
+                runtime_hooks.on_agent_change()
+            except Exception:
+                pass
 
     def rename_agent_atomic(self, old_name: str, new_name: str) -> None:
         """Atomically rename an agent."""

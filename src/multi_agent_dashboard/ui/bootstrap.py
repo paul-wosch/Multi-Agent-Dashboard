@@ -15,6 +15,9 @@ from multi_agent_dashboard.models import AgentSpec
 from multi_agent_dashboard.ui.cache import cached_load_agents, get_agent_service, invalidate_agents
 from multi_agent_dashboard.ui.logging_ui import attach_streamlit_log_handler
 
+# Runtime hooks registration
+from multi_agent_dashboard import runtime_hooks
+
 
 # Default agent templates (moved from app.py for bootstrap)
 # Each agent now has an explicit system_prompt_template (developer/system role)
@@ -186,6 +189,16 @@ def app_start():
     # create engine with injected client
     engine = MultiAgentEngine(llm_client=llm_client)
     st.session_state.engine = engine
+
+    # Register runtime handlers so DB/service layer can notify the UI to reload.
+    # These are best-effort; the runtime_hooks module is safe to import from non-UI contexts.
+    try:
+        runtime_hooks.register_agent_change_handlers(
+            invalidate_agents,
+            reload_agents_into_engine,
+        )
+    except Exception:
+        logging.getLogger(__name__).exception("Failed to register runtime hooks")
 
     # Ensure default agents exist in DB (only if table empty)
     bootstrap_default_agents(default_agents)

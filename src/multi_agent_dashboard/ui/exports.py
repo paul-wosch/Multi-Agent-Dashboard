@@ -146,10 +146,32 @@ def build_export_from_engine_result(
             "provider_features": run_cfg.get("provider_features") if run_cfg and run_cfg.get("provider_features") is not None else (getattr(runtime.spec, "provider_features", None) if runtime else None),
         }
 
+        # Determine effective tools configuration, and capture any allowed_domains present in runtime state
+        spec_tools = getattr(runtime.spec, "tools", None) if runtime else None
+        # Derive allowed_domains for this agent from run state (result.state)
+        allowed_domains_agent = None
+        try:
+            if isinstance(result.state, dict):
+                adb = result.state.get("allowed_domains_by_agent")
+                if isinstance(adb, dict):
+                    allowed_domains_agent = adb.get(name)
+                else:
+                    global_allowed = result.state.get("allowed_domains")
+                    if isinstance(global_allowed, list) and global_allowed:
+                        allowed_domains_agent = global_allowed
+        except Exception:
+            allowed_domains_agent = None
+
+        tools_snapshot = dict(spec_tools) if isinstance(spec_tools, dict) else (spec_tools or {})
+        if allowed_domains_agent:
+            # include the effective allowed_domains used during the run for auditing/export
+            tools_snapshot = dict(tools_snapshot)
+            tools_snapshot["allowed_domains"] = allowed_domains_agent
+
         agent_config = {
             "model": model,
             "role": getattr(runtime.spec, "role", None) if runtime else None,
-            "tools": getattr(runtime.spec, "tools", None),
+            "tools": tools_snapshot,
             "reasoning": {
                 "effort": getattr(runtime.spec, "reasoning_effort", None)
                 if runtime

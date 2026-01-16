@@ -77,6 +77,13 @@ def render_agent_config_section(
             st.markdown(f"**Model:** `{cfg.model}`")
             st.markdown(f"**Role:** {cfg.role}")
 
+            # Provider snapshot (explicit)
+            st.markdown("**Provider snapshot:**")
+            st.markdown(f"- **Provider:** `{cfg.provider_id or '–'}`")
+            st.markdown(f"- **Provider model class:** `{cfg.model_class or '–'}`")
+            st.markdown(f"- **Endpoint:** `{cfg.endpoint or '–'}`")
+            st.markdown(f"- **Use Responses API:** `{'Yes' if cfg.use_responses_api else 'No'}`")
+
             st.markdown("**System prompt (system/developer role):**")
             if cfg.system_prompt_template:
                 st.code(cfg.system_prompt_template, language=None)
@@ -99,6 +106,16 @@ def render_agent_config_section(
                 f"**Tools:** {', '.join(cfg.tools) if cfg.tools else '–'}"
             )
 
+            # A provider-aware note (keeps UI provider-neutral)
+            st.caption(
+                "Note: tool parameters such as domain filters are provider-specific. "
+                "The dashboard normalizes observed tool calls and filters into a provider-agnostic "
+                "view (LangChain content_blocks) so you can inspect them consistently. "
+                "OpenAI's Responses API exposes domain filtering on the web_search tool as "
+                "`filters.allowed_domains`; other providers (e.g., local Ollama instances) "
+                "may accept different parameters or enforce filtering differently."
+            )
+
             if "web_search" in cfg.tools:
                 if cfg.web_search_allowed_domains:
                     st.markdown("**Allowed domains for `web_search`:**")
@@ -107,6 +124,13 @@ def render_agent_config_section(
                     st.markdown(
                         "**Allowed domains for `web_search`:** not restricted (any domain)"
                     )
+
+                st.markdown(
+                    "Provider note: some providers (for example OpenAI Responses) accept an explicit "
+                    "`filters.allowed_domains` parameter which restricts search results to the listed domains. "
+                    "Other providers may surface similar filters via different parameter names or via the local tool layer. "
+                    "The dashboard records and displays the effective allow-list here for auditing and export."
+                )
 
             st.markdown(
                 f"**Reasoning effort:** {cfg.reasoning_effort}"
@@ -181,6 +205,10 @@ def render_agent_config_section(
                             if allowed_domains:
                                 st.markdown("  - Allowed domains for this call:")
                                 st.code("\n".join(allowed_domains))
+                                st.caption(
+                                    "Note: enforcement and exact parameter names for domain filters are provider-specific. "
+                                    "The dashboard normalizes the tool call details and displays allowed domains when present."
+                                )
                         st.json(action, expanded=False)
                 else:
                     args = parse_json_field(u.get("args_json"), {})
@@ -192,6 +220,9 @@ def render_agent_config_section(
                             if allowed_domains:
                                 st.markdown("  - Allowed domains for this call:")
                                 st.code("\n".join(allowed_domains))
+                                st.caption(
+                                    "Historic note: stored tool call args are displayed as-is; provider enforcement may differ."
+                                )
                         st.json(args, expanded=False)
 
     # Compact overview

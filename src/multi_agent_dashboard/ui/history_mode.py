@@ -201,13 +201,40 @@ def render_history_mode():
         )
         provider_feats = parse_json_field(cfg.get("provider_features_json"), {})
 
+        # Extract allowed domains from the low-level stored tools_config_json (if present)
+        allowed_domains = None
+        try:
+            # helper from view_models normally does this; inline here for export completeness
+            if isinstance(tools_cfg_json, dict):
+                tools_low = tools_cfg_json.get("tools")
+                if isinstance(tools_low, list):
+                    for tcfg in tools_low:
+                        if not isinstance(tcfg, dict):
+                            continue
+                        if tcfg.get("type") != "web_search":
+                            continue
+                        filters = tcfg.get("filters") or {}
+                        if isinstance(filters, dict) and "allowed_domains" in filters:
+                            allowed = filters["allowed_domains"]
+                            if isinstance(allowed, list):
+                                allowed_domains = [str(d) for d in allowed]
+                            else:
+                                allowed_domains = [str(allowed)]
+                            break
+        except Exception:
+            allowed_domains = None
+
+        tools_snapshot = {
+            "enabled": bool(tools_json.get("enabled")),
+            "tools": tools_json.get("tools") or [],
+        }
+        if allowed_domains:
+            tools_snapshot["allowed_domains"] = allowed_domains
+
         agent_config = {
             "model": cfg.get("model") or a.get("model") or "unknown",
             "role": cfg.get("role") or "–",
-            "tools": {
-                "enabled": bool(tools_json.get("enabled")),
-                "tools": tools_json.get("tools") or [],
-            },
+            "tools": tools_snapshot,
             "reasoning": {
                 "effort": cfg.get("reasoning_effort") or "default",
                 "summary": cfg.get("reasoning_summary") or "none",
