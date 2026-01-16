@@ -32,6 +32,8 @@ class AgentConfigView(NamedTuple):
     # prompt_template and optional system_prompt_template (developer role).
     prompt_template: Optional[str] = None
     system_prompt_template: Optional[str] = None
+    # Provider features captured for this run (derived or explicit)
+    provider_features: Optional[dict] = None
     # Raw stored JSON blobs (historic runs)
     raw_tools_config: Optional[dict] = None
     raw_reasoning_config: Optional[dict] = None
@@ -190,6 +192,7 @@ def parse_agent_run_config_row(cfg: dict) -> dict:
     tools_cfg_json = parse_json_field(cfg.get("tools_config_json"), {})
     reasoning_cfg_json = parse_json_field(cfg.get("reasoning_config_json"), {})
     extra_cfg_json = parse_json_field(cfg.get("extra_config_json"), {})
+    provider_features = parse_json_field(cfg.get("provider_features_json"), {})
 
     tools_enabled = bool(tools_json.get("enabled"))
     enabled_tools = tools_json.get("tools") or []
@@ -203,6 +206,7 @@ def parse_agent_run_config_row(cfg: dict) -> dict:
         "tools_config_json": tools_cfg_json,
         "reasoning_config_json": reasoning_cfg_json,
         "extra_config_json": extra_cfg_json,
+        "provider_features": provider_features,
         "reasoning_effort": cfg.get("reasoning_effort") or "default",
         "reasoning_summary": cfg.get("reasoning_summary") or "none",
     }
@@ -269,6 +273,7 @@ def config_view_from_db_rows(
                 reasoning_summary=parsed["reasoning_summary"],
                 prompt_template=prompt_template,
                 system_prompt_template=system_prompt_template,
+                provider_features=parsed.get("provider_features") or None,
                 raw_tools_config=parsed["tools_config_json"] or None,
                 raw_reasoning_config=parsed["reasoning_config_json"] or None,
                 raw_extra_config=parsed["extra_config_json"] or None,

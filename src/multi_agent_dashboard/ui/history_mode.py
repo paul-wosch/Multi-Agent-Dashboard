@@ -199,6 +199,7 @@ def render_history_mode():
         extra_cfg_json = parse_json_field(
             cfg.get("extra_config_json"), {}
         )
+        provider_feats = parse_json_field(cfg.get("provider_features_json"), {})
 
         agent_config = {
             "model": cfg.get("model") or a.get("model") or "unknown",
@@ -219,6 +220,14 @@ def render_history_mode():
                 "tools_config_json": tools_cfg_json or None,
                 "reasoning_config_json": reasoning_cfg_json or None,
                 "extra_config_json": extra_cfg_json or None,
+            },
+            # Provider snapshot (captured at run time)
+            "provider": {
+                "provider_id": cfg.get("provider_id") or None,
+                "model_class": cfg.get("model_class") or None,
+                "endpoint": cfg.get("endpoint") or None,
+                "use_responses_api": bool(cfg.get("use_responses_api")),
+                "provider_features": provider_feats or None,
             },
         }
 

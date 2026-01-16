@@ -115,6 +115,14 @@ def render_agent_config_section(
                 f"**Reasoning summary:** {cfg.reasoning_summary}"
             )
 
+            # Provider features (derived or explicit)
+            if cfg.provider_features:
+                st.markdown("**Provider features (derived / snapshot):**")
+                try:
+                    st.json(cfg.provider_features)
+                except Exception:
+                    st.markdown(str(cfg.provider_features))
+
             # Historic runs can expose stored raw JSON configs
             if is_historic:
                 if cfg.raw_reasoning_config:

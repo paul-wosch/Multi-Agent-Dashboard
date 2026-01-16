@@ -135,6 +135,17 @@ def build_export_from_engine_result(
         model = runtime.spec.model if runtime else None
         output = result.memory.get(name, "")
 
+        # Prefer provider snapshot from the per-run agent_configs (if available), else fallback to spec-level snapshot
+        run_cfg = (result.agent_configs or {}).get(name, {}) or {}
+
+        provider_snapshot = {
+            "provider_id": run_cfg.get("provider_id") or (getattr(runtime.spec, "provider_id", None) if runtime else None),
+            "model_class": run_cfg.get("model_class") or (getattr(runtime.spec, "model_class", None) if runtime else None),
+            "endpoint": run_cfg.get("endpoint") or (getattr(runtime.spec, "endpoint", None) if runtime else None),
+            "use_responses_api": bool(run_cfg.get("use_responses_api")) if run_cfg else (getattr(runtime.spec, "use_responses_api", None) if runtime else None),
+            "provider_features": run_cfg.get("provider_features") if run_cfg and run_cfg.get("provider_features") is not None else (getattr(runtime.spec, "provider_features", None) if runtime else None),
+        }
+
         agent_config = {
             "model": model,
             "role": getattr(runtime.spec, "role", None) if runtime else None,
@@ -147,14 +158,8 @@ def build_export_from_engine_result(
                 if runtime
                 else None,
             },
-            # Provider snapshot
-            "provider": {
-                "provider_id": getattr(runtime.spec, "provider_id", None) if runtime else None,
-                "model_class": getattr(runtime.spec, "model_class", None) if runtime else None,
-                "endpoint": getattr(runtime.spec, "endpoint", None) if runtime else None,
-                "use_responses_api": getattr(runtime.spec, "use_responses_api", None) if runtime else None,
-                "provider_features": getattr(runtime.spec, "provider_features", None) if runtime else None,
-            },
+            # Provider snapshot (prefer per-run derived snapshot)
+            "provider": provider_snapshot,
             # Explicitly expose both prompt templates
             "prompt_template": getattr(runtime.spec, "prompt_template", None) if runtime else None,
             "system_prompt_template": getattr(runtime.spec, "system_prompt_template", None) if runtime else None,

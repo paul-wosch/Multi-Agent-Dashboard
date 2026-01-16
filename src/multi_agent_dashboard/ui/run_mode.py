@@ -525,6 +525,8 @@ def config_view_from_engine_result(
                 # Expose both prompt templates from the live AgentSpec
                 prompt_template=getattr(spec, "prompt_template", None),
                 system_prompt_template=getattr(spec, "system_prompt_template", None),
+                # Include provider features from the spec for live view
+                provider_features=getattr(spec, "provider_features", None),
             )
         )
     return views
