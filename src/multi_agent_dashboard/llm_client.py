@@ -4,6 +4,10 @@ import time
 import logging
 import json
 import inspect
+import urllib.request
+import urllib.error
+import socket
+import threading
 from typing import Any, Dict, List, Optional, Callable, Tuple
 from dataclasses import dataclass
 
@@ -182,12 +186,20 @@ class ChatModelFactory:
 
     Keyed by (model, provider_id, endpoint, use_responses_api, model_class, provider_features_fingerprint, timeout).
     """
+
+    # Default TTL for cached endpoint health checks (seconds)
+    DEFAULT_HEALTH_TTL = 30.0
+
     def __init__(self, init_fn: Optional[Callable[..., Any]] = None):
         if init_fn is None and not _LANGCHAIN_AVAILABLE:
             raise RuntimeError("LangChain not available; cannot create ChatModelFactory without init function.")
         self._init_fn = init_fn or _init_chat_model
         # include timeout as final component in key tuple (Optional[float])
         self._cache: Dict[Tuple[str, str, Optional[str], bool, Optional[str], str, Optional[float]], Any] = {}
+
+        # Endpoint health cache: endpoint -> {"reachable": bool, "status": int|None, "message": str, "checked_at": float}
+        self._endpoint_health_cache: Dict[str, Dict[str, Any]] = {}
+        self._endpoint_health_cache_lock = threading.Lock()
 
     def _key(
         self,
@@ -260,6 +272,117 @@ class ChatModelFactory:
         except Exception:
             return {"__repr": repr(profile)}
 
+    def _normalize_endpoint_key(self, endpoint: Optional[str]) -> Optional[str]:
+        if not endpoint:
+            return None
+        key = endpoint.strip().rstrip("/")
+        return key
+
+    def check_endpoint(
+        self,
+        endpoint: Optional[str],
+        *,
+        timeout: float = 1.0,
+        ttl: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """
+        Lightweight health-check for an Ollama (or other) endpoint.
+
+        Returns a dict:
+          {
+            "endpoint": <string>,
+            "reachable": bool,
+            "status": <HTTP status code or None>,
+            "message": <str>,
+            "checked_at": <unix timestamp>
+          }
+
+        Behavior:
+        - Uses a small set of candidate paths (root, /api, /api/version, /version, /health)
+        - Treats any HTTP response as evidence the host is reachable (we aim to detect host/network unreachability)
+        - Caches results for DEFAULT_HEALTH_TTL seconds to avoid repeated network calls during UI rerenders
+        """
+        ep = self._normalize_endpoint_key(endpoint)
+        now = time.time()
+        ttl = ttl if ttl is not None else self.DEFAULT_HEALTH_TTL
+
+        if not ep:
+            return {"endpoint": endpoint, "reachable": False, "status": None, "message": "no endpoint provided", "checked_at": now}
+
+        # Consult cache
+        with self._endpoint_health_cache_lock:
+            cached = self._endpoint_health_cache.get(ep)
+            if cached:
+                try:
+                    if (now - float(cached.get("checked_at", 0))) < ttl:
+                        return dict(cached)
+                except Exception:
+                    # fallback to rechecking if cache malformed
+                    pass
+
+        # Candidate paths to probe (in order)
+        candidate_suffixes = [
+            "",               # e.g., http://host:11434 or http://host:11434/api if user provided /api
+            "/api",
+            "/api/version",
+            "/version",
+            "/health",
+        ]
+
+        last_err_msg = None
+        reached = False
+        status_code: Optional[int] = None
+        message = ""
+        for suf in candidate_suffixes:
+            # Avoid double slashes
+            url = ep + suf if suf and not ep.endswith("/") else (ep.rstrip("/") + suf)
+            try:
+                req = urllib.request.Request(url, method="GET", headers={"User-Agent": "multi-agent-dashboard/0.1"})
+                with urllib.request.urlopen(req, timeout=float(timeout)) as resp:
+                    # Any response indicates the host resolved and is reachable
+                    status_code = getattr(resp, "status", None) or getattr(resp, "getcode", lambda: None)()
+                    message = f"HTTP {status_code} @ {url}"
+                    reached = True
+                    break
+            except urllib.error.HTTPError as he:
+                # Server reached and returned an HTTP error (401/403/404/500 etc)
+                status_code = getattr(he, "code", None)
+                message = f"HTTP {status_code} @ {url}"
+                reached = True
+                break
+            except urllib.error.URLError as ue:
+                # Could be DNS error, refused connection, timeout, etc.
+                last_err_msg = f"URLError for {url}: {ue}"
+                # Try next candidate path; continue
+                continue
+            except socket.timeout as ste:
+                last_err_msg = f"timeout for {url}: {ste}"
+                continue
+            except Exception as ex:
+                last_err_msg = f"error for {url}: {ex}"
+                continue
+
+        if not reached:
+            message = last_err_msg or f"No response when checking {ep}"
+
+        result = {
+            "endpoint": endpoint,
+            "reachable": bool(reached),
+            "status": int(status_code) if status_code is not None else None,
+            "message": message,
+            "checked_at": now,
+        }
+
+        # Cache the result
+        try:
+            with self._endpoint_health_cache_lock:
+                self._endpoint_health_cache[ep] = dict(result)
+        except Exception:
+            # Non-fatal caching failure
+            logger.debug("Failed to cache endpoint health for %s", ep, exc_info=True)
+
+        return result
+
     def get_model(
         self,
         model: str,
@@ -270,6 +393,9 @@ class ChatModelFactory:
         model_class: Optional[str] = None,
         provider_features: Optional[Dict[str, Any]] = None,
         timeout: Optional[float] = None,
+        # Internal flag: if true, run a health-check before returning the model instance.
+        # Disabled by default to avoid unintended network calls in test environments.
+        health_check: bool = False,
     ):
         """
         Return a LangChain chat model instance for the provided metadata.
@@ -277,7 +403,45 @@ class ChatModelFactory:
 
         Additionally, attempt to extract a provider/model 'profile' when available and
         attach it as `_detected_provider_profile` on the returned model instance.
+
+        If `health_check` is True and provider == 'ollama', the factory will check the endpoint
+        reachability and cache the result; it will not raise on failure, only annotate the returned
+        model instance with `_endpoint_health` for downstream visibility.
         """
+        # Provider name normalization for provider-specific fallback logic
+        provider_norm = (provider_id or "").strip().lower()
+
+        # Provider-specific default endpoint handling:
+        # If the provider is Ollama and no endpoint was supplied, consult
+        # multi_agent_dashboard.config.OLLAMA_HOST / OLLAMA_PORT / OLLAMA_PROTOCOL
+        # to construct a sensible base_url (e.g., "http://localhost:11434").
+        if provider_norm == "ollama" and not endpoint:
+            try:
+                from multi_agent_dashboard import config as _cfg
+                host = getattr(_cfg, "OLLAMA_HOST", None)
+                port = getattr(_cfg, "OLLAMA_PORT", None)
+                proto = getattr(_cfg, "OLLAMA_PROTOCOL", None) or "http"
+                if host:
+                    # Compose endpoint with scheme and port (if present)
+                    if port:
+                        endpoint = f"{proto}://{host}:{port}"
+                    else:
+                        endpoint = f"{proto}://{host}"
+                    logger.debug("ChatModelFactory: no endpoint provided for Ollama; using default %s", endpoint)
+            except Exception as e:
+                logger.debug("ChatModelFactory: failed to determine Ollama defaults from config: %s", e, exc_info=True)
+
+        # Normalize endpoint: if user provided a host:port without scheme, add a default scheme.
+        if endpoint and "://" not in endpoint:
+            default_scheme = "http"
+            if provider_norm == "ollama":
+                try:
+                    from multi_agent_dashboard import config as _cfg2
+                    default_scheme = getattr(_cfg2, "OLLAMA_PROTOCOL", "http") or "http"
+                except Exception:
+                    default_scheme = "http"
+            endpoint = f"{default_scheme}://{endpoint}"
+
         key = self._key(
             model,
             provider_id,
@@ -340,6 +504,22 @@ class ChatModelFactory:
                         logger.debug("Failed to attach _detected_provider_profile to chat_model", exc_info=True)
             except Exception:
                 logger.debug("Failed to normalize chat_model profile", exc_info=True)
+
+            # Optionally run a health-check for Ollama endpoints and attach result
+            try:
+                if health_check and provider_norm == "ollama" and endpoint:
+                    try:
+                        health = self.check_endpoint(endpoint, timeout=1.0)
+                        try:
+                            setattr(chat_model, "_endpoint_health", health)
+                        except Exception:
+                            # Best-effort: log debug and continue
+                            logger.debug("Failed to set _endpoint_health on chat_model", exc_info=True)
+                    except Exception as hexc:
+                        logger.debug("Health-check for Ollama endpoint failed: %s", hexc, exc_info=True)
+            except Exception:
+                # Ensure nothing breaks model creation
+                logger.debug("Unexpected error while attempting health_check", exc_info=True)
 
             # cache and return
             self._cache[key] = chat_model
@@ -1384,3 +1564,57 @@ class LLMClient:
             token in msg
             for token in ("rate limit", "too many requests", "429")
         )
+
+    # -------------------------
+    # Public helper: Ollama endpoint check
+    # -------------------------
+    def check_ollama_endpoint(self, endpoint: Optional[str], *, timeout: float = 1.0, ttl: Optional[float] = None) -> Dict[str, Any]:
+        """
+        Public wrapper that checks an Ollama endpoint reachability.
+
+        If a ChatModelFactory is present, uses its cached check. Otherwise performs a small GET probe.
+        Returns a dict same shape as ChatModelFactory.check_endpoint.
+        """
+        # Prefer delegated factory check (it includes caching)
+        try:
+            if self._model_factory is not None:
+                return self._model_factory.check_endpoint(endpoint, timeout=timeout, ttl=ttl)
+        except Exception:
+            logger.debug("LLMClient.check_ollama_endpoint: factory check failed; falling back to local probe", exc_info=True)
+
+        # Local fallback (no caching)
+        ep = (endpoint or "").strip().rstrip("/")
+        now = time.time()
+        if not ep:
+            return {"endpoint": endpoint, "reachable": False, "status": None, "message": "no endpoint provided", "checked_at": now}
+
+        candidate_suffixes = ["", "/api", "/api/version", "/version", "/health"]
+        last_err_msg = None
+        reached = False
+        status_code = None
+        message = ""
+        for suf in candidate_suffixes:
+            url = ep + suf if suf and not ep.endswith("/") else (ep.rstrip("/") + suf)
+            try:
+                req = urllib.request.Request(url, method="GET", headers={"User-Agent": "multi-agent-dashboard/0.1"})
+                with urllib.request.urlopen(req, timeout=float(timeout)) as resp:
+                    status_code = getattr(resp, "status", None) or getattr(resp, "getcode", lambda: None)()
+                    message = f"HTTP {status_code} @ {url}"
+                    reached = True
+                    break
+            except urllib.error.HTTPError as he:
+                status_code = getattr(he, "code", None)
+                message = f"HTTP {status_code} @ {url}"
+                reached = True
+                break
+            except urllib.error.URLError as ue:
+                last_err_msg = f"URLError for {url}: {ue}"
+                continue
+            except Exception as ex:
+                last_err_msg = f"error for {url}: {ex}"
+                continue
+
+        if not reached:
+            message = last_err_msg or f"No response when checking {ep}"
+
+        return {"endpoint": endpoint, "reachable": bool(reached), "status": int(status_code) if status_code is not None else None, "message": message, "checked_at": now}

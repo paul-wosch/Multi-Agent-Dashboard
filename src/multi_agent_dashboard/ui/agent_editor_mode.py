@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 import json
 import logging
+import time
 from typing import List, Dict, Any
 from urllib.parse import urlparse
 
@@ -668,6 +669,58 @@ def render_agent_editor():
             "• LangChain blog: [Standard message content](https://www.blog.langchain.com/standard-message-content/?utm_source=openai).  \n"
             "• LangChain docs: [Messages / content_blocks](https://docs.langchain.com/oss/python/langchain/messages?utm_source=openai)."
         )
+
+        # --- Ollama endpoint health check indicator ---
+        # Only show when provider_choice indicates local Ollama and some endpoint info is present
+        try:
+            endpoint_candidate = None
+            # prefer Endpoint field if present
+            if endpoint_val and endpoint_val.strip():
+                endpoint_candidate = endpoint_val.strip()
+            # else consider host+port composition
+            elif show_host_port and host_val:
+                endpoint_candidate = _compose_endpoint_from_host_port(host_val, port_val)
+
+            if provider_choice == "ollama" and endpoint_candidate:
+                # If an LLM client was initialized at app bootstrap, prefer its cached check
+                llm_client = st.session_state.get("llm_client")
+                health = None
+                try:
+                    if llm_client and hasattr(llm_client, "check_ollama_endpoint"):
+                        # Use a small timeout for UI snappiness; the check is cached on the factory if present.
+                        health = llm_client.check_ollama_endpoint(endpoint_candidate, timeout=0.9)
+                    else:
+                        # Fallback: attempt a minimal probe (very short timeout)
+                        import urllib.request, urllib.error
+                        try:
+                            req = urllib.request.Request(endpoint_candidate, method="GET",
+                                                         headers={"User-Agent": "multi-agent-dashboard/0.1"})
+                            with urllib.request.urlopen(req, timeout=0.9) as resp:
+                                code = getattr(resp, "status", None) or getattr(resp, "getcode", lambda: None)()
+                                health = {"endpoint": endpoint_candidate, "reachable": True,
+                                          "status": int(code) if code else None,
+                                          "message": f"HTTP {code} @ {endpoint_candidate}", "checked_at": time.time()}
+                        except urllib.error.HTTPError as he:
+                            health = {"endpoint": endpoint_candidate, "reachable": True,
+                                      "status": int(getattr(he, "code", None)),
+                                      "message": f"HTTP {getattr(he, 'code', None)} @ {endpoint_candidate}",
+                                      "checked_at": time.time()}
+                        except Exception as e:
+                            health = {"endpoint": endpoint_candidate, "reachable": False, "status": None,
+                                      "message": str(e), "checked_at": time.time()}
+                except Exception:
+                    health = {"endpoint": endpoint_candidate, "reachable": False, "status": None,
+                              "message": "health check failed", "checked_at": time.time()}
+
+                # Display a succinct status hint
+                if health:
+                    if health.get("reachable"):
+                        st.success(f"Ollama reachable ({health.get('message')})")
+                    else:
+                        st.error(f"Ollama unreachable: {health.get('message')}")
+        except Exception:
+            # Keep the editor resilient: ignore health-check failures
+            logger.debug("Agent editor endpoint health check failed", exc_info=True)
 
         # Tools section (respects provider_feat.tool_calling)
         st.markdown("### Tools")
