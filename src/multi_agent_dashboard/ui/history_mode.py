@@ -13,6 +13,36 @@ from multi_agent_dashboard.ui.utils import parse_json_field
 
 logger = __import__("logging").getLogger(__name__)
 
+from urllib.parse import urlparse
+
+
+def _provider_friendly_name(provider_id: str | None) -> str:
+    mapping = {
+        "openai": "OpenAI",
+        "azure_openai": "Azure OpenAI",
+        "ollama": "Ollama (local)",
+        "anthropic": "Anthropic",
+        "custom": "Custom",
+        None: "OpenAI",
+        "": "OpenAI",
+    }
+    pid = (provider_id or "").strip().lower()
+    return mapping.get(pid, pid or "Unknown")
+
+
+def _parse_endpoint_host(endpoint: str | None) -> str | None:
+    if not endpoint:
+        return None
+    try:
+        p = urlparse(endpoint if "://" in endpoint else f"http://{endpoint}")
+        host = p.hostname
+        port = p.port
+        if host is None:
+            return None
+        return f"{host}:{port}" if port else host
+    except Exception:
+        return None
+
 
 def render_history_mode():
     st.header("📜 Past Runs")
@@ -231,6 +261,10 @@ def render_history_mode():
         if allowed_domains:
             tools_snapshot["allowed_domains"] = allowed_domains
 
+        # Provider host/name convenience fields (explicit)
+        endpoint = cfg.get("endpoint") or None
+        provider_id = cfg.get("provider_id") or None
+
         agent_config = {
             "model": cfg.get("model") or a.get("model") or "unknown",
             "role": cfg.get("role") or "–",
@@ -248,15 +282,30 @@ def render_history_mode():
                 "reasoning_config_json": reasoning_cfg_json or None,
                 "extra_config_json": extra_cfg_json or None,
             },
-            # Provider snapshot (captured at run time)
+            # Provider snapshot (captured at run time) including friendly name and host
             "provider": {
-                "provider_id": cfg.get("provider_id") or None,
+                "provider_id": provider_id or None,
+                "provider_name": _provider_friendly_name(provider_id),
                 "model_class": cfg.get("model_class") or None,
-                "endpoint": cfg.get("endpoint") or None,
+                "endpoint": endpoint or None,
+                "host": _parse_endpoint_host(endpoint),
                 "use_responses_api": bool(cfg.get("use_responses_api")),
                 "provider_features": provider_feats or None,
             },
         }
+
+        # Also explicitly expose content_blocks and instrumentation events if present in extra_config_json:
+        try:
+            if isinstance(extra_cfg_json, dict):
+                if "content_blocks" in extra_cfg_json:
+                    agent_config["content_blocks"] = extra_cfg_json.get("content_blocks")
+                if "instrumentation_events" in extra_cfg_json:
+                    agent_config["instrumentation_events"] = extra_cfg_json.get("instrumentation_events")
+                if "structured_response" in extra_cfg_json:
+                    agent_config["structured_response"] = extra_cfg_json.get("structured_response")
+        except Exception:
+            # Non-fatal: leave as-is if parsing/extraction fails
+            pass
 
         export_agents[name] = {
             "output": agent_output,

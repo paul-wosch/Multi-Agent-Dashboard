@@ -5,10 +5,45 @@ import json
 from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
+from urllib.parse import urlparse
 
 import streamlit as st
 
 from multi_agent_dashboard.engine import EngineResult, MultiAgentEngine
+
+
+def _parse_endpoint_host(endpoint: Optional[str]) -> Optional[str]:
+    """
+    Parse endpoint string and return a host[:port] representation when possible.
+    Returns None when endpoint is falsy or not parseable.
+    """
+    if not endpoint:
+        return None
+    try:
+        p = urlparse(endpoint if "://" in endpoint else f"http://{endpoint}")
+        host = p.hostname
+        port = p.port
+        if host is None:
+            return None
+        if port:
+            return f"{host}:{port}"
+        return host
+    except Exception:
+        return None
+
+
+def _provider_friendly_name(provider_id: Optional[str]) -> str:
+    mapping = {
+        "openai": "OpenAI",
+        "azure_openai": "Azure OpenAI",
+        "ollama": "Ollama (local)",
+        "anthropic": "Anthropic",
+        "custom": "Custom",
+        "": "OpenAI",
+        None: "OpenAI",
+    }
+    pid = (provider_id or "").strip().lower()
+    return mapping.get(pid, pid or "Unknown")
 
 
 def _agent_spec_to_dict_safe(spec) -> dict:
@@ -27,6 +62,19 @@ def _agent_spec_to_dict_safe(spec) -> dict:
         # Ensure the two prompt keys exist explicitly
         d.setdefault("prompt_template", getattr(spec, "prompt_template", None))
         d.setdefault("system_prompt_template", getattr(spec, "system_prompt_template", None))
+
+        # Normalize provider object to make downstream reconstruction easier
+        provider_id = d.get("provider_id")
+        endpoint = d.get("endpoint")
+        provider_obj = {
+            "id": provider_id,
+            "name": _provider_friendly_name(provider_id),
+            "endpoint": endpoint,
+            "host": _parse_endpoint_host(endpoint),
+            "features": d.get("provider_features") or {},
+        }
+        d["provider_snapshot"] = provider_obj
+
         return d
     except Exception:
         # Fall back: extract common attributes used in the UI
@@ -50,6 +98,16 @@ def _agent_spec_to_dict_safe(spec) -> dict:
             "use_responses_api": getattr(spec, "use_responses_api", None),
             "provider_features": getattr(spec, "provider_features", None),
         }
+        # Build provider_snapshot
+        provider_obj = {
+            "id": out.get("provider_id"),
+            "name": _provider_friendly_name(out.get("provider_id")),
+            "endpoint": out.get("endpoint"),
+            "host": _parse_endpoint_host(out.get("endpoint")),
+            "features": out.get("provider_features") or {},
+        }
+        out["provider_snapshot"] = provider_obj
+
         # Keep prompt keys even if None; drop other keys that are None to keep payload compact
         final = {}
         for k, v in out.items():
@@ -70,6 +128,9 @@ def export_pipeline_agents_as_json(
     Backwards-compatible: if `engine` is not provided, read engine from st.session_state
     (same behavior as before). Providing an explicit `engine` makes the function easier
     to test in isolation.
+
+    Exports include provider snapshot information (id, name, host, endpoint, features)
+    to allow downstream systems to reconstruct the original environment.
     """
     if engine is None:
         if "engine" not in st.session_state:
@@ -82,7 +143,8 @@ def export_pipeline_agents_as_json(
         if not agent:
             continue
         # Use safe conversion to avoid hard failure if AgentSpec is not a dataclass
-        agents_payload.append(_agent_spec_to_dict_safe(agent.spec))
+        spec_dict = _agent_spec_to_dict_safe(agent.spec)
+        agents_payload.append(spec_dict)
 
     export = {
         "pipeline": pipeline_name,
@@ -107,8 +169,9 @@ def build_export_from_engine_result(
     st.session_state (previous behavior). Optionally pass an engine explicitly for
     testing or isolation.
 
-    This export now exposes both prompt_template and system_prompt_template for
-    each agent under the agent's config.
+    This export now exposes provider metadata (id, name, host), content_blocks,
+    instrumentation events, and low-level reasoning/tools config so downstream
+    consumers can fully reconstruct the runtime environment.
     """
     if engine is None:
         if "engine" not in st.session_state:
@@ -138,10 +201,13 @@ def build_export_from_engine_result(
         # Prefer provider snapshot from the per-run agent_configs (if available), else fallback to spec-level snapshot
         run_cfg = (result.agent_configs or {}).get(name, {}) or {}
 
+        # Derive provider snapshot (explicit fields)
         provider_snapshot = {
             "provider_id": run_cfg.get("provider_id") or (getattr(runtime.spec, "provider_id", None) if runtime else None),
+            "provider_name": _provider_friendly_name(run_cfg.get("provider_id") or (getattr(runtime.spec, "provider_id", None) if runtime else None)),
             "model_class": run_cfg.get("model_class") or (getattr(runtime.spec, "model_class", None) if runtime else None),
             "endpoint": run_cfg.get("endpoint") or (getattr(runtime.spec, "endpoint", None) if runtime else None),
+            "host": _parse_endpoint_host(run_cfg.get("endpoint") or (getattr(runtime.spec, "endpoint", None) if runtime else None)),
             "use_responses_api": bool(run_cfg.get("use_responses_api")) if run_cfg else (getattr(runtime.spec, "use_responses_api", None) if runtime else None),
             "provider_features": run_cfg.get("provider_features") if run_cfg and run_cfg.get("provider_features") is not None else (getattr(runtime.spec, "provider_features", None) if runtime else None),
         }
@@ -168,23 +234,40 @@ def build_export_from_engine_result(
             tools_snapshot = dict(tools_snapshot)
             tools_snapshot["allowed_domains"] = allowed_domains_agent
 
+        # Low-level configs derived from run snapshot (if present)
+        tools_config = run_cfg.get("tools_config")
+        reasoning_config = run_cfg.get("reasoning_config")
+
+        # Extra from the per-run snapshot (these often include content_blocks, detected_provider_profile, instrumentation events)
+        extra = run_cfg.get("extra") or {}
+
+        # Extract content_blocks & instrumentation events explicitly when available
+        content_blocks = extra.get("content_blocks") if isinstance(extra, dict) else None
+        instrumentation_events = extra.get("instrumentation_events") if isinstance(extra, dict) else None
+        structured_response = extra.get("structured_response") if isinstance(extra, dict) else None
+
         agent_config = {
             "model": model,
             "role": getattr(runtime.spec, "role", None) if runtime else None,
             "tools": tools_snapshot,
             "reasoning": {
-                "effort": getattr(runtime.spec, "reasoning_effort", None)
-                if runtime
-                else None,
-                "summary": getattr(runtime.spec, "reasoning_summary", None)
-                if runtime
-                else None,
+                "effort": (run_cfg.get("reasoning_effort") if run_cfg and run_cfg.get("reasoning_effort") is not None else (getattr(runtime.spec, "reasoning_effort", None) if runtime else None)),
+                "summary": (run_cfg.get("reasoning_summary") if run_cfg and run_cfg.get("reasoning_summary") is not None else (getattr(runtime.spec, "reasoning_summary", None) if runtime else None)),
+                "config": reasoning_config,
             },
             # Provider snapshot (prefer per-run derived snapshot)
             "provider": provider_snapshot,
             # Explicitly expose both prompt templates
-            "prompt_template": getattr(runtime.spec, "prompt_template", None) if runtime else None,
-            "system_prompt_template": getattr(runtime.spec, "system_prompt_template", None) if runtime else None,
+            "prompt_template": (run_cfg.get("prompt_template") if run_cfg and run_cfg.get("prompt_template") is not None else (getattr(runtime.spec, "prompt_template", None) if runtime else None)),
+            "system_prompt_template": (run_cfg.get("system_prompt_template") if run_cfg and run_cfg.get("system_prompt_template") is not None else (getattr(runtime.spec, "system_prompt_template", None) if runtime else None)),
+            # Low-level tools config
+            "tools_config": tools_config,
+            # Structured/extra metadata surfaced from LangChain middleware / responses
+            "content_blocks": content_blocks,
+            "instrumentation_events": instrumentation_events,
+            "structured_response": structured_response,
+            # Raw extra for auditing / debugging
+            "raw_extra": extra,
         }
 
         export_agents[name] = {

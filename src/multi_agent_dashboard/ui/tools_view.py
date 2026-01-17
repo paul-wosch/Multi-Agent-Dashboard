@@ -43,6 +43,28 @@ def _extract_allowed_domains_from_tool_entry(
     return domains
 
 
+def _content_blocks_summary(blocks: list | None) -> List[str]:
+    """
+    Return a compact summary list for content blocks: type/name/id where available.
+    """
+    if not isinstance(blocks, list):
+        return []
+    summary = []
+    for b in blocks:
+        if not isinstance(b, dict):
+            continue
+        btype = b.get("type") or b.get("name") or b.get("block_type") or "unknown"
+        bid = b.get("id") or b.get("tool_call_id") or b.get("tool_use_id")
+        name = b.get("name") or b.get("tool") or None
+        parts = [str(btype)]
+        if name:
+            parts.append(str(name))
+        if bid:
+            parts.append(str(bid))
+        summary.append(" / ".join(parts))
+    return summary
+
+
 def render_agent_config_section(
     config_view: List[AgentConfigView],
     tool_usages_by_agent: Dict[str, List[dict]],
@@ -146,6 +168,37 @@ def render_agent_config_section(
                     st.json(cfg.provider_features)
                 except Exception:
                     st.markdown(str(cfg.provider_features))
+
+            # Show content_blocks when present (historic or live)
+            cb = cfg.raw_extra_config if hasattr(cfg, "raw_extra_config") else None
+            if cb and isinstance(cb, dict):
+                content_blocks = cb.get("content_blocks")
+            else:
+                content_blocks = None
+
+            # For some live flows, AgentConfigView may carry provider_features but not raw_extra_config.
+            # Attempt to detect content blocks via other fields if present.
+            if not content_blocks and getattr(cfg, "provider_features", None):
+                # Nothing more to do here; provider_features is separate.
+                content_blocks = None
+
+            if content_blocks:
+                st.markdown("**Content blocks (captured during run):**")
+                try:
+                    # compact summary inline
+                    summary = _content_blocks_summary(content_blocks)
+                    if summary:
+                        for s in summary[:10]:
+                            st.markdown(f"- `{s}`")
+                        if len(summary) > 10:
+                            st.markdown(f"- ... and {len(summary) - 10} more blocks")
+                    # Full JSON in an expander for deep inspection
+                    with st.expander("Full content_blocks JSON (expand)"):
+                        st.json(content_blocks)
+                except Exception:
+                    # fallback: print raw
+                    st.markdown("Could not render content_blocks cleanly; raw JSON follows.")
+                    st.json(content_blocks)
 
             # Historic runs can expose stored raw JSON configs
             if is_historic:

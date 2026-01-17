@@ -520,6 +520,13 @@ def config_view_from_engine_result(
 
         from multi_agent_dashboard.ui.view_models import AgentConfigView
 
+        # Pull any runtime snapshot produced by engine.run_seq if available
+        run_cfg = (result.agent_configs or {}).get(name) or {}
+
+        raw_tools_config = run_cfg.get("tools_config") or None
+        raw_reasoning_config = run_cfg.get("reasoning_config") or None
+        raw_extra_config = run_cfg.get("extra") or None
+
         views.append(
             AgentConfigView(
                 agent_name=name,
@@ -539,6 +546,10 @@ def config_view_from_engine_result(
                 model_class=getattr(spec, "model_class", None),
                 endpoint=getattr(spec, "endpoint", None),
                 use_responses_api=getattr(spec, "use_responses_api", False),
+                # Include runtime raw configs (so the tools view can display content_blocks, instrumentation, etc.)
+                raw_tools_config=raw_tools_config or None,
+                raw_reasoning_config=raw_reasoning_config or None,
+                raw_extra_config=raw_extra_config or None,
             )
         )
     return views
