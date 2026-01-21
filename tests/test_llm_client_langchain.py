@@ -255,3 +255,34 @@ def test_invoke_agent_extracts_usage_from_messages():
     # Ensure usage is promoted for downstream consumers
     assert isinstance(resp.raw, dict)
     assert resp.raw.get("usage") == {"input_tokens": 12, "output_tokens": 34}
+
+
+def test_invoke_agent_promotes_tool_calls_from_messages():
+    class FakeAIMessage:
+        def __init__(self, tool_calls=None, content_blocks=None):
+            self.tool_calls = tool_calls
+            self.content_blocks = content_blocks
+
+    class FakeAgent:
+        system_prompt = "system"
+
+        def invoke(self, state, context=None):
+            return {
+                "messages": [
+                    {"role": "user", "content": "hi"},
+                    FakeAIMessage(
+                        tool_calls=[{"name": "web_search", "args": {"q": "x"}, "id": "t1"}],
+                        content_blocks=[{"type": "tool_call", "name": "web_search", "args": {"q": "x"}, "id": "t1"}],
+                    ),
+                ]
+            }
+
+    client = LLMClient()
+    client._langchain_available = True
+    client._SystemMessage = None
+    client._HumanMessage = None
+
+    resp = client.invoke_agent(FakeAgent(), "hello")
+    assert isinstance(resp.raw, dict)
+    assert resp.raw.get("tool_calls") == [{"name": "web_search", "args": {"q": "x"}, "id": "t1"}]
+    assert resp.raw.get("content_blocks") == [{"type": "tool_call", "name": "web_search", "args": {"q": "x"}, "id": "t1"}]

@@ -39,6 +39,20 @@ def _collect_content_blocks(raw_metrics: Dict[str, Any] | None) -> List[Dict[str
     direct = raw_metrics.get("content_blocks")
     if isinstance(direct, list):
         blocks.extend(direct)
+    # Also inspect messages for content/content_blocks (LangChain agent state)
+    messages = raw_metrics.get("messages")
+    if isinstance(messages, list):
+        for msg in messages:
+            msg_dict = _value_to_dict(msg)
+            if not isinstance(msg_dict, dict):
+                continue
+            cb = msg_dict.get("content_blocks")
+            if isinstance(cb, list):
+                blocks.extend(cb)
+            # OpenAI-native content blocks live under "content" as a list of dicts
+            content = msg_dict.get("content")
+            if isinstance(content, list) and content and isinstance(content[0], dict):
+                blocks.extend(content)
     elif isinstance(raw_metrics.get("output"), list):
         blocks.extend(raw_metrics["output"])
     return blocks
@@ -95,6 +109,18 @@ def _collect_tool_calls(raw_metrics: Dict[str, Any] | None) -> List[Dict[str, An
                 entry_dict = _value_to_dict(entry)
                 if isinstance(entry_dict, dict):
                     calls.append(entry_dict)
+        # Some providers nest tool_calls under additional_kwargs
+        additional = node_dict.get("additional_kwargs")
+        if isinstance(additional, dict) and isinstance(additional.get("tool_calls"), list):
+            for entry in additional.get("tool_calls"):
+                entry_dict = _value_to_dict(entry)
+                if isinstance(entry_dict, dict):
+                    calls.append(entry_dict)
+        # Recurse into messages list if present (LangChain agent state)
+        messages = node_dict.get("messages")
+        if isinstance(messages, list):
+            for msg in messages:
+                _recurse(msg)
         for key in ("agent_response", "response", "result"):
             _recurse(node_dict.get(key))
         output = node_dict.get("output")

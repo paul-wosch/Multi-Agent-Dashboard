@@ -947,6 +947,73 @@ class LLMClient:
                     continue
             return None
 
+        def _extract_tool_info_from_messages(messages: Any) -> tuple[list[dict], list[dict]]:
+            """
+            Extract tool_calls and content_blocks from AIMessage-like objects in a messages list.
+            Returns (tool_calls, content_blocks).
+            """
+            if not isinstance(messages, list):
+                return [], []
+
+            def _msg_to_dict(m: Any) -> dict | None:
+                if isinstance(m, dict):
+                    return m
+                try:
+                    if hasattr(m, "model_dump"):
+                        out = m.model_dump()
+                        return out if isinstance(out, dict) else None
+                except Exception:
+                    pass
+                try:
+                    if hasattr(m, "to_dict"):
+                        out = m.to_dict()
+                        return out if isinstance(out, dict) else None
+                except Exception:
+                    pass
+                try:
+                    if hasattr(m, "__dict__"):
+                        out = dict(m.__dict__)
+                        return out if isinstance(out, dict) else None
+                except Exception:
+                    pass
+                return None
+
+            tool_calls: list[dict] = []
+            content_blocks: list[dict] = []
+
+            for msg in messages:
+                msg_dict = _msg_to_dict(msg)
+                if not isinstance(msg_dict, dict):
+                    continue
+                tc = msg_dict.get("tool_calls")
+                if isinstance(tc, list):
+                    for entry in tc:
+                        e = _msg_to_dict(entry)
+                        if isinstance(e, dict):
+                            tool_calls.append(e)
+                # Some integrations store tool_calls under additional_kwargs
+                additional = msg_dict.get("additional_kwargs")
+                if isinstance(additional, dict) and isinstance(additional.get("tool_calls"), list):
+                    for entry in additional.get("tool_calls"):
+                        e = _msg_to_dict(entry)
+                        if isinstance(e, dict):
+                            tool_calls.append(e)
+                cb = msg_dict.get("content_blocks")
+                if isinstance(cb, list):
+                    for entry in cb:
+                        e = _msg_to_dict(entry)
+                        if isinstance(e, dict):
+                            content_blocks.append(e)
+                # OpenAI-native content blocks are often under "content"
+                content = msg_dict.get("content")
+                if isinstance(content, list) and content and isinstance(content[0], dict):
+                    for entry in content:
+                        e = _msg_to_dict(entry)
+                        if isinstance(e, dict):
+                            content_blocks.append(e)
+
+            return tool_calls, content_blocks
+
         input_tokens = None
         output_tokens = None
         usage = (
@@ -969,17 +1036,31 @@ class LLMClient:
                 if output_tokens is None:
                     output_tokens = token_usage.get("completion_tokens") or token_usage.get("output_tokens")
 
+        # Promote tool_calls/content_blocks from agent messages into raw_dict (always)
+        messages = None
+        try:
+            if isinstance(result, dict):
+                messages = result.get("messages")
+            if messages is None and isinstance(raw_dict, dict):
+                messages = raw_dict.get("messages")
+        except Exception:
+            messages = None
+
+        try:
+            tool_calls, content_blocks = _extract_tool_info_from_messages(messages)
+            if isinstance(raw_dict, dict):
+                if tool_calls and "tool_calls" not in raw_dict:
+                    raw_dict["tool_calls"] = tool_calls
+                if content_blocks:
+                    if "content_blocks" not in raw_dict:
+                        raw_dict["content_blocks"] = content_blocks
+                    elif isinstance(raw_dict.get("content_blocks"), list):
+                        raw_dict["content_blocks"].extend(content_blocks)
+        except Exception:
+            logger.debug("Failed to attach tool info from messages into raw_dict", exc_info=True)
+
         if input_tokens is None or output_tokens is None:
             # Try usage on the last AIMessage from agent state (common in LangChain agents)
-            messages = None
-            try:
-                if isinstance(result, dict):
-                    messages = result.get("messages")
-                if messages is None and isinstance(raw_dict, dict):
-                    messages = raw_dict.get("messages")
-            except Exception:
-                messages = None
-
             msg_usage = _extract_usage_from_messages(messages)
             if isinstance(msg_usage, dict):
                 if input_tokens is None:
