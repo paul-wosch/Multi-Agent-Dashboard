@@ -1051,11 +1051,8 @@ class LLMClient:
             if isinstance(raw_dict, dict):
                 if tool_calls and "tool_calls" not in raw_dict:
                     raw_dict["tool_calls"] = tool_calls
-                if content_blocks:
-                    if "content_blocks" not in raw_dict:
-                        raw_dict["content_blocks"] = content_blocks
-                    elif isinstance(raw_dict.get("content_blocks"), list):
-                        raw_dict["content_blocks"].extend(content_blocks)
+                # Do NOT promote content_blocks into raw_dict here to avoid duplication.
+                # _collect_content_blocks() already inspects messages and raw content_blocks.
         except Exception:
             logger.debug("Failed to attach tool info from messages into raw_dict", exc_info=True)
 
