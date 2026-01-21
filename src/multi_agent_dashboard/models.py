@@ -297,6 +297,28 @@ class AgentRuntime:
         response = None
         used_langchain_agent = False
         agent_obj_for_invoke = None
+        langchain_tools = None
+
+        # Map configured tools to LangChain-compatible tool specs (OpenAI built-ins)
+        try:
+            if (getattr(self.spec, "provider_id", None) or "").lower() == "openai":
+                tools_cfg = self.spec.tools or {}
+                if tools_cfg.get("enabled"):
+                    enabled_tools = tools_cfg.get("tools") or []
+                    if "web_search" in enabled_tools:
+                        tool_spec: Dict[str, Any] = {"type": "web_search"}
+                        # Pass allowed_domains filters when available
+                        if isinstance(tc, dict):
+                            tools_arr = tc.get("tools")
+                            if isinstance(tools_arr, list):
+                                for t in tools_arr:
+                                    if isinstance(t, dict) and t.get("type") == "web_search":
+                                        filters = t.get("filters")
+                                        if filters:
+                                            tool_spec["filters"] = filters
+                        langchain_tools = [tool_spec]
+        except Exception:
+            langchain_tools = None
 
         # Helper: fingerprint structured_schema to decide cache compatibility.
         def _fingerprint_schema(sch: Optional[Any]) -> Optional[str]:
@@ -329,12 +351,12 @@ class AgentRuntime:
                         new_agent = None
                         # Attempt to create agent; if creation fails, propagate a clear LLMError (do not silently swallow)
                         try:
-                            new_agent = self.llm_client.create_agent_for_spec(
-                                self.spec,
-                                tools=None,
-                                middleware=None,
-                                response_format=structured_schema,
-                            )
+                                new_agent = self.llm_client.create_agent_for_spec(
+                                    self.spec,
+                                    tools=langchain_tools,
+                                    middleware=None,
+                                    response_format=structured_schema,
+                                )
                         except Exception as e:
                             logger.debug("create_agent_for_spec raised while creating agent for %s: %s", self.spec.name, e, exc_info=True)
                             # Surface a typed, informative exception upward
@@ -352,12 +374,12 @@ class AgentRuntime:
                 # Cache logic must be resilient; attempt non-cached creation but surface any errors clearly.
                 logger.debug("Agent cache logic failed; attempting non-cached create for %s", self.spec.name, exc_info=True)
                 try:
-                    agent = self.llm_client.create_agent_for_spec(
-                        self.spec,
-                        tools=None,
-                        middleware=None,
-                        response_format=structured_schema,
-                    )
+                        agent = self.llm_client.create_agent_for_spec(
+                            self.spec,
+                            tools=langchain_tools,
+                            middleware=None,
+                            response_format=structured_schema,
+                        )
                 except Exception as e:
                     logger.debug("Non-cached create_agent_for_spec failed for %s: %s", self.spec.name, e, exc_info=True)
                     raise LLMError(f"LangChain agent creation failed for '{self.spec.name}': {e}") from e
