@@ -400,6 +400,7 @@ class MultiAgentEngine:
 
             # Retrieve metrics from AgentRuntime.last_metrics
             metrics = getattr(agent, "last_metrics", {}) or {}
+            raw_metrics = metrics.get("raw") or {}
 
             # If LangChain agent path was used but instrumentation appears missing, warn
             try:
@@ -444,7 +445,10 @@ class MultiAgentEngine:
             # Include both user-facing prompt_template and system_prompt_template so
             # stored runs capture both templates used during execution.
             # Also include a compact summary of content_blocks for auditing
-            content_blocks = metrics.get("content_blocks") or []
+            content_blocks = metrics.get("content_blocks")
+            if not isinstance(content_blocks, list):
+                content_blocks = _collect_content_blocks(raw_metrics)
+
             content_blocks_summary = None
             try:
                 if isinstance(content_blocks, list) and content_blocks:
@@ -460,10 +464,10 @@ class MultiAgentEngine:
                 content_blocks_summary = None
 
             # Normalize full content blocks for DB storage (best-effort)
-            content_blocks_full = _normalize_content_blocks(content_blocks)
+            content_blocks_full = _normalize_content_blocks(content_blocks or [])
 
             # Provider profile hints detected at runtime (from model or response)
-            detected_profile = metrics.get("detected_provider_profile")
+            detected_profile = metrics.get("detected_provider_profile") or raw_metrics.get("detected_provider_profile")
             # Derive a compact provider_features mapping when the AgentSpec didn't provide any
             spec_provider_features = getattr(agent.spec, "provider_features", None) or {}
             provider_features_to_store = dict(spec_provider_features) if isinstance(spec_provider_features, dict) else (spec_provider_features or {})
@@ -476,7 +480,6 @@ class MultiAgentEngine:
                     provider_features_to_store = {"detected_profile_present": True}
 
             # Capture instrumentation events & structured_response for auditing
-            raw_metrics = metrics.get("raw") or {}
             instrumentation_events = _extract_instrumentation_events(raw_metrics)
             structured_response = None
             try:
@@ -490,6 +493,20 @@ class MultiAgentEngine:
 
             # Record whether instrumentation middleware was attached to the agent (if agent runtime set it)
             instrumentation_attached_flag = bool(metrics.get("instrumentation_attached"))
+
+            extra_dict: Dict[str, Any] = {}
+            if content_blocks_summary is not None:
+                extra_dict["content_blocks_summary"] = content_blocks_summary
+            if content_blocks_full:
+                extra_dict["content_blocks"] = content_blocks_full
+            if detected_profile is not None:
+                extra_dict["detected_provider_profile"] = detected_profile
+            if instrumentation_events:
+                extra_dict["instrumentation_events"] = instrumentation_events
+            if structured_response is not None:
+                extra_dict["structured_response"] = structured_response
+            if instrumentation_attached_flag:
+                extra_dict["instrumentation_attached"] = True
 
             agent_configs[agent_name] = {
                 "model": agent.spec.model,
@@ -506,15 +523,7 @@ class MultiAgentEngine:
                 "reasoning_summary": agent.spec.reasoning_summary,
                 "reasoning_config": rc,
                 # Reserved for future options such as temperature
-                "extra": {
-                    # include content_blocks summary and normalized full content_blocks for auditing reproducibility
-                    **({"content_blocks_summary": content_blocks_summary} if content_blocks_summary is not None else {}),
-                    **({"content_blocks": content_blocks_full} if content_blocks_full else {}),
-                    **({"detected_provider_profile": detected_profile} if detected_profile is not None else {}),
-                    **({"instrumentation_events": instrumentation_events} if instrumentation_events else {}),
-                    **({"structured_response": structured_response} if structured_response is not None else {}),
-                    **({"instrumentation_attached": instrumentation_attached_flag} if instrumentation_attached_flag else {}),
-                },
+                "extra": extra_dict,
                 # Provider metadata (ensure runs capture which provider/model was used)
                 "provider_id": getattr(agent.spec, "provider_id", None),
                 "model_class": getattr(agent.spec, "model_class", None),
@@ -524,8 +533,28 @@ class MultiAgentEngine:
                 "provider_features": provider_features_to_store,
             }
 
+            # -------------------------
+            # Metric extraction and token/cost computation
+            # -------------------------
             input_tokens = metrics.get("input_tokens")
             output_tokens = metrics.get("output_tokens")
+
+            # Fallback to raw usage metadata if necessary
+            if (input_tokens is None or output_tokens is None) and isinstance(raw_metrics, dict):
+                try:
+                    usage = raw_metrics.get("usage") or raw_metrics.get("usage_metadata") or {}
+                    if isinstance(usage, dict):
+                        if input_tokens is None:
+                            input_tokens = usage.get("input_tokens") or usage.get("prompt_tokens") or usage.get("prompt_token_count")
+                            if input_tokens is None and isinstance(usage.get("token_usage"), dict):
+                                input_tokens = usage["token_usage"].get("prompt_tokens") or usage["token_usage"].get("input_tokens")
+                        if output_tokens is None:
+                            output_tokens = usage.get("output_tokens") or usage.get("completion_tokens") or usage.get("completion_token_count")
+                            if output_tokens is None and isinstance(usage.get("token_usage"), dict):
+                                output_tokens = usage["token_usage"].get("completion_tokens") or usage["token_usage"].get("output_tokens")
+                except Exception:
+                    logger.debug("Engine-level token fallback extraction failed for agent=%s", agent_name, exc_info=True)
+
             latency = metrics.get("latency")
 
             total_cost, input_cost, output_cost = self._compute_cost(
@@ -550,7 +579,6 @@ class MultiAgentEngine:
 
             # ---- Prefer structured outputs surfaced via LangChain content_blocks or structured response ----
             parsed = None
-            raw_metrics = metrics.get("raw") or {}
             # 1) If the LLM client included a canonical 'structured' key (created by LLMClient when with_structured_output returned a parsed object),
             #    or when using LangChain agents, a top-level 'structured_response' key from the agent state.
             if isinstance(raw_metrics, dict):
@@ -580,7 +608,7 @@ class MultiAgentEngine:
 
             # 3) Fallback: try best-effort JSON parsing of the textual output
             if parsed is None:
-                parsed = LLMClient.safe_json(raw_output)
+                parsed = LLMClient.safe_json(raw_output) if isinstance(raw_output, str) else None
 
             # ---- Writeback rules ----
             if agent.spec.output_vars:

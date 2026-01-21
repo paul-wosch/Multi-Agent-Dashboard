@@ -460,8 +460,18 @@ class ChatModelFactory:
             # Some providers expect 'base_url' or 'base_url' like param; init_chat_model passes kwargs to concrete impl
             init_kwargs["base_url"] = endpoint
             # Some integrations (openai) call this 'base_url' or 'api_base' - provider integration will accept 'base_url'
+        # Propagate timeout to underlying LangChain model integrations:
+        # Use 'request_timeout' (preferred alias used by ChatOpenAI) and set 'timeout' as fallback,
+        # so providers reading either name will receive the configured numeric timeout value.
         if timeout is not None:
-            init_kwargs["timeout"] = timeout
+            try:
+                timeout_val = float(timeout)
+                init_kwargs["request_timeout"] = timeout_val
+                # some integrations accept 'timeout' as the canonical kwarg; ensure it is present as well
+                init_kwargs.setdefault("timeout", timeout_val)
+            except Exception:
+                # Fallback: pass raw value under 'timeout'
+                init_kwargs["timeout"] = timeout
 
         # Convey Responses API preference for providers that support it (e.g., OpenAI)
         if use_responses_api:
@@ -476,6 +486,33 @@ class ChatModelFactory:
             init_kwargs["profile"] = provider_features
 
         model_provider = provider_id or None
+
+        # If an OpenAI API key is available in project config, and this appears to be an OpenAI provider/model,
+        # forward it explicitly to the underlying init call to avoid relying on environment variables (which may not be set).
+        # We try to be conservative: only forward for 'openai' or 'azure_openai' provider ids or when the model name strongly
+        # suggests an OpenAI model (e.g., model names starting with 'gpt-').
+        try:
+            from multi_agent_dashboard import config as _cfg_key
+            openai_key = getattr(_cfg_key, "OPENAI_API_KEY", None)
+            if openai_key:
+                is_openai_candidate = False
+                try:
+                    if provider_norm in ("openai", "azure_openai"):
+                        is_openai_candidate = True
+                    else:
+                        # Heuristic: many OpenAI model ids start with 'gpt' (gpt-4, gpt-4o, gpt-5, etc.)
+                        mlow = (model or "").lower()
+                        if mlow.startswith("gpt") or mlow.startswith("openai:") or ":" in mlow and mlow.split(":", 1)[0] == "openai":
+                            is_openai_candidate = True
+                except Exception:
+                    is_openai_candidate = False
+
+                if is_openai_candidate:
+                    # Only set if not already provided by caller
+                    init_kwargs.setdefault("api_key", openai_key)
+        except Exception:
+            # Non-fatal; do not fail model init just because config import or attribute lookup failed
+            pass
 
         # Attempt to initialize via the unified helper
         try:
@@ -505,6 +542,17 @@ class ChatModelFactory:
             except Exception:
                 logger.debug("Failed to normalize chat_model profile", exc_info=True)
 
+            # Attach effective_request_timeout attribute for observability
+            try:
+                eff_to = init_kwargs.get("request_timeout", init_kwargs.get("timeout", None))
+                if eff_to is not None:
+                    try:
+                        setattr(chat_model, "_effective_request_timeout", float(eff_to))
+                    except Exception:
+                        setattr(chat_model, "_effective_request_timeout", eff_to)
+            except Exception:
+                logger.debug("Failed to set _effective_request_timeout on chat_model", exc_info=True)
+
             # Optionally run a health-check for Ollama endpoints and attach result
             try:
                 if health_check and provider_norm == "ollama" and endpoint:
@@ -523,6 +571,10 @@ class ChatModelFactory:
 
             # cache and return
             self._cache[key] = chat_model
+            logger.debug(
+                "ChatModelFactory: created model=%s provider=%s endpoint=%s request_timeout=%s",
+                model, provider_id, endpoint, getattr(chat_model, "_effective_request_timeout", None)
+            )
             return chat_model
         except Exception as e:
             logger.debug(
@@ -552,15 +604,17 @@ class LLMClient:
     - Capability detection
     - Response normalization
 
-    This implementation prefers LangChain when available and falls back to the legacy OpenAI SDK behavior for environments that do not have langchain
-    or the provider-specific integration packages installed.
+    This implementation prefers LangChain when available. The legacy OpenAI SDK
+    fallback has been removed: create_text_response now requires LangChain and
+    provider integrations to be available. This avoids shipping a hidden legacy
+    code path that bypasses LangChain instrumentation middleware.
     """
 
     def __init__(
         self,
         client: Any = None,
         *,
-        timeout: float = 30.0,
+        timeout: float = 600.0,
         max_retries: int = 3,
         backoff_base: float = 1.5,
         on_rate_limit: Optional[Callable[[int], None]] = None,
@@ -727,6 +781,18 @@ class LLMClient:
                 except Exception:
                     logger.debug("Unable to set _detected_provider_profile on agent instance", exc_info=True)
 
+            # Propagate effective_request_timeout attribute for observability
+            try:
+                eff_to = getattr(model_instance, "_effective_request_timeout", None)
+                if eff_to is not None:
+                    try:
+                        setattr(agent, "_effective_request_timeout", float(eff_to))
+                    except Exception:
+                        setattr(agent, "_effective_request_timeout", eff_to)
+                logger.debug("create_agent_for_spec: agent=%s model=%s effective_request_timeout=%s", getattr(spec, "name", "<unnamed>"), spec.model, getattr(agent, "_effective_request_timeout", None))
+            except Exception:
+                logger.debug("Failed to propagate effective_request_timeout to agent instance", exc_info=True)
+
             # If instrumentation was not attached, log an explicit warning so operators are aware
             if not instrumentation_attached:
                 logger.warning(
@@ -739,6 +805,7 @@ class LLMClient:
         except Exception as e:
             logger.debug("create_agent_for_spec failed for spec=%s: %s", getattr(spec, "name", "<unnamed>"), e, exc_info=True)
             raise
+
 
     def invoke_agent(
         self,
@@ -790,7 +857,6 @@ class LLMClient:
 
         start_ts = time.perf_counter()
         # agent.invoke may accept context parameter in v1 Agents API
-        state_events = None
         try:
             if context is not None:
                 result = agent.invoke(state, context=context)
@@ -803,81 +869,259 @@ class LLMClient:
         end_ts = time.perf_counter()
         latency = end_ts - start_ts
 
-        # Convert result into dict
         raw_dict = self._to_dict(result)
 
-        # Merge any middleware-mutated state (e.g., _multi_agent_dashboard_events) into raw_dict.
-        try:
-            if isinstance(state, dict):
-                events = state.get("_multi_agent_dashboard_events") or state.get("_instrumentation_events") or None
-                if events:
-                    # expose both canonical keys just in case
-                    if "instrumentation_events" not in raw_dict:
-                        raw_dict["instrumentation_events"] = events
-                    if "_multi_agent_dashboard_events" not in raw_dict:
-                        raw_dict["_multi_agent_dashboard_events"] = events
+        # Ensure instrumentation events propagate structured response/content blocks.
+        events = (
+                raw_dict.get("instrumentation_events")
+                or raw_dict.get("_multi_agent_dashboard_events")
+        )
+        if isinstance(events, list):
+            cb_list = raw_dict.get("content_blocks")
+            if cb_list is None:
+                cb_list = []
+                raw_dict["content_blocks"] = cb_list
+            elif not isinstance(cb_list, list):
+                cb_list = [cb_list]
+                raw_dict["content_blocks"] = cb_list
 
-                    # Also aggregate any content_blocks found inside events into top-level content_blocks
-                    aggregated_cb = raw_dict.get("content_blocks", []) if isinstance(raw_dict.get("content_blocks", []), list) else []
-                    for ev in events:
-                        if isinstance(ev, dict):
-                            cb = ev.get("content_blocks")
-                            if isinstance(cb, list):
-                                aggregated_cb.extend(cb)
-                            # some events carry a structured_response directly on the event
-                            if "structured_response" in ev and "structured_response" not in raw_dict:
-                                raw_dict["structured_response"] = ev.get("structured_response")
-                    if aggregated_cb:
-                        # set or extend
-                        raw_dict["content_blocks"] = aggregated_cb
-        except Exception:
-            logger.debug("Failed to merge mutated agent state into raw_dict", exc_info=True)
+            for ev in events:
+                if not isinstance(ev, dict):
+                    continue
+                ev_blocks = ev.get("content_blocks")
+                if isinstance(ev_blocks, list):
+                    cb_list.extend(ev_blocks)
+                if "structured_response" in ev and "structured_response" not in raw_dict:
+                    raw_dict["structured_response"] = ev["structured_response"]
 
-        # Extract token usage if provided by provider via usage_metadata or usage
+        def _extract_usage_from_candidate(candidate: Any) -> dict | None:
+            if not isinstance(candidate, dict):
+                return None
+            usage_payload = candidate.get("usage") or candidate.get("usage_metadata")
+            if isinstance(usage_payload, dict) and usage_payload:
+                return usage_payload
+
+            nested = candidate.get("agent_response")
+            if isinstance(nested, dict):
+                payload = _extract_usage_from_candidate(nested)
+                if payload:
+                    return payload
+
+            output_entries = candidate.get("output")
+            if isinstance(output_entries, list):
+                for entry in output_entries:
+                    if not isinstance(entry, dict):
+                        continue
+                    payload = _extract_usage_from_candidate(entry.get("response"))
+                    if payload:
+                        return payload
+                    payload = _extract_usage_from_candidate(entry.get("result"))
+                    if payload:
+                        return payload
+                    payload = _extract_usage_from_candidate(entry.get("agent_response"))
+                    if payload:
+                        return payload
+            return None
+
         input_tokens = None
         output_tokens = None
         usage = (
-            getattr(result, "usage_metadata", None)
-            or getattr(result, "usage", None)
-            or raw_dict.get("usage")
-            or raw_dict.get("usage_metadata")
-            or {}
+                getattr(result, "usage_metadata", None)
+                or getattr(result, "usage", None)
+                or raw_dict.get("usage")
+                or raw_dict.get("usage_metadata")
         )
         if isinstance(usage, dict):
-            input_tokens = usage.get("input_tokens") or usage.get("prompt_tokens") or usage.get("prompt_token_count")
-            output_tokens = usage.get("output_tokens") or usage.get("completion_tokens") or usage.get("completion_token_count")
-            try:
-                if input_tokens is None and isinstance(usage.get("token_usage"), dict):
-                    input_tokens = usage["token_usage"].get("prompt_tokens") or usage["token_usage"].get("input_tokens")
-                if output_tokens is None and isinstance(usage.get("token_usage"), dict):
-                    output_tokens = usage["token_usage"].get("completion_tokens") or usage["token_usage"].get("output_tokens")
-            except Exception:
-                pass
+            if input_tokens is None:
+                input_tokens = usage.get("input_tokens") or usage.get("prompt_tokens") or usage.get(
+                    "prompt_token_count")
+            if output_tokens is None:
+                output_tokens = usage.get("output_tokens") or usage.get("completion_tokens") or usage.get(
+                    "completion_token_count")
+            token_usage = usage.get("token_usage")
+            if isinstance(token_usage, dict):
+                if input_tokens is None:
+                    input_tokens = token_usage.get("prompt_tokens") or token_usage.get("input_tokens")
+                if output_tokens is None:
+                    output_tokens = token_usage.get("completion_tokens") or token_usage.get("output_tokens")
 
-        # Extract textual output
+        if input_tokens is None or output_tokens is None:
+            nested_usage = _extract_usage_from_candidate(raw_dict.get("agent_response"))
+            if not nested_usage:
+                try:
+                    nested_usage = _extract_usage_from_candidate(getattr(result, "agent_response", None))
+                except Exception:
+                    nested_usage = None
+            if isinstance(nested_usage, dict):
+                if input_tokens is None:
+                    input_tokens = nested_usage.get("input_tokens") or nested_usage.get(
+                        "prompt_tokens") or nested_usage.get("prompt_token_count")
+                if output_tokens is None:
+                    output_tokens = nested_usage.get("output_tokens") or nested_usage.get(
+                        "completion_tokens") or nested_usage.get("completion_token_count")
+                token_usage = nested_usage.get("token_usage")
+                if isinstance(token_usage, dict):
+                    if input_tokens is None:
+                        input_tokens = token_usage.get("prompt_tokens") or token_usage.get("input_tokens")
+                    if output_tokens is None:
+                        output_tokens = token_usage.get("completion_tokens") or token_usage.get("output_tokens")
+
+                # Crucial: ensure the detected nested usage is available in the raw dict
+                # so downstream consumers (engine/DB) can inspect usage via resp.raw
+                try:
+                    if isinstance(nested_usage, dict):
+                        # Normalize key names conservatively
+                        if "usage" not in raw_dict:
+                            raw_dict["usage"] = nested_usage
+                        if "usage_metadata" not in raw_dict:
+                            raw_dict["usage_metadata"] = nested_usage
+                except Exception:
+                    logger.debug("Failed to attach nested usage into raw_dict", exc_info=True)
+
+        # -----------------------------
+        # Extract textual output by examining the returned agent state messages.
+        # Walk messages from the end, prefer assistant/Ai messages, then fall back to other fields.
+        # -----------------------------
         text_out = None
         try:
-            text_attr = getattr(result, "text", None)
-            if callable(text_attr):
-                text_out = text_attr()
-            elif text_attr is not None:
-                text_out = text_attr
-            else:
-                content = getattr(result, "content", None) or raw_dict.get("content")
-                if isinstance(content, list):
-                    parts = []
-                    for c in content:
-                        if isinstance(c, dict) and c.get("type") in ("text", "output_text"):
-                            parts.append(c.get("text") or "")
-                        elif isinstance(c, str):
-                            parts.append(c)
-                    if parts:
-                        text_out = "".join(parts)
-                elif isinstance(content, str):
-                    text_out = content
+            messages = None
+            # Prefer actual message objects/structures from the returned result
+            if isinstance(result, dict):
+                messages = result.get("messages") or result.get("messages", None)
+                # also consider nested agent_response.messages
+                if not messages and "agent_response" in result and isinstance(result["agent_response"], dict):
+                    messages = result["agent_response"].get("messages") or None
+            if messages is None:
+                # Try attribute access (some Agent result objects provide .messages)
+                try:
+                    messages_attr = getattr(result, "messages", None)
+                    if messages_attr is not None:
+                        # Coerce to list where possible
+                        if isinstance(messages_attr, (list, tuple)):
+                            messages = list(messages_attr)
+                        else:
+                            # Some objects may expose an indexable interface; try converting to list
+                            try:
+                                messages = list(messages_attr)
+                            except Exception:
+                                messages = None
+                except Exception:
+                    messages = None
+
+            # If we have a messages sequence, inspect from last -> first for assistant content
+            if isinstance(messages, list) and messages:
+                for m in reversed(messages):
+                    # m could be dict or message object
+                    content_candidate = None
+                    role = None
+                    try:
+                        if isinstance(m, dict):
+                            role = (m.get("role") or m.get("type") or "")
+                            # Look for typical content fields
+                            c = m.get("content")
+                            if isinstance(c, str):
+                                content_candidate = c
+                            elif isinstance(c, list):
+                                parts = []
+                                for cpart in c:
+                                    if isinstance(cpart, dict):
+                                        # block form: {'type': 'output_text', 'text': '...'}
+                                        if cpart.get("text") is not None:
+                                            parts.append(str(cpart.get("text") or ""))
+                                        else:
+                                            parts.append(str(cpart))
+                                    elif isinstance(cpart, str):
+                                        parts.append(cpart)
+                                if parts:
+                                    content_candidate = "".join(parts)
+                            elif isinstance(m.get("text"), str):
+                                content_candidate = m.get("text")
+                            # Some message dicts include 'output' as list
+                            elif isinstance(m.get("output"), list):
+                                parts = []
+                                for o in m.get("output", []):
+                                    if isinstance(o, dict) and o.get("type") in ("text", "output_text"):
+                                        parts.append(o.get("text") or "")
+                                    elif isinstance(o, str):
+                                        parts.append(o)
+                                if parts:
+                                    content_candidate = "".join(parts)
+                        else:
+                            # Message object: try common attributes
+                            if hasattr(m, "content"):
+                                mc = getattr(m, "content")
+                                if isinstance(mc, str):
+                                    content_candidate = mc
+                                elif isinstance(mc, list):
+                                    parts = []
+                                    for p in mc:
+                                        if isinstance(p, str):
+                                            parts.append(p)
+                                        elif isinstance(p, dict) and p.get("text"):
+                                            parts.append(p.get("text"))
+                                    if parts:
+                                        content_candidate = "".join(parts)
+                            if content_candidate is None and hasattr(m, "text"):
+                                mt = getattr(m, "text")
+                                if callable(mt):
+                                    try:
+                                        mt = mt()
+                                    except Exception:
+                                        mt = None
+                                if isinstance(mt, str):
+                                    content_candidate = mt
+                            # Some message objects include 'role'
+                            if role is None and hasattr(m, "role"):
+                                try:
+                                    role = getattr(m, "role")
+                                except Exception:
+                                    role = None
+                    except Exception:
+                        content_candidate = None
+                        role = None
+
+                    # Normalize role to string for comparisons
+                    try:
+                        role_str = (str(role) if role is not None else "").lower()
+                    except Exception:
+                        role_str = ""
+
+                    if content_candidate:
+                        # Prefer messages that look like assistant responses
+                        if role_str in ("assistant", "ai", "bot", "system_assistant", "assistant_response"):
+                            text_out = content_candidate
+                            break
+                        # If role not marked, pick first available candidate as fallback (but continue searching for assistant)
+                        if text_out is None:
+                            text_out = content_candidate
+
+            # If still None, fall back to common response attributes on the returned result
+            if text_out is None:
+                text_attr = getattr(result, "text", None)
+                if callable(text_attr):
+                    try:
+                        text_out = text_attr()
+                    except Exception:
+                        text_out = None
+                elif text_attr is not None:
+                    text_out = text_attr
+                else:
+                    content = getattr(result, "content", None) or raw_dict.get("content")
+                    if isinstance(content, list):
+                        parts = []
+                        for c in content:
+                            if isinstance(c, dict) and c.get("type") in ("text", "output_text"):
+                                parts.append(c.get("text") or "")
+                            elif isinstance(c, str):
+                                parts.append(c)
+                        if parts:
+                            text_out = "".join(parts)
+                    elif isinstance(content, str):
+                        text_out = content
         except Exception:
             text_out = None
 
+        # Final fallback: stringify the returned result if extraction failed
         if text_out is None:
             try:
                 text_out = str(result)
@@ -910,7 +1154,7 @@ class LLMClient:
 
         # Attempt to surface detected profile if agent has one (propagated from create_agent_for_spec)
         try:
-            detected_profile = getattr(agent, "_detected_provider_profile", None)
+            detected_profile = getattr(agent, "_detected_provider_profile", None) or getattr(result, "_detected_provider_profile", None) or raw_dict.get("detected_provider_profile")
             if detected_profile is not None and "detected_provider_profile" not in raw_dict:
                 raw_dict["detected_provider_profile"] = detected_profile
         except Exception:
@@ -950,311 +1194,218 @@ class LLMClient:
         Execute a text-generation request and return a normalized response.
 
         New provider metadata args allow per-agent choices (OpenAI vs Ollama).
-        The function will attempt to use LangChain.init_chat_model when langchain
-        and the required provider integration are installed. Otherwise, it falls
-        back to the legacy OpenAI SDK call that existed previously.
-
-        Note: The signature was kept backward compatible (all new args optional).
+        This function now requires LangChain and the appropriate provider integrations
+        to be installed. The legacy OpenAI SDK fallback has been removed in favor of
+        a single LangChain-based code path so that instrumentation middleware and
+        content_blocks are always captured via LangChain agents/models.
         """
+        # LangChain-only path
+        if not self._langchain_available or self._model_factory is None:
+            raise LLMError(
+                "LangChain or required provider integration is not available. "
+                "create_text_response now requires LangChain and the provider integration package "
+                "(e.g., langchain-openai, langchain-ollama). Install the appropriate packages and retry."
+            )
+
         last_err: Optional[Exception] = None
 
-        # Prefer LangChain path when available and factory initialized
-        if self._langchain_available and self._model_factory:
-            try:
-                # Obtain (cached) chat model instance for this agent's metadata
-                chat_model = self._model_factory.get_model(
-                    model,
-                    provider_id=provider_id,
-                    endpoint=endpoint,
-                    use_responses_api=bool(use_responses_api),
-                    model_class=model_class,
-                    provider_features=provider_features,
-                    timeout=self._timeout,
-                )
+        try:
+            # Obtain (cached) chat model instance for this agent's metadata
+            chat_model = self._model_factory.get_model(
+                model,
+                provider_id=provider_id,
+                endpoint=endpoint,
+                use_responses_api=bool(use_responses_api),
+                model_class=model_class,
+                provider_features=provider_features,
+                timeout=self._timeout,
+            )
 
-                # Build messages. Stick to a conservative string-based embedding for files.
-                combined_prompt = str(prompt or "")
-                if files:
-                    for f in files:
-                        filename = f.get("filename", "file")
-                        content = f.get("content")
-                        try:
-                            if isinstance(content, (bytes, bytearray)):
-                                text = content.decode("utf-8", errors="replace")
-                                combined_prompt += f"\n\n--- FILE: {filename} ---\n{text}"
-                            else:
-                                combined_prompt += f"\n\n--- FILE: {filename} ---\n{str(content)}"
-                        except Exception:
-                            combined_prompt += f"\n\n--- FILE: {filename} (binary not attached) ---\n"
-
-                messages = []
-                if system_prompt and self._SystemMessage:
-                    messages.append(self._SystemMessage(system_prompt))
-                messages.append(self._HumanMessage(combined_prompt))
-
-                start_ts = time.perf_counter()
-
-                # If a structured response format is requested, prefer the model.with_structured_output helper
-                if response_format is not None:
+            # Build messages. Stick to a conservative string-based embedding for files.
+            combined_prompt = str(prompt or "")
+            if files:
+                for f in files:
+                    filename = f.get("filename", "file")
+                    content = f.get("content")
                     try:
-                        # model.with_structured_output may return a wrapped model that yields a structured object
-                        structured_model = getattr(chat_model, "with_structured_output", None)
-                        if callable(structured_model):
-                            wrapped = structured_model(response_format)
-                            # Respect binding order: if tools are present, tools should be bound first (docs). We don't bind tools here,
-                            # we rely on server-side tool calls surfaced through content_blocks.
-                            response_obj = wrapped.invoke(messages)
-                            end_ts = time.perf_counter()
-                            latency = end_ts - start_ts
-
-                            # If the provider returned a structured python object (Pydantic model / dict), normalize it.
-                            if not hasattr(response_obj, "content_blocks"):
-                                # structured object returned directly
-                                structured_content = response_obj
-                                raw_dict = {"structured": structured_content}
-                                text_out = json.dumps(structured_content, default=str)
-                                input_tokens = None
-                                output_tokens = None
-                                # Attempt to extract usage metadata if the wrapped model returned it as a tuple-like or has attrs
-                                if hasattr(response_obj, "usage_metadata"):
-                                    um = getattr(response_obj, "usage_metadata", {}) or {}
-                                    input_tokens = um.get("input_tokens")
-                                    output_tokens = um.get("output_tokens")
-                                return TextResponse(
-                                    text=text_out,
-                                    raw=raw_dict,
-                                    input_tokens=input_tokens,
-                                    output_tokens=output_tokens,
-                                    latency=latency,
-                                )
-                            else:
-                                # If we got an AIMessage-like object, fall through to the common path
-                                response_msg = response_obj
+                        if isinstance(content, (bytes, bytearray)):
+                            text = content.decode("utf-8", errors="replace")
+                            combined_prompt += f"\n\n--- FILE: {filename} ---\n{text}"
                         else:
-                            # Wrapped not available; fall back to invoke
-                            response_msg = chat_model.invoke(messages)
-                            end_ts = time.perf_counter()
-                            latency = end_ts - start_ts
-                    except Exception as e:
-                        # If structured path fails, log and fall back to a normal invocation below
-                        logger.debug("Structured output attempt failed for model=%s: %s", model, e, exc_info=True)
+                            combined_prompt += f"\n\n--- FILE: {filename} ---\n{str(content)}"
+                    except Exception:
+                        combined_prompt += f"\n\n--- FILE: {filename} (binary not attached) ---\n"
+
+            messages = []
+            if system_prompt and self._SystemMessage:
+                messages.append(self._SystemMessage(system_prompt))
+            messages.append(self._HumanMessage(combined_prompt))
+
+            start_ts = time.perf_counter()
+
+            # If a structured response format is requested, prefer the model.with_structured_output helper
+            if response_format is not None:
+                try:
+                    structured_model = getattr(chat_model, "with_structured_output", None)
+                    if callable(structured_model):
+                        wrapped = structured_model(response_format)
+                        response_obj = wrapped.invoke(messages)
+                        end_ts = time.perf_counter()
+                        latency = end_ts - start_ts
+
+                        # If the provider returned a structured python object, normalize it.
+                        if not hasattr(response_obj, "content_blocks"):
+                            structured_content = response_obj
+                            raw_dict = {"structured": structured_content}
+                            text_out = json.dumps(structured_content, default=str)
+                            input_tokens = None
+                            output_tokens = None
+                            if hasattr(response_obj, "usage_metadata"):
+                                um = getattr(response_obj, "usage_metadata", {}) or {}
+                                input_tokens = um.get("input_tokens")
+                                output_tokens = um.get("output_tokens")
+                            return TextResponse(
+                                text=text_out,
+                                raw=raw_dict,
+                                input_tokens=input_tokens,
+                                output_tokens=output_tokens,
+                                latency=latency,
+                            )
+                        else:
+                            response_msg = response_obj
+                    else:
                         response_msg = chat_model.invoke(messages)
                         end_ts = time.perf_counter()
                         latency = end_ts - start_ts
-                else:
-                    # Simple invoke path
+                except Exception as e:
+                    logger.debug("Structured output attempt failed for model=%s: %s", model, e, exc_info=True)
                     response_msg = chat_model.invoke(messages)
                     end_ts = time.perf_counter()
                     latency = end_ts - start_ts
-
-                # Normalize raw representation (best-effort) and extract usage/content blocks
-                raw_dict = self._to_dict(response_msg)
-
-                # Extract token usage if provided by provider via usage_metadata or usage
-                input_tokens = None
-                output_tokens = None
-                usage = getattr(response_msg, "usage_metadata", None) or getattr(response_msg, "usage", None) or raw_dict.get("usage") or {}
-                if isinstance(usage, dict):
-                    input_tokens = usage.get("input_tokens") or usage.get("prompt_tokens") or usage.get("prompt_token_count")
-                    output_tokens = usage.get("output_tokens") or usage.get("completion_tokens") or usage.get("completion_token_count")
-                    try:
-                        if input_tokens is None and isinstance(usage.get("token_usage"), dict):
-                            input_tokens = usage["token_usage"].get("prompt_tokens") or usage["token_usage"].get("input_tokens")
-                        if output_tokens is None and isinstance(usage.get("token_usage"), dict):
-                            output_tokens = usage["token_usage"].get("completion_tokens") or usage["token_usage"].get("output_tokens")
-                    except Exception:
-                        pass
-
-                # Extract textual output: prefer message.text property or string content
-                text_out = None
-                try:
-                    # In langchain v1, AIMessage exposes `.text` property
-                    text_attr = getattr(response_msg, "text", None)
-                    if callable(text_attr):
-                        text_out = text_attr()
-                    elif text_attr is not None:
-                        text_out = text_attr
-                    else:
-                        # Fallback: check content / content_blocks
-                        content = getattr(response_msg, "content", None) or raw_dict.get("content")
-                        if isinstance(content, list):
-                            parts = []
-                            for c in content:
-                                if isinstance(c, dict) and c.get("type") in ("text", "output_text"):
-                                    parts.append(c.get("text") or "")
-                                elif isinstance(c, str):
-                                    parts.append(c)
-                            if parts:
-                                text_out = "".join(parts)
-                        elif isinstance(content, str):
-                            text_out = content
-                except Exception:
-                    text_out = None
-
-                if text_out is None:
-                    # Final fallback to repr
-                    try:
-                        text_out = str(response_msg)
-                    except Exception:
-                        text_out = ""
-
-                # Ensure raw_dict contains explicit content_blocks if available on the object
-                try:
-                    cb = getattr(response_msg, "content_blocks", None)
-                    if cb is not None and "content_blocks" not in raw_dict:
-                        # Convert content_blocks to serializable list
-                        blocks = []
-                        for b in cb:
-                            if isinstance(b, dict):
-                                blocks.append(b)
-                            else:
-                                try:
-                                    if hasattr(b, "model_dump"):
-                                        blocks.append(b.model_dump())
-                                    elif hasattr(b, "to_dict"):
-                                        blocks.append(b.to_dict())
-                                    elif hasattr(b, "__dict__"):
-                                        blocks.append(dict(b.__dict__))
-                                    else:
-                                        blocks.append(repr(b))
-                                except Exception:
-                                    blocks.append(repr(b))
-                        raw_dict["content_blocks"] = blocks
-                except Exception:
-                    pass
-
-                return TextResponse(
-                    text=text_out,
-                    raw=raw_dict,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    latency=latency,
-                )
-
-            except Exception as e:
-                logger.debug("LangChain path failed; will attempt legacy client (if available): %s", e, exc_info=True)
-                last_err = e
-                # Fallthrough to legacy path below
-
-        # Legacy / OpenAI SDK path (unchanged behavior)
-        for attempt in range(1, self._max_retries + 1):
-            try:
-                kwargs = {
-                    "model": model,
-                }
-
-                # Build user input item(s)
-                if files:
-                    user_items = self._build_input_with_files(prompt, files)
-                    user_input_for_kwargs = user_items  # list
-                else:
-                    user_item = {
-                        "role": "user",
-                        "content": [{"type": "input_text", "text": prompt}],
-                    }
-                    user_input_for_kwargs = user_item  # single dict (we'll adapt below)
-
-                # Use 'instructions' when available + system_prompt provided
-                if system_prompt and "instructions" in self._capabilities:
-                    kwargs["instructions"] = system_prompt
-                    kwargs["input"] = user_input_for_kwargs
-                    logger.debug("LLMClient: using 'instructions' capability to set system prompt.")
-                elif system_prompt:
-                    system_item = {
-                        "role": "system",
-                        "content": [{"type": "input_text", "text": system_prompt}],
-                    }
-                    if isinstance(user_input_for_kwargs, list):
-                        kwargs["input"] = [system_item] + user_input_for_kwargs
-                    else:
-                        kwargs["input"] = [system_item, user_input_for_kwargs]
-                    logger.debug("LLMClient: injected system-role input item (fallback to input list).")
-                else:
-                    kwargs["input"] = user_input_for_kwargs
-
-                if stream and "stream" in self._capabilities:
-                    kwargs["stream"] = True
-
-                # response_format (if supported)
-                if response_format is not None and "response_format" in self._capabilities:
-                    kwargs["response_format"] = response_format
-
-                # tools config (if supported)
-                if tools_config:
-                    tools = tools_config.get("tools")
-                    if tools and "tools" in self._capabilities:
-                        kwargs["tools"] = tools
-                    tool_choice = tools_config.get("tool_choice")
-                    if tool_choice and "tool_choice" in self._capabilities:
-                        kwargs["tool_choice"] = tool_choice
-                    include = tools_config.get("include")
-                    if include and "include" in self._capabilities:
-                        kwargs["include"] = include
-
-                # reasoning config (if supported)
-                if reasoning_config and "reasoning" in self._capabilities:
-                    kwargs["reasoning"] = reasoning_config
-
-                logger.debug(
-                    "LLM request (legacy SDK): model=%s, prompt_len=%d, stream=%s, structured=%s, tools=%s, reasoning=%s, system_prompt_set=%s",
-                    model,
-                    len(prompt),
-                    stream,
-                    bool(response_format),
-                    bool(tools_config),
-                    bool(reasoning_config),
-                    bool(system_prompt),
-                )
-
-                start_ts = time.perf_counter()
-                response = self._client.responses.create(**kwargs)
+            else:
+                response_msg = chat_model.invoke(messages)
                 end_ts = time.perf_counter()
                 latency = end_ts - start_ts
 
-                raw_dict = self._to_dict(response)
+            raw_dict = self._to_dict(response_msg)
 
-                # Best-effort usage extraction (OpenAI Responses API)
-                input_tokens = None
-                output_tokens = None
+            # Extract token usage if provided by provider via usage_metadata or usage
+            input_tokens = None
+            output_tokens = None
+            usage = getattr(response_msg, "usage_metadata", None) or getattr(response_msg, "usage", None) or raw_dict.get("usage") or raw_dict.get("usage_metadata") or {}
+            if isinstance(usage, dict):
+                input_tokens = usage.get("input_tokens") or usage.get("prompt_tokens") or usage.get("prompt_token_count")
+                output_tokens = usage.get("output_tokens") or usage.get("completion_tokens") or usage.get("completion_token_count")
                 try:
-                    usage = raw_dict.get("usage") or {}
-                    input_tokens = usage.get("input_tokens")
-                    output_tokens = usage.get("output_tokens")
+                    if input_tokens is None and isinstance(usage.get("token_usage"), dict):
+                        input_tokens = usage["token_usage"].get("prompt_tokens") or usage["token_usage"].get("input_tokens")
+                    if output_tokens is None and isinstance(usage.get("token_usage"), dict):
+                        output_tokens = usage["token_usage"].get("completion_tokens") or usage["token_usage"].get("output_tokens")
                 except Exception:
-                    logger.debug("No usage metadata found in LLM response", exc_info=True)
+                    pass
 
-                return TextResponse(
-                    text=self._extract_text(response),
-                    raw=raw_dict,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    latency=latency,
-                )
+            # Extract textual output: prefer message.text property or string content
+            text_out = None
+            try:
+                text_attr = getattr(response_msg, "text", None)
+                if callable(text_attr):
+                    text_out = text_attr()
+                elif text_attr is not None:
+                    text_out = text_attr
+                else:
+                    content = getattr(response_msg, "content", None) or raw_dict.get("content")
+                    if isinstance(content, list):
+                        parts = []
+                        for c in content:
+                            if isinstance(c, dict) and c.get("type") in ("text", "output_text"):
+                                parts.append(c.get("text") or "")
+                            elif isinstance(c, str):
+                                parts.append(c)
+                        if parts:
+                            text_out = "".join(parts)
+                    elif isinstance(content, str):
+                        text_out = content
+            except Exception:
+                text_out = None
 
-            except TypeError:
-                # Programming / integration error → fail fast
-                raise
+            if text_out is None:
+                try:
+                    text_out = str(response_msg)
+                except Exception:
+                    text_out = ""
 
-            except Exception as e:
-                last_err = e
-                logger.warning(
-                    "LLM call_failed (attempt %d/%d): %s",
-                    attempt,
-                    self._max_retries,
-                    e,
-                )
+            # Ensure raw_dict contains explicit content_blocks if available on the object
+            try:
+                cb = getattr(response_msg, "content_blocks", None)
+                if cb is not None and "content_blocks" not in raw_dict:
+                    blocks = []
+                    for b in cb:
+                        if isinstance(b, dict):
+                            blocks.append(b)
+                        else:
+                            try:
+                                if hasattr(b, "model_dump"):
+                                    blocks.append(b.model_dump())
+                                elif hasattr(b, "to_dict"):
+                                    blocks.append(b.to_dict())
+                                elif hasattr(b, "__dict__"):
+                                    blocks.append(dict(b.__dict__))
+                                else:
+                                    blocks.append(repr(b))
+                            except Exception:
+                                blocks.append(repr(b))
+                    raw_dict["content_blocks"] = blocks
+            except Exception:
+                pass
 
-                # Best-effort rate-limit signal
-                if self._on_rate_limit and self._looks_like_rate_limit(e):
-                    try:
-                        self._on_rate_limit(attempt)
-                    except Exception:
-                        pass  # metrics hooks must never break execution
+            # Ensure usage info discovered is present in raw_dict for downstream consumers
+            try:
+                if isinstance(usage, dict):
+                    if "usage" not in raw_dict:
+                        raw_dict["usage"] = usage
+                    if "usage_metadata" not in raw_dict:
+                        raw_dict["usage_metadata"] = usage
+                else:
+                    # attempt to find nested usage in out/agent_response and bring it forward
+                    def _find_and_promote_usage(src: Any):
+                        if not isinstance(src, dict):
+                            return None
+                        if "usage" in src and isinstance(src.get("usage"), dict):
+                            return src.get("usage")
+                        if "usage_metadata" in src and isinstance(src.get("usage_metadata"), dict):
+                            return src.get("usage_metadata")
+                        ar = src.get("agent_response")
+                        if isinstance(ar, dict):
+                            return _find_and_promote_usage(ar)
+                        out_entries = src.get("output")
+                        if isinstance(out_entries, list):
+                            for e in out_entries:
+                                if isinstance(e, dict):
+                                    cand = _find_and_promote_usage(e.get("response") or e.get("result") or e.get("agent_response"))
+                                    if cand:
+                                        return cand
+                        return None
 
-                if attempt < self._max_retries:
-                    time.sleep(self._backoff_base ** attempt)
+                    if "usage" not in raw_dict or "usage_metadata" not in raw_dict:
+                        found = _find_and_promote_usage(raw_dict)
+                        if found and isinstance(found, dict):
+                            raw_dict.setdefault("usage", found)
+                            raw_dict.setdefault("usage_metadata", found)
+            except Exception:
+                logger.debug("Failed to promote usage to raw_dict", exc_info=True)
 
-        raise LLMError("LLM request failed after retries") from last_err
+            return TextResponse(
+                text=text_out,
+                raw=raw_dict,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                latency=latency,
+            )
+
+        except Exception as e:
+            logger.exception("create_text_response failed via LangChain path")
+            # Propagate as typed error so callers can surface instructional message to operators
+            raise LLMError("create_text_response failed via LangChain path: " + str(e)) from e
 
     # -------------------------
     # Capability detection
@@ -1454,6 +1605,7 @@ class LLMClient:
         Convert SDK/LangChain response into a serializable dict (best-effort),
         avoiding noisy Pydantic serializer warnings from the SDK's internal model graph.
         Ensure `content_blocks` and `usage_metadata` are surfaced when present.
+        Also flatten nested 'agent_response' shapes commonly returned by LangChain agents.
         """
         out: Dict[str, Any] = {}
         try:
@@ -1536,6 +1688,95 @@ class LLMClient:
                     out["instrumentation_events"] = events_attr
         except Exception:
             pass
+
+        # -------------------------
+        # Flatten LangChain agent_response chains (LangChain 2025/2026)
+        # -------------------------
+        seen_agent_responses = set()
+
+        def _append_list(dest_key: str, value: Any) -> None:
+            if value is None:
+                return
+            existing = out.get(dest_key)
+            if existing is None:
+                existing = []
+                out[dest_key] = existing
+            elif not isinstance(existing, list):
+                existing = [existing]
+                out[dest_key] = existing
+            if isinstance(value, list):
+                existing.extend(value)
+            else:
+                existing.append(value)
+
+        def _ensure_key_from_source(source: dict, src_key: str, dest_key: Optional[str] = None) -> None:
+            if dest_key is None:
+                dest_key = src_key
+            if dest_key in out:
+                return
+            if src_key in source and source[src_key] is not None:
+                out[dest_key] = source[src_key]
+
+        def _prepare_source(candidate: Any) -> Optional[Dict[str, Any]]:
+            if candidate is None:
+                return None
+            if isinstance(candidate, dict):
+                return candidate
+            normalized = _normalize_to_dict(candidate)
+            if isinstance(normalized, dict):
+                return normalized
+            return None
+
+        def _merge_agent_response(source: Any) -> None:
+            src = _prepare_source(source)
+            if not src:
+                return
+            marker = id(src)
+            if marker in seen_agent_responses:
+                return
+            seen_agent_responses.add(marker)
+
+            for key in ("usage", "usage_metadata", "structured_response", "structured", "messages"):
+                _ensure_key_from_source(src, key)
+
+            _append_list("tool_calls", src.get("tool_calls"))
+            _append_list("instrumentation_events", src.get("instrumentation_events"))
+            _append_list("_multi_agent_dashboard_events", src.get("_multi_agent_dashboard_events"))
+
+            if isinstance(src.get("content_blocks"), list):
+                _append_list("content_blocks", src.get("content_blocks"))
+
+            output_entries = src.get("output")
+            if isinstance(output_entries, list):
+                for entry in output_entries:
+                    if not isinstance(entry, dict):
+                        continue
+                    cb_entry = entry.get("content_blocks")
+                    if isinstance(cb_entry, list):
+                        _append_list("content_blocks", cb_entry)
+                    _merge_agent_response(entry.get("response"))
+                    _merge_agent_response(entry.get("result"))
+                    _merge_agent_response(entry.get("agent_response"))
+
+            nested = src.get("agent_response")
+            if nested is not None:
+                _merge_agent_response(nested)
+
+        _merge_agent_response(response)
+        _merge_agent_response(out.get("agent_response"))
+        try:
+            attr_agent_resp = getattr(response, "agent_response", None)
+        except Exception:
+            attr_agent_resp = None
+        _merge_agent_response(attr_agent_resp)
+
+        events = out.get("instrumentation_events")
+        legacy_events = out.get("_multi_agent_dashboard_events")
+        if isinstance(legacy_events, list) and not isinstance(events, list):
+            out["instrumentation_events"] = list(legacy_events)
+            events = out["instrumentation_events"]
+        if isinstance(events, list) and (not isinstance(legacy_events, list) or legacy_events is not events):
+            out["_multi_agent_dashboard_events"] = list(events)
 
         return out
 

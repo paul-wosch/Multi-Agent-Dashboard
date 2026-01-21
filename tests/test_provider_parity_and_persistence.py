@@ -64,50 +64,7 @@ class DummyLangChainLLMClient:
         )
 
     def create_text_response(self, *args, **kwargs):
-        raise RuntimeError("Legacy path should not be called for langchain-style client")
-
-
-class DummyLegacyLLMClient:
-    """
-    Simulates the legacy OpenAI Responses-style client (create_text_response path).
-    The engine's AgentRuntime will take the legacy path when llm_client._langchain_available is False.
-    """
-    _langchain_available = False
-
-    def create_text_response(self, *args, **kwargs):
-        # Return TextResponse shaped like a Responses API result (including instrumentation events)
-        return TextResponse(
-            text='{"answer":"ok"}',
-            raw={
-                "_multi_agent_dashboard_events": [
-                    {
-                        "content_blocks": [
-                            {
-                                "type": "web_search_call",
-                                "name": "web_search",
-                                "args": {"query": "instrumentize"},
-                                "id": "call-legacy-1",
-                                "status": "ok",
-                            }
-                        ],
-                        "structured_response": {"answer": "ok"},
-                    }
-                ],
-                "detected_provider_profile": {
-                    "tool_calling": True,
-                    "structured_output": True,
-                    "max_input_tokens": 131072,
-                },
-                "structured_response": {"answer": "ok"},
-            },
-            input_tokens=3,
-            output_tokens=5,
-            latency=0.02,
-        )
-
-    # Not necessary for this test, but kept for completeness
-    def create_agent_for_spec(self, *args, **kwargs):
-        raise RuntimeError("LangChain agent creation should not be used for legacy client")
+        raise RuntimeError("LangChain-style client used; legacy create_text_response should not be called")
 
 
 # -----------------------
@@ -128,16 +85,13 @@ def _make_test_agent_spec(name: str) -> AgentSpec:
     )
 
 
-def test_legacy_and_langchain_parity_content_blocks_and_profile():
+def test_langchain_only_content_blocks_and_profile():
     """
-    Ensure an engine run using the legacy create_text_response path and an engine
-    run using the LangChain invoke path both produce instrumentation (content_blocks)
-    and provider profile hints in the same places in the engine's agent_configs.
+    Ensure an engine run using the LangChain invoke path produces instrumentation (content_blocks)
+    and provider profile hints in the engine's agent_configs.
     """
-
     spec_name = "tester"
 
-    # LangChain-style run
     client_lc = DummyLangChainLLMClient()
     engine_lc = MultiAgentEngine(llm_client=client_lc)
     spec = _make_test_agent_spec(spec_name)
@@ -145,36 +99,19 @@ def test_legacy_and_langchain_parity_content_blocks_and_profile():
 
     res_lc = engine_lc.run_seq(steps=[spec_name], initial_input="capture", strict=False)
 
-    # Legacy (Responses API) run
-    client_legacy = DummyLegacyLLMClient()
-    engine_leg = MultiAgentEngine(llm_client=client_legacy)
-    spec2 = _make_test_agent_spec(spec_name)  # same spec; name may be same across engines
-    engine_leg.add_agent(spec2)
-
-    res_leg = engine_leg.run_seq(steps=[spec_name], initial_input="capture", strict=False)
-
-    # Sanity checks
     assert spec_name in res_lc.agent_configs, "LangChain run must record agent config"
-    assert spec_name in res_leg.agent_configs, "Legacy run must record agent config"
 
     cfg_lc = res_lc.agent_configs[spec_name]
-    cfg_leg = res_leg.agent_configs[spec_name]
 
-    # Extra payload should include content_blocks (full) or content_blocks_summary in either case
     extra_lc = cfg_lc.get("extra", {}) or {}
-    extra_leg = cfg_leg.get("extra", {}) or {}
 
     def has_content_info(extra: Dict[str, Any]) -> bool:
         return bool(extra.get("content_blocks")) or bool(extra.get("content_blocks_summary")) or bool(extra.get("instrumentation_events"))
 
     assert has_content_info(extra_lc), "LangChain run did not record content_blocks/instrumentation"
-    assert has_content_info(extra_leg), "Legacy run did not record content_blocks/instrumentation"
 
-    # Provider profile detection (engine attempts to derive provider_features when profile present)
     pf_lc = cfg_lc.get("provider_features") or {}
-    pf_leg = cfg_leg.get("provider_features") or {}
 
-    # Either derived hints (tool_calling/structured_output) or a detected_profile_present marker should be present
     def profile_has_hints(pf: Dict[str, Any]) -> bool:
         return (
             (pf.get("tool_calling") is True and pf.get("structured_output") is True)
@@ -182,11 +119,7 @@ def test_legacy_and_langchain_parity_content_blocks_and_profile():
             or (pf.get("structured_output") is True)
         )
 
-    assert profile_has_hints(pf_lc) or profile_has_hints(pf_leg), "At least one run should expose provider hints"
-
-    # Cross-compare parity: both runs should have at least the same "presence" of content_blocks and profile detection
-    assert has_content_info(extra_lc) == has_content_info(extra_leg), "Content capture presence should match between LangChain and legacy flows"
-    assert bool(pf_lc) == bool(pf_leg), "Provider features presence should match across flows"
+    assert profile_has_hints(pf_lc), "LangChain run should expose provider hints"
 
 
 def test_persistence_and_cost_across_providers(tmp_path: Path):

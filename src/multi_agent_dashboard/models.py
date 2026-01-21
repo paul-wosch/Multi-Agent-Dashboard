@@ -5,6 +5,7 @@ import json
 import logging
 import threading
 from multi_agent_dashboard.utils import safe_format
+from multi_agent_dashboard.llm_client import LLMError
 
 logger = logging.getLogger(__name__)
 
@@ -16,9 +17,14 @@ logger = logging.getLogger(__name__)
 def _extract_instrumentation_events(raw_metrics: Dict[str, Any] | None) -> List[Dict[str, Any]]:
     if not isinstance(raw_metrics, dict):
         return []
+    # Primary key used by middleware
     events = raw_metrics.get("_multi_agent_dashboard_events")
     if isinstance(events, list):
         return events
+    # Backwards-compatible alias (used by LLMClient.invoke_agent)
+    events2 = raw_metrics.get("instrumentation_events")
+    if isinstance(events2, list):
+        return events2
     return []
 
 
@@ -45,6 +51,85 @@ def _structured_from_instrumentation(raw_metrics: Dict[str, Any] | None) -> Any:
         if "structured_response" in event:
             return event["structured_response"]
     return None
+
+
+def _value_to_dict(value: Any) -> Dict[str, Any] | None:
+    if isinstance(value, dict):
+        return value
+    if value is None:
+        return None
+    if hasattr(value, "model_dump"):
+        try:
+            normalized = value.model_dump()
+            if isinstance(normalized, dict):
+                return normalized
+        except Exception:
+            pass
+    if hasattr(value, "to_dict"):
+        try:
+            normalized = value.to_dict()
+            if isinstance(normalized, dict):
+                return normalized
+        except Exception:
+            pass
+    if hasattr(value, "__dict__"):
+        try:
+            return dict(value.__dict__)
+        except Exception:
+            pass
+    return None
+
+
+def _collect_tool_calls(raw_metrics: Dict[str, Any] | None) -> List[Dict[str, Any]]:
+    if not isinstance(raw_metrics, dict):
+        return []
+    calls: List[Dict[str, Any]] = []
+
+    def _recurse(node: Any) -> None:
+        node_dict = _value_to_dict(node)
+        if not isinstance(node_dict, dict):
+            return
+        tool_calls = node_dict.get("tool_calls")
+        if isinstance(tool_calls, list):
+            for entry in tool_calls:
+                entry_dict = _value_to_dict(entry)
+                if isinstance(entry_dict, dict):
+                    calls.append(entry_dict)
+        for key in ("agent_response", "response", "result"):
+            _recurse(node_dict.get(key))
+        output = node_dict.get("output")
+        if isinstance(output, list):
+            for entry in output:
+                _recurse(entry)
+        events = node_dict.get("instrumentation_events") or node_dict.get("_multi_agent_dashboard_events")
+        if isinstance(events, list):
+            for event in events:
+                _recurse(event)
+
+    _recurse(raw_metrics)
+    return calls
+
+
+def _tool_usage_entry_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    tool_type = payload.get("name") or payload.get("tool_type") or payload.get("type") or "unknown"
+    entry: Dict[str, Any] = {
+        "tool_type": tool_type,
+        "id": payload.get("id") or payload.get("tool_call_id") or payload.get("tool_use_id"),
+    }
+    status = payload.get("status") or payload.get("state")
+    if status is not None:
+        entry["status"] = status
+    action = payload.get("args") or payload.get("action") or payload.get("input") or payload.get("result")
+    if isinstance(action, str):
+        try:
+            action = json.loads(action)
+        except Exception:
+            action = {"raw": action}
+    if isinstance(action, dict):
+        entry["action"] = action
+    elif action is not None:
+        entry["action"] = {"raw": action}
+    return entry
 
 
 # -------------------------
@@ -106,6 +191,7 @@ class AgentRuntime:
     _cached_agent_response_format: Optional[str] = field(default=None, init=False, repr=False)
     # Lock to make cache operations thread-safe if engine is used in threaded contexts
     _cached_agent_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
+    _cached_agent_instrumentation_attached: bool = field(default=False, init=False, repr=False)
 
     def run(
         self,
@@ -176,13 +262,12 @@ class AgentRuntime:
             llm_files_payload.append(f)  # will be uploaded by LLM client
 
         # -------------------------
-        # Call LLM client
+        # Call LLM client (LangChain-only path)
         # -------------------------
         tc = self._build_tools_config(state)
         rc = self._build_reasoning_config()
         logger.debug("Agent %s tools_config=%r reasoning_config=%r", self.spec.name, tc, rc)
 
-        # Prefer LangChain agent path when available. This uses create_agent + agent.invoke
         response = None
         used_langchain_agent = False
         agent_obj_for_invoke = None
@@ -198,104 +283,124 @@ class AgentRuntime:
 
         requested_rf = _fingerprint_schema(structured_schema)
 
-        if getattr(self.llm_client, "_langchain_available", False):
+        # Enforce LangChain-only runtime: create_agent_for_spec + invoke_agent must be available.
+        if not getattr(self.llm_client, "_langchain_available", False):
+            raise LLMError(
+                f"AgentRuntime.run requires LangChain-enabled LLM client for agent '{self.spec.name}'. "
+                "The legacy create_text_response fallback has been removed. Install LangChain and the provider integration (e.g., langchain-openai, langchain-ollama) and retry."
+            )
+
+        try:
+            agent = None
+            # Attempt to reuse a cached agent when available and compatible with requested response format.
             try:
-                agent = None
-                # Attempt to reuse a cached agent when available and compatible with requested response format.
-                try:
-                    with self._cached_agent_lock:
-                        if self._cached_agent is not None and self._cached_agent_response_format == requested_rf:
-                            agent = self._cached_agent
-                            logger.debug("Reusing cached LangChain agent for %s (rf=%s)", self.spec.name, requested_rf)
-                        else:
-                            # Create and cache a new agent instance.
-                            new_agent = None
-                            try:
-                                new_agent = self.llm_client.create_agent_for_spec(
-                                    self.spec,
-                                    tools=None,
-                                    middleware=None,
-                                    response_format=structured_schema,
-                                )
-                            except Exception:
-                                new_agent = None
+                with self._cached_agent_lock:
+                    if self._cached_agent is not None and self._cached_agent_response_format == requested_rf:
+                        agent = self._cached_agent
+                        logger.debug("Reusing cached LangChain agent for %s (rf=%s)", self.spec.name, requested_rf)
+                    else:
+                        # Create and cache a new agent instance.
+                        new_agent = None
+                        # Attempt to create agent; if creation fails, propagate a clear LLMError (do not silently swallow)
+                        try:
+                            new_agent = self.llm_client.create_agent_for_spec(
+                                self.spec,
+                                tools=None,
+                                middleware=None,
+                                response_format=structured_schema,
+                            )
+                        except Exception as e:
+                            logger.debug("create_agent_for_spec raised while creating agent for %s: %s", self.spec.name, e, exc_info=True)
+                            # Surface a typed, informative exception upward
+                            raise LLMError(f"LangChain agent creation failed for '{self.spec.name}': {e}") from e
 
-                            if new_agent is not None:
-                                self._cached_agent = new_agent
-                                self._cached_agent_response_format = requested_rf
-                                agent = new_agent
-                                logger.debug("Created and cached new LangChain agent for %s (rf=%s)", self.spec.name, requested_rf)
-                except Exception:
-                    # Cache logic must be resilient; fall back to creating agent without caching.
-                    logger.debug("Agent cache logic failed; attempting non-cached create for %s", self.spec.name, exc_info=True)
-                    try:
-                        agent = self.llm_client.create_agent_for_spec(
-                            self.spec,
-                            tools=None,
-                            middleware=None,
-                            response_format=structured_schema,
-                        )
-                    except Exception:
-                        agent = None
-
-                if agent is not None:
-                    # Context: pass allowed_domains/state if present so middleware / agent may use it.
-                    context: Dict[str, Any] = {}
-                    if "allowed_domains_by_agent" in state:
-                        context["allowed_domains_by_agent"] = state.get("allowed_domains_by_agent")
-                    if "allowed_domains" in state:
-                        context["allowed_domains"] = state.get("allowed_domains")
-
-                    if tc is not None:
-                        context["tools_config"] = tc
-                    if rc is not None:
-                        context["reasoning_config"] = rc
-
-                    # Invoke the agent via the LLMClient helper for consistent normalization
-                    response = self.llm_client.invoke_agent(
-                        agent,
-                        prompt,
-                        files=llm_files_payload if llm_files_payload else None,
-                        response_format=structured_schema,
-                        stream=stream,
-                        context=context if context else None,
-                    )
-                    used_langchain_agent = True
-                    agent_obj_for_invoke = agent
+                        if new_agent is not None:
+                            self._cached_agent = new_agent
+                            self._cached_agent_response_format = requested_rf
+                            agent = new_agent
+                            logger.debug("Created and cached new LangChain agent for %s (rf=%s)", self.spec.name, requested_rf)
+            except LLMError:
+                # Propagate LLMError created above
+                raise
             except Exception:
-                logger.debug("LangChain agent path failed for agent '%s'; falling back to create_text_response", self.spec.name, exc_info=True)
-                response = None
+                # Cache logic must be resilient; attempt non-cached creation but surface any errors clearly.
+                logger.debug("Agent cache logic failed; attempting non-cached create for %s", self.spec.name, exc_info=True)
+                try:
+                    agent = self.llm_client.create_agent_for_spec(
+                        self.spec,
+                        tools=None,
+                        middleware=None,
+                        response_format=structured_schema,
+                    )
+                except Exception as e:
+                    logger.debug("Non-cached create_agent_for_spec failed for %s: %s", self.spec.name, e, exc_info=True)
+                    raise LLMError(f"LangChain agent creation failed for '{self.spec.name}': {e}") from e
 
-        # Fallback to existing path (works for legacy OpenAI SDK and also LangChain chat-model-only path)
-        if response is None:
-            response = self.llm_client.create_text_response(
-                model=self.spec.model,
-                prompt=prompt,
+            if agent is None:
+                # create_agent_for_spec unexpectedly returned None (should return agent or raise)
+                raise LLMError(f"Failed to create LangChain agent for '{self.spec.name}': create_agent_for_spec returned no agent instance.")
+            self._cached_agent_instrumentation_attached = bool(getattr(agent, "_instrumentation_attached", False))
+
+            # Context: pass allowed_domains/state if present so middleware / agent may use it.
+            context: Dict[str, Any] = {}
+            if "allowed_domains_by_agent" in state:
+                context["allowed_domains_by_agent"] = state.get("allowed_domains_by_agent")
+            if "allowed_domains" in state:
+                context["allowed_domains"] = state.get("allowed_domains")
+
+            if tc is not None:
+                context["tools_config"] = tc
+            if rc is not None:
+                context["reasoning_config"] = rc
+
+            # Invoke the agent via the LLMClient helper for consistent normalization
+            response = self.llm_client.invoke_agent(
+                agent,
+                prompt,
+                files=llm_files_payload if llm_files_payload else None,
                 response_format=structured_schema,
                 stream=stream,
-                files=llm_files_payload if llm_files_payload else None,
-                tools_config=tc,
-                reasoning_config=rc,
-                system_prompt=self.spec.system_prompt_template,
-                # Provider metadata
-                provider_id=self.spec.provider_id,
-                model_class=self.spec.model_class,
-                endpoint=self.spec.endpoint,
-                use_responses_api=self.spec.use_responses_api,
-                provider_features=self.spec.provider_features,
+                context=context if context else None,
             )
+            used_langchain_agent = True
+            agent_obj_for_invoke = agent
+        except Exception as e:
+            # Do not fall back to legacy path; surface a typed error with context.
+            logger.debug("LangChain agent path failed for agent '%s'; throwing LLMError", self.spec.name, exc_info=True)
+            raise LLMError(
+                f"LangChain agent creation/invoke failed for agent '{self.spec.name}': {e}"
+            ) from e
 
         # -------------------------
         # Normalize and store metrics / instrumentation for engine/DB
         # -------------------------
         raw = response.raw or {}
+
+        # Fallback token extraction from raw usage metadata if TextResponse left them None
+        input_tokens = response.input_tokens
+        output_tokens = response.output_tokens
+        try:
+            if (input_tokens is None or output_tokens is None) and isinstance(raw, dict):
+                usage = raw.get("usage") or raw.get("usage_metadata") or {}
+                if isinstance(usage, dict):
+                    if input_tokens is None:
+                        input_tokens = usage.get("input_tokens") or usage.get("prompt_tokens") or usage.get("prompt_token_count")
+                        if input_tokens is None and isinstance(usage.get("token_usage"), dict):
+                            input_tokens = usage["token_usage"].get("prompt_tokens") or usage["token_usage"].get("input_tokens")
+                    if output_tokens is None:
+                        output_tokens = usage.get("output_tokens") or usage.get("completion_tokens") or usage.get("completion_token_count")
+                        if output_tokens is None and isinstance(usage.get("token_usage"), dict):
+                            output_tokens = usage["token_usage"].get("completion_tokens") or usage["token_usage"].get("output_tokens")
+        except Exception:
+            logger.debug("Token fallback extraction from raw usage failed for agent=%s", self.spec.name, exc_info=True)
+
         instrumentation_events = _extract_instrumentation_events(raw)
         content_blocks = _collect_content_blocks(raw)
 
         # Base last_metrics stored for engine consumption
         self.last_metrics = {
-            "input_tokens": response.input_tokens,
-            "output_tokens": response.output_tokens,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
             "latency": response.latency,
             "raw": raw,
             "content_blocks": content_blocks,
@@ -314,56 +419,38 @@ class AgentRuntime:
             if detected is not None:
                 self.last_metrics["detected_provider_profile"] = detected
             else:
-                # In some flows, the create_text_response path may populate this in response.raw
+                # In some flows, the LLM client may have included this in response.raw
                 resp_detected = raw.get("detected_provider_profile")
                 if resp_detected is not None:
                     self.last_metrics["detected_provider_profile"] = resp_detected
         except Exception:
             pass
 
-        # If there was tool usage (web_search), store for engine / run logging
-        # We'll store high-level info into last_metrics["tools"]
+        # -------------------------
+        # Tool usage extraction from content_blocks and legacy tool_calls
+        # -------------------------
         used_tools: List[Dict[str, Any]] = []
-        # Normalize different tool-call/ server-tool-call block types into a tool usage entry
+        seen_tool_entries: set[tuple[str, str | None]] = set()
+
+        def _maybe_add_tool_entry(entry: Dict[str, Any]) -> None:
+            tool_type = entry.get("tool_type")
+            if not tool_type:
+                return
+            key = (tool_type, entry.get("id"))
+            if key in seen_tool_entries:
+                return
+            seen_tool_entries.add(key)
+            used_tools.append(entry)
+
         for item in content_blocks:
             if not isinstance(item, dict):
                 continue
-            btype = item.get("type", "").lower()
-            if btype in ("server_tool_call", "tool_call", "web_search_call", "web_search"):
-                usage_entry = {
-                    "tool_type": item.get("name") or item.get("tool_type") or "web_search",
-                    "id": item.get("id") or item.get("tool_call_id"),
-                    "status": item.get("status") or item.get("state") or None,
-                }
-                action = item.get("args") or item.get("action") or item.get("input") or item.get("args_json")
-                if isinstance(action, dict):
-                    usage_entry["action"] = action
-                elif isinstance(action, str):
-                    try:
-                        usage_entry["action"] = json.loads(action)
-                    except Exception:
-                        usage_entry["action"] = {"raw": action}
-                used_tools.append(usage_entry)
+            _maybe_add_tool_entry(_tool_usage_entry_from_payload(item))
 
-        # If still empty, check for legacy 'tool_calls' metadata
-        if not used_tools and isinstance(raw, dict):
-            legacy_calls = raw.get("tool_calls") or raw.get("tool_calls", None)
-            if isinstance(legacy_calls, list):
-                for lc in legacy_calls:
-                    if not isinstance(lc, dict):
-                        continue
-                    usage_entry = {
-                        "tool_type": lc.get("tool_type") or lc.get("name") or "unknown",
-                        "id": lc.get("id") or lc.get("tool_call_id") or None,
-                        "status": lc.get("status"),
-                    }
-                    action = lc.get("args") or lc.get("action") or lc.get("args_json")
-                    if isinstance(action, dict):
-                        usage_entry["action"] = action
-                    used_tools.append(usage_entry)
+        for call_payload in _collect_tool_calls(raw):
+            _maybe_add_tool_entry(_tool_usage_entry_from_payload(call_payload))
 
         if used_tools:
-            # Attach the used tools list into last_metrics for engine persistence
             self.last_metrics["tools"] = used_tools
 
         # -------------------------
@@ -386,7 +473,7 @@ class AgentRuntime:
                 for cb in content_blocks:
                     if not isinstance(cb, dict):
                         continue
-                    ctype = cb.get("type", "").lower()
+                    ctype = (cb.get("type") or "").lower()
                     # Typical structured response block names
                     if ctype in ("structured", "structured_response", "structured_output"):
                         parsed = cb.get("value") or cb.get("data") or cb.get("json") or cb.get("args") or cb.get("output")
@@ -398,9 +485,9 @@ class AgentRuntime:
 
         # 4) Fallback: try best-effort JSON parsing of the textual output
         raw_output = response.text
-        if parsed is None:
+        if parsed is None and isinstance(raw_output, str):
             try:
-                parsed = json.loads(raw_output) if isinstance(raw_output, str) and raw_output.strip() else None
+                parsed = json.loads(raw_output) if raw_output.strip() else None
             except Exception:
                 parsed = None
 

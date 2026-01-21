@@ -149,7 +149,7 @@ def test_chat_model_factory_honors_ollama_provider_and_endpoint():
     - endpoint should be passed as base_url to the init function (Ollama uses base_url)
     - provider_features should be passed through as 'profile'
     - identical metadata must yield cached instance (same object)
-    - changing metadata (provider_features or endpoint) must yield a new instance
+    - changing metadata (provider_features or endpoint or timeout) must yield a new instance
     """
     recorded = []
 
@@ -182,6 +182,8 @@ def test_chat_model_factory_honors_ollama_provider_and_endpoint():
     assert kw.get("base_url") == endpoint
     # provider_features forwarded under 'profile'
     assert kw.get("profile") == {"structured_output": False}
+    # request_timeout should be forwarded to the underlying init function
+    assert kw.get("request_timeout") == 3.5 or kw.get("timeout") == 3.5
 
     # Repeating the exact same call should return the cached instance (no new init)
     m2 = factory.get_model(
@@ -208,3 +210,16 @@ def test_chat_model_factory_honors_ollama_provider_and_endpoint():
     )
     assert m3 is not m1
     assert len(recorded) == 2
+
+    # Changing timeout should also change the cache key and cause a new init
+    m4 = factory.get_model(
+        "llama3",
+        provider_id="ollama",
+        endpoint=endpoint,
+        use_responses_api=False,
+        model_class="ollama-mini",
+        provider_features={"structured_output": True},
+        timeout=4.5,
+    )
+    assert m4 is not m3
+    assert len(recorded) == 3

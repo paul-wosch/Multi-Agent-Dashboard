@@ -18,9 +18,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Hooks (callables). Set by the UI at bootstrap time.
-invalidate_agents_fn: Optional[Callable[[], None]] = None  # type: ignore
-reload_agents_fn: Optional[Callable[[], None]] = None  # type: ignore
+# Internal hook storage (use underscored names consistently)
+_invalidate_agents_fn: Optional[Callable[[], None]] = None  # type: ignore
+_reload_agents_fn: Optional[Callable[[], None]] = None  # type: ignore
 
 
 def register_agent_change_handlers(
