@@ -1,3 +1,6 @@
+# Diff patches
+*.patch
+
 # sqlite database files
 data/**/*.sqlite3
 data/**/*.sqlite
