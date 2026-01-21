@@ -136,8 +136,15 @@ def _collect_tool_calls(raw_metrics: Dict[str, Any] | None) -> List[Dict[str, An
     return calls
 
 
-def _tool_usage_entry_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+def _tool_usage_entry_from_payload(payload: Dict[str, Any]) -> Dict[str, Any] | None:
+    raw_type = payload.get("type") or payload.get("tool_type") or ""
+    raw_type_l = str(raw_type).lower()
+    # Skip non-tool content blocks (e.g., text/reasoning)
+    if raw_type_l in ("text", "reasoning"):
+        return None
     tool_type = payload.get("name") or payload.get("tool_type") or payload.get("type") or "unknown"
+    if tool_type in ("unknown", "", None) and not payload.get("name"):
+        return None
     entry: Dict[str, Any] = {
         "tool_type": tool_type,
         "id": payload.get("id") or payload.get("tool_call_id") or payload.get("tool_use_id"),
@@ -480,7 +487,9 @@ class AgentRuntime:
         used_tools: List[Dict[str, Any]] = []
         seen_tool_entries: set[tuple[str, str | None]] = set()
 
-        def _maybe_add_tool_entry(entry: Dict[str, Any]) -> None:
+        def _maybe_add_tool_entry(entry: Dict[str, Any] | None) -> None:
+            if not entry:
+                return
             tool_type = entry.get("tool_type")
             if not tool_type:
                 return
@@ -490,8 +499,12 @@ class AgentRuntime:
             seen_tool_entries.add(key)
             used_tools.append(entry)
 
+        TOOL_BLOCK_TYPES = {"tool_call", "server_tool_call", "web_search_call", "web_search", "function_call"}
         for item in content_blocks:
             if not isinstance(item, dict):
+                continue
+            btype = str(item.get("type") or "").lower()
+            if btype and btype not in TOOL_BLOCK_TYPES:
                 continue
             _maybe_add_tool_entry(_tool_usage_entry_from_payload(item))
 

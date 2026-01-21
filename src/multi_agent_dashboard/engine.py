@@ -449,22 +449,35 @@ class MultiAgentEngine:
             if not isinstance(content_blocks, list):
                 content_blocks = _collect_content_blocks(raw_metrics)
 
+            def _filter_extra_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+                # Exclude plain text blocks from extra_config_json to avoid duplicating agent_outputs.output
+                out: List[Dict[str, Any]] = []
+                for b in blocks:
+                    if not isinstance(b, dict):
+                        continue
+                    btype = (b.get("type") or "").lower()
+                    if btype == "text":
+                        continue
+                    out.append(b)
+                return out
+
             content_blocks_summary = None
             try:
                 if isinstance(content_blocks, list) and content_blocks:
+                    filtered_blocks = _filter_extra_blocks(content_blocks)
                     content_blocks_summary = [
                         {
                             "type": (cb.get("type") if isinstance(cb, dict) else None),
                             "name": (cb.get("name") if isinstance(cb, dict) else None),
                             "id": (cb.get("id") if isinstance(cb, dict) else None),
                         }
-                        for cb in content_blocks
+                        for cb in filtered_blocks
                     ]
             except Exception:
                 content_blocks_summary = None
 
             # Normalize full content blocks for DB storage (best-effort)
-            content_blocks_full = _normalize_content_blocks(content_blocks or [])
+            content_blocks_full = _normalize_content_blocks(_filter_extra_blocks(content_blocks or []))
 
             # Provider profile hints detected at runtime (from model or response)
             detected_profile = metrics.get("detected_provider_profile") or raw_metrics.get("detected_provider_profile")
