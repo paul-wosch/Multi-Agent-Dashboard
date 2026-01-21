@@ -223,3 +223,35 @@ def test_chat_model_factory_honors_ollama_provider_and_endpoint():
     )
     assert m4 is not m3
     assert len(recorded) == 3
+
+
+def test_invoke_agent_extracts_usage_from_messages():
+    class FakeAIMessage:
+        def __init__(self, usage_metadata=None, response_metadata=None):
+            self.usage_metadata = usage_metadata
+            self.response_metadata = response_metadata
+
+    class FakeAgent:
+        system_prompt = "system"
+
+        def invoke(self, state, context=None):
+            # Return agent state dict with messages; usage is on last AIMessage
+            return {
+                "messages": [
+                    {"role": "user", "content": "hi"},
+                    FakeAIMessage(usage_metadata={"input_tokens": 12, "output_tokens": 34}),
+                ]
+            }
+
+    client = LLMClient()
+    # Force LangChain path without real dependencies
+    client._langchain_available = True
+    client._SystemMessage = None
+    client._HumanMessage = None
+
+    resp = client.invoke_agent(FakeAgent(), "hello")
+    assert resp.input_tokens == 12
+    assert resp.output_tokens == 34
+    # Ensure usage is promoted for downstream consumers
+    assert isinstance(resp.raw, dict)
+    assert resp.raw.get("usage") == {"input_tokens": 12, "output_tokens": 34}

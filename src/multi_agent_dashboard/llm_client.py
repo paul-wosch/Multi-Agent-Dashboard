@@ -923,6 +923,30 @@ class LLMClient:
                         return payload
             return None
 
+        def _extract_usage_from_messages(messages: Any) -> dict | None:
+            """
+            Pull usage from the last AIMessage-like object in a messages list.
+            LangChain commonly attaches usage on AIMessage.usage_metadata or
+            AIMessage.response_metadata rather than promoting it to the top-level
+            agent state dict.
+            """
+            if not isinstance(messages, list):
+                return None
+            for msg in reversed(messages):
+                try:
+                    # dict-shaped message
+                    if isinstance(msg, dict):
+                        usage_payload = msg.get("usage_metadata") or msg.get("usage") or msg.get("response_metadata")
+                        if isinstance(usage_payload, dict) and usage_payload:
+                            return usage_payload
+                    # object-shaped message
+                    usage_payload = getattr(msg, "usage_metadata", None) or getattr(msg, "usage", None) or getattr(msg, "response_metadata", None)
+                    if isinstance(usage_payload, dict) and usage_payload:
+                        return usage_payload
+                except Exception:
+                    continue
+            return None
+
         input_tokens = None
         output_tokens = None
         usage = (
@@ -946,6 +970,37 @@ class LLMClient:
                     output_tokens = token_usage.get("completion_tokens") or token_usage.get("output_tokens")
 
         if input_tokens is None or output_tokens is None:
+            # Try usage on the last AIMessage from agent state (common in LangChain agents)
+            messages = None
+            try:
+                if isinstance(result, dict):
+                    messages = result.get("messages")
+                if messages is None and isinstance(raw_dict, dict):
+                    messages = raw_dict.get("messages")
+            except Exception:
+                messages = None
+
+            msg_usage = _extract_usage_from_messages(messages)
+            if isinstance(msg_usage, dict):
+                if input_tokens is None:
+                    input_tokens = msg_usage.get("input_tokens") or msg_usage.get("prompt_tokens") or msg_usage.get("prompt_token_count")
+                if output_tokens is None:
+                    output_tokens = msg_usage.get("output_tokens") or msg_usage.get("completion_tokens") or msg_usage.get("completion_token_count")
+                token_usage = msg_usage.get("token_usage")
+                if isinstance(token_usage, dict):
+                    if input_tokens is None:
+                        input_tokens = token_usage.get("prompt_tokens") or token_usage.get("input_tokens")
+                    if output_tokens is None:
+                        output_tokens = token_usage.get("completion_tokens") or token_usage.get("output_tokens")
+
+                # Promote usage to raw_dict for downstream consumers
+                try:
+                    if isinstance(raw_dict, dict):
+                        raw_dict.setdefault("usage", msg_usage)
+                        raw_dict.setdefault("usage_metadata", msg_usage)
+                except Exception:
+                    logger.debug("Failed to attach message usage into raw_dict", exc_info=True)
+
             nested_usage = _extract_usage_from_candidate(raw_dict.get("agent_response"))
             if not nested_usage:
                 try:
