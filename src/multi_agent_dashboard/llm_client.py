@@ -258,36 +258,9 @@ class ChatModelFactory:
         # Provider name normalization for provider-specific fallback logic
         provider_norm = (provider_id or "").strip().lower()
 
-        # Provider-specific default endpoint handling:
-        # If the provider is Ollama and no endpoint was supplied, consult
-        # multi_agent_dashboard.config.OLLAMA_HOST / OLLAMA_PORT / OLLAMA_PROTOCOL
-        # to construct a sensible base_url (e.g., "http://localhost:11434").
-        if provider_norm == "ollama" and not endpoint:
-            try:
-                from multi_agent_dashboard import config as _cfg
-                host = getattr(_cfg, "OLLAMA_HOST", None)
-                port = getattr(_cfg, "OLLAMA_PORT", None)
-                proto = getattr(_cfg, "OLLAMA_PROTOCOL", None) or "http"
-                if host:
-                    # Compose endpoint with scheme and port (if present)
-                    if port:
-                        endpoint = f"{proto}://{host}:{port}"
-                    else:
-                        endpoint = f"{proto}://{host}"
-                    logger.debug("ChatModelFactory: no endpoint provided for Ollama; using default %s", endpoint)
-            except Exception as e:
-                logger.debug("ChatModelFactory: failed to determine Ollama defaults from config: %s", e, exc_info=True)
-
         # Normalize endpoint: if user provided a host:port without scheme, add a default scheme.
         if endpoint and "://" not in endpoint:
-            default_scheme = "http"
-            if provider_norm == "ollama":
-                try:
-                    from multi_agent_dashboard import config as _cfg2
-                    default_scheme = getattr(_cfg2, "OLLAMA_PROTOCOL", "http") or "http"
-                except Exception:
-                    default_scheme = "http"
-            endpoint = f"{default_scheme}://{endpoint}"
+            endpoint = f"http://{endpoint}"
 
         key = self._key(
             model,

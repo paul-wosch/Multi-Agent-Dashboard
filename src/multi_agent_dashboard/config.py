@@ -101,44 +101,6 @@ OPENAI_PRICING = {
     # Add more models as needed
 }
 
-# Ollama (local server) defaults and detection:
-#
-# The provider factory / ChatModelFactory will consult these values when an agent
-# is configured to use provider_id == "ollama" and no explicit endpoint is supplied.
-#
-# Common defaults:
-#  - default host: localhost
-#  - default port: 11434
-#  - protocol: either provided via OLLAMA_PROTOCOL or inferred from OLLAMA_SSL / OLLAMA_USE_SSL
-#
-# These environment variables are optional; if not provided we fall back to the defaults
-# above and the provider factory will emit a debug log indicating the constructed base_url.
-OLLAMA_HOST = _env.get("OLLAMA_HOST", "localhost")
-_ollama_port_env = _env.get("OLLAMA_PORT", None)
-try:
-    if _ollama_port_env is None or str(_ollama_port_env).strip() == "":
-        OLLAMA_PORT = 11434
-    else:
-        OLLAMA_PORT = int(str(_ollama_port_env).strip())
-except Exception:
-    OLLAMA_PORT = 11434
-
-# Protocol detection: explicit OLLAMA_PROTOCOL (http/https) takes precedence.
-# Fallback to OLLAMA_SSL or OLLAMA_USE_SSL truthy values to select https.
-OLLAMA_PROTOCOL = None
-_ollama_protocol_env = _env.get("OLLAMA_PROTOCOL")
-if _ollama_protocol_env and str(_ollama_protocol_env).strip():
-    OLLAMA_PROTOCOL = str(_ollama_protocol_env).strip().lower()
-else:
-    _ollama_ssl_env = _env.get("OLLAMA_SSL") or _env.get("OLLAMA_USE_SSL")
-    if _ollama_ssl_env and str(_ollama_ssl_env).strip().lower() in ("1", "true", "yes"):
-        OLLAMA_PROTOCOL = "https"
-    else:
-        OLLAMA_PROTOCOL = "http"
-
-# Precomputed convenience value; may be used by factory code but is optional.
-OLLAMA_BASE_URL = f"{OLLAMA_PROTOCOL}://{OLLAMA_HOST}:{OLLAMA_PORT}" if OLLAMA_HOST else None
-
 # Toggle whether the UI file uploader restricts selectable file extensions.
 # If True, the uploader will only allow extensions listed in ATTACHMENT_FILE_TYPES.
 # If False, the uploader will accept any file extension (Streamlit default: None).
