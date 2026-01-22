@@ -93,12 +93,6 @@ Return the improved final answer only.
 }
 
 
-def create_openai_client(api_key: str):
-    """Factory to create an OpenAI client. Allows tests to replace this factory or pass fake client."""
-    # Import here to keep optional dependency local to factory
-    from openai import OpenAI  # type: ignore
-
-    return OpenAI(api_key=api_key)
 
 
 def bootstrap_default_agents(defaults: Dict[str, dict]):
@@ -170,8 +164,7 @@ def app_start():
     """
     Explicit application bootstrap. Call this once when running the Streamlit app.
     - initializes DB and migrations
-    - creates an OpenAI client via factory
-    - creates the MultiAgentEngine with the injected client
+    - creates the MultiAgentEngine with the LangChain-only client
     - bootstraps default agents if DB empty
     - loads agents from DB into the engine
     - stores engine into st.session_state
@@ -182,9 +175,8 @@ def app_start():
     # Initialize DB and apply migrations
     init_db(DB_FILE_PATH)
 
-    # create OpenAI client (factory)
-    openai_client = create_openai_client(OPENAI_API_KEY)
-    llm_client = LLMClient(openai_client)
+    # create LangChain-only client
+    llm_client = LLMClient()
 
     # create engine with injected client
     engine = MultiAgentEngine(llm_client=llm_client)
