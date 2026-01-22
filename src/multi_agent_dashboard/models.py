@@ -317,7 +317,7 @@ class AgentRuntime:
         if not getattr(self.llm_client, "_langchain_available", False):
             raise LLMError(
                 f"AgentRuntime.run requires LangChain-enabled LLM client for agent '{self.spec.name}'. "
-                "The legacy create_text_response fallback has been removed. Install LangChain and the provider integration (e.g., langchain-openai, langchain-ollama) and retry."
+                "Install LangChain and the provider integration (e.g., langchain-openai, langchain-ollama) and retry."
             )
 
         try:
