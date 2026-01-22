@@ -3,7 +3,6 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 import json
 import logging
-import threading
 from multi_agent_dashboard.utils import safe_format
 from multi_agent_dashboard.llm_client import LLMError
 
@@ -207,24 +206,11 @@ class AgentRuntime:
     """
     Execution wrapper.
     Holds runtime-only dependencies (LLM client, memory).
-
-    Note: this class now caches a LangChain 'agent' instance (when the LLM client
-    provides the LangChain agent path) to avoid re-creating agents on every call,
-    which in turn avoids repeatedly instantiating/attaching middleware that can
-    generate noisy warnings during long runs.
     """
     spec: AgentSpec
     llm_client: Any  # injected, intentionally untyped
     # last LLM call metrics
     last_metrics: Dict[str, Any] = field(default_factory=dict)
-
-    # Internal cache for LangChain agent instances (not part of dataclass equality / init)
-    _cached_agent: Any = field(default=None, init=False, repr=False)
-    # Response-format fingerprint used to decide whether cached agent is compatible.
-    _cached_agent_response_format: Optional[str] = field(default=None, init=False, repr=False)
-    # Lock to make cache operations thread-safe if engine is used in threaded contexts
-    _cached_agent_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
-    _cached_agent_instrumentation_attached: bool = field(default=False, init=False, repr=False)
 
     def run(
         self,
@@ -327,17 +313,6 @@ class AgentRuntime:
         except Exception:
             langchain_tools = None
 
-        # Helper: fingerprint structured_schema to decide cache compatibility.
-        def _fingerprint_schema(sch: Optional[Any]) -> Optional[str]:
-            if sch is None:
-                return None
-            try:
-                return json.dumps(sch, sort_keys=True, separators=(",", ":"), default=str)
-            except Exception:
-                return repr(sch)
-
-        requested_rf = _fingerprint_schema(structured_schema)
-
         # Enforce LangChain-only runtime: create_agent_for_spec + invoke_agent must be available.
         if not getattr(self.llm_client, "_langchain_available", False):
             raise LLMError(
@@ -346,55 +321,21 @@ class AgentRuntime:
             )
 
         try:
-            agent = None
-            # Attempt to reuse a cached agent when available and compatible with requested response format.
+            # Create a new agent instance per run (simpler and avoids cache invalidation complexity).
             try:
-                with self._cached_agent_lock:
-                    if self._cached_agent is not None and self._cached_agent_response_format == requested_rf:
-                        agent = self._cached_agent
-                        logger.debug("Reusing cached LangChain agent for %s (rf=%s)", self.spec.name, requested_rf)
-                    else:
-                        # Create and cache a new agent instance.
-                        new_agent = None
-                        # Attempt to create agent; if creation fails, propagate a clear LLMError (do not silently swallow)
-                        try:
-                                new_agent = self.llm_client.create_agent_for_spec(
-                                    self.spec,
-                                    tools=langchain_tools,
-                                    middleware=None,
-                                    response_format=structured_schema,
-                                )
-                        except Exception as e:
-                            logger.debug("create_agent_for_spec raised while creating agent for %s: %s", self.spec.name, e, exc_info=True)
-                            # Surface a typed, informative exception upward
-                            raise LLMError(f"LangChain agent creation failed for '{self.spec.name}': {e}") from e
-
-                        if new_agent is not None:
-                            self._cached_agent = new_agent
-                            self._cached_agent_response_format = requested_rf
-                            agent = new_agent
-                            logger.debug("Created and cached new LangChain agent for %s (rf=%s)", self.spec.name, requested_rf)
-            except LLMError:
-                # Propagate LLMError created above
-                raise
-            except Exception:
-                # Cache logic must be resilient; attempt non-cached creation but surface any errors clearly.
-                logger.debug("Agent cache logic failed; attempting non-cached create for %s", self.spec.name, exc_info=True)
-                try:
-                        agent = self.llm_client.create_agent_for_spec(
-                            self.spec,
-                            tools=langchain_tools,
-                            middleware=None,
-                            response_format=structured_schema,
-                        )
-                except Exception as e:
-                    logger.debug("Non-cached create_agent_for_spec failed for %s: %s", self.spec.name, e, exc_info=True)
-                    raise LLMError(f"LangChain agent creation failed for '{self.spec.name}': {e}") from e
+                agent = self.llm_client.create_agent_for_spec(
+                    self.spec,
+                    tools=langchain_tools,
+                    middleware=None,
+                    response_format=structured_schema,
+                )
+            except Exception as e:
+                logger.debug("create_agent_for_spec raised while creating agent for %s: %s", self.spec.name, e, exc_info=True)
+                raise LLMError(f"LangChain agent creation failed for '{self.spec.name}': {e}") from e
 
             if agent is None:
                 # create_agent_for_spec unexpectedly returned None (should return agent or raise)
                 raise LLMError(f"Failed to create LangChain agent for '{self.spec.name}': create_agent_for_spec returned no agent instance.")
-            self._cached_agent_instrumentation_attached = bool(getattr(agent, "_instrumentation_attached", False))
 
             # Context: pass allowed_domains/state if present so middleware / agent may use it.
             context: Dict[str, Any] = {}
@@ -650,19 +591,6 @@ class AgentRuntime:
         if not reasoning:
             return None
         return reasoning
-
-    # Helper to allow explicit cache invalidation if callers need it (e.g., spec was mutated)
-    def invalidate_cached_agent(self) -> None:
-        """
-        Clear the cached LangChain agent instance, forcing a recreate on next run.
-        """
-        try:
-            with self._cached_agent_lock:
-                self._cached_agent = None
-                self._cached_agent_response_format = None
-                logger.debug("Invalidated cached LangChain agent for %s", self.spec.name)
-        except Exception:
-            logger.debug("Failed to invalidate cached agent for %s", self.spec.name, exc_info=True)
 
 
 # -------------------------
