@@ -1068,9 +1068,9 @@ class LLMClient:
 
         New provider metadata args allow per-agent choices (OpenAI vs Ollama).
         This function now requires LangChain and the appropriate provider integrations
-        to be installed. The legacy OpenAI SDK fallback has been removed in favor of
-        a single LangChain-based code path so that instrumentation middleware and
-        content_blocks are always captured via LangChain agents/models.
+        to be installed. This uses a single LangChain-based code path so that
+        instrumentation middleware and content_blocks are captured via LangChain
+        agents/models.
         """
         # LangChain-only path
         if not self._langchain_available or self._model_factory is None:
@@ -1392,7 +1392,7 @@ class LLMClient:
         except Exception:
             pass
 
-        # Attempt to surface tool_calls (legacy name) for compatibility
+        # Attempt to surface tool_calls for compatibility
         try:
             tc = getattr(response, "tool_calls", None)
             if tc is not None and "tool_calls" not in out:
@@ -1496,11 +1496,11 @@ class LLMClient:
         _merge_agent_response(attr_agent_resp)
 
         events = out.get("instrumentation_events")
-        legacy_events = out.get("_multi_agent_dashboard_events")
-        if isinstance(legacy_events, list) and not isinstance(events, list):
-            out["instrumentation_events"] = list(legacy_events)
+        events_alt = out.get("_multi_agent_dashboard_events")
+        if isinstance(events_alt, list) and not isinstance(events, list):
+            out["instrumentation_events"] = list(events_alt)
             events = out["instrumentation_events"]
-        if isinstance(events, list) and (not isinstance(legacy_events, list) or legacy_events is not events):
+        if isinstance(events, list) and (not isinstance(events_alt, list) or events_alt is not events):
             out["_multi_agent_dashboard_events"] = list(events)
 
         return out
