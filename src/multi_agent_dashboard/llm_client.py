@@ -1,9 +1,7 @@
 # multi_agent_dashboard/llm_client.py
-import io
 import time
 import logging
 import json
-import inspect
 from typing import Any, Dict, List, Optional, Callable, Tuple
 from dataclasses import dataclass
 
@@ -1284,47 +1282,6 @@ class LLMClient:
     # Response normalization
     # -------------------------
 
-    def _extract_text(self, response: Any) -> str:
-        """
-        Best-effort text extraction across SDK versions.
-        """
-        try:
-            if hasattr(response, "output_text") and response.output_text:
-                return response.output_text
-
-            chunks: list[str] = []
-
-            if hasattr(response, "output") and response.output and isinstance(response.output, list):
-                for block in response.output:
-                    if not isinstance(block, dict):
-                        continue
-                    content = block.get("content")
-                    if isinstance(content, list):
-                        for c in content:
-                            if (
-                                isinstance(c, dict)
-                                and c.get("type") == "output_text"
-                            ):
-                                chunks.append(c.get("text", ""))
-        except Exception:
-            logger.exception("Failed to extract text from LLM response")
-            raise
-
-        if chunks:
-            return "".join(chunks)
-
-        if hasattr(response, "text"):
-            try:
-                # response.text may be callable or property
-                t = getattr(response, "text")
-                if callable(t):
-                    return t()
-                return t
-            except Exception:
-                return str(t)
-
-        return str(response)
-
     def _to_dict(self, response: Any) -> Dict[str, Any]:
         """
         Convert SDK/LangChain response into a serializable dict (best-effort),
@@ -1518,15 +1475,3 @@ class LLMClient:
             return json.loads(text)
         except Exception:
             return None
-
-    @staticmethod
-    def _looks_like_rate_limit(exc: Exception) -> bool:
-        """
-        Heuristic check to detect rate-limit-like failures
-        without importing provider-specific exception types.
-        """
-        msg = str(exc).lower()
-        return any(
-            token in msg
-            for token in ("rate limit", "too many requests", "429")
-        )

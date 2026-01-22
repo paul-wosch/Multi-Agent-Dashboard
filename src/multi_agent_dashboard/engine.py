@@ -693,15 +693,3 @@ class MultiAgentEngine:
             total_output_cost=total_output_cost,
             tool_usages=tool_usages,
         )
-
-
-# =========================
-# File Detection Helper
-# =========================
-
-def agent_requires_files(agent_runtime) -> bool:
-    try:
-        sig = inspect.signature(agent_runtime.run)
-        return "files" in sig.parameters
-    except Exception:
-        return False
