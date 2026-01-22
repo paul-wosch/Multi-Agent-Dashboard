@@ -360,32 +360,22 @@ class ChatModelFactory:
 
 class LLMClient:
     """
-    Thin, reusable wrapper around either:
-      - an OpenAI-style SDK client (legacy path), or
-      - LangChain's BaseChatModel factory (when langchain is installed).
+    Thin wrapper around LangChain's BaseChatModel factory.
 
     Responsibilities:
     - Request execution
     - Retry / backoff
-    - Capability detection
     - Response normalization
-
-    This implementation prefers LangChain when available. The legacy OpenAI SDK
-    fallback has been removed: create_text_response now requires LangChain and
-    provider integrations to be available. This avoids shipping a hidden legacy
-    code path that bypasses LangChain instrumentation middleware.
     """
 
     def __init__(
         self,
-        client: Any = None,
         *,
         timeout: float = 600.0,
         max_retries: int = 3,
         backoff_base: float = 1.5,
         on_rate_limit: Optional[Callable[[int], None]] = None,
     ):
-        self._client = client
         self._timeout = timeout
         self._max_retries = max_retries
         self._backoff_base = backoff_base
@@ -408,7 +398,7 @@ class LLMClient:
                 logger.exception("Failed to initialize ChatModelFactory; LangChain path may be disabled")
                 self._model_factory = None
 
-        self._capabilities = self._detect_capabilities()
+        self._capabilities = {"langchain", "stream", "response_format", "tools", "reasoning", "instructions"}
 
     # -------------------------
     # LangChain agent helpers
@@ -1289,154 +1279,6 @@ class LLMClient:
             logger.exception("create_text_response failed via LangChain path")
             # Propagate as typed error so callers can surface instructional message to operators
             raise LLMError("create_text_response failed via LangChain path: " + str(e)) from e
-
-    # -------------------------
-    # Capability detection
-    # -------------------------
-
-    def _detect_capabilities(self) -> set[str]:
-        """
-        Introspect the SDK/obj to see which kwargs are supported.
-        If langchain is available, we set a lightweight capability set
-        describing the LangChain path. Otherwise, inspect the legacy client.
-        """
-        caps = set()
-        if self._langchain_available:
-            # Basic indicator that we can use LangChain invoke/path
-            caps.add("langchain")
-            # We still preserve the old 'response_format'/'tools'/'stream' markers
-            caps.add("stream")
-            caps.add("response_format")
-            caps.add("tools")
-            caps.add("reasoning")
-            caps.add("instructions")
-            return caps
-
-        # Legacy detection for OpenAI SDK (best-effort)
-        try:
-            fn = getattr(self._client, "responses").create
-            sig = inspect.signature(fn)
-            caps.update(sig.parameters.keys())
-        except Exception:
-            # Fall-back: attempt to detect typical attributes on the client
-            try:
-                if hasattr(self._client, "files") and hasattr(self._client.files, "create"):
-                    caps.add("files.create")
-            except Exception:
-                pass
-        return caps
-
-    # -------------------------
-    # FILE HANDLING HELPERS
-    # -------------------------
-
-    def _upload_file(self, f: Dict[str, Any]) -> str:
-        """
-        Upload a file to OpenAI and return its file_id.
-        (legacy path only)
-        """
-        file_obj = io.BytesIO(f["content"])
-        file_obj.name = f["filename"]  # IMPORTANT: SDK reads filename from here
-
-        uploaded = self._client.files.create(
-            file=file_obj,
-            purpose="assistants",
-        )
-
-        return uploaded.id
-
-    def _build_input_with_files(self, prompt: str, files: List[Dict[str, Any]]) -> list[dict]:
-        import base64, mimetypes
-
-        def try_decode_text(b: bytes) -> Optional[str]:
-            try:
-                text = b.decode("utf-8")
-                if "\x00" in text:
-                    return None
-                return text
-            except UnicodeDecodeError:
-                try:
-                    text = b.decode("utf-8", errors="replace")
-                    if "\x00" in text:
-                        return None
-                    return text
-                except Exception:
-                    return None
-
-        def detect_mime(filename: str, b: bytes, provided: Optional[str]) -> str:
-            # prefer a non-generic provided mime
-            if provided and provided != "application/octet-stream":
-                return provided
-            guess = mimetypes.guess_type(filename)[0]
-            if guess:
-                return guess
-            if try_decode_text(b) is not None:
-                return "text/plain"
-            if b.startswith(b"%PDF"):
-                return "application/pdf"
-            if b.startswith(b"\x89PNG\r\n\x1a\n"):
-                return "image/png"
-            return provided or "application/octet-stream"
-
-        content: list[dict] = [{"type": "input_text", "text": prompt}]
-
-        for f in files:
-            file_content = f["content"]
-            filename = f.get("filename", "file")
-            provided_mime = f.get("mime_type")
-            mime = detect_mime(filename, file_content, provided_mime)
-
-            # Inline text
-            decoded = try_decode_text(file_content)
-            if decoded is not None:
-                content.append({
-                    "type": "input_text",
-                    "text": f"\n\n--- FILE: {filename} ---\n{decoded}",
-                })
-                continue
-
-            # Images -> input_image (data URI)
-            if mime and (mime.startswith("image/") or filename.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"))):
-                import base64 as _b64
-                b64 = _b64.b64encode(file_content).decode("ascii")
-                data_url = f"data:{mime or 'image/png'};base64,{b64}"
-                content.append({"type": "input_image", "image_url": data_url})
-                continue
-
-            # Try upload (preferred for PDFs/docs)
-            try:
-                file_obj = io.BytesIO(file_content)
-                file_obj.name = filename
-                uploaded = self._client.files.create(file=file_obj, purpose="user_data")
-                content.append({"type": "input_file", "file_id": uploaded.id})
-                continue
-            except Exception:
-                logger.debug("files.create failed for %s; will try base64 embed", filename, exc_info=True)
-
-            # Fallback: embed raw base64 in file_data (not a data URI)
-            try:
-                max_embed = 4 * 1024 * 1024
-                if len(file_content) <= max_embed:
-                    file_data_b64 = base64.b64encode(file_content).decode("ascii")
-                    content.append({
-                        "type": "input_file",
-                        "filename": filename,
-                        "file_data": file_data_b64,
-                    })
-                    continue
-                else:
-                    logger.warning("Skipping inlined file_data for %s (>%d bytes)", filename, max_embed)
-            except Exception:
-                logger.exception("Failed to attach %s as file_data", filename)
-
-            # Last resort: mention filename only
-            content.append({
-                "type": "input_text",
-                "text": f"\n\n--- FILE: {filename} (binary not attached) ---\n",
-            })
-
-        # Return a list of input items (wrap as a user item)
-        return [{"role": "user", "content": content}]
 
     # -------------------------
     # Response normalization
