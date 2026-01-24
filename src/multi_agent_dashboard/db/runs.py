@@ -201,7 +201,11 @@ class RunDAO:
                            model_class,
                            endpoint,
                            use_responses_api,
-                           provider_features_json
+                           provider_features_json,
+                           structured_output_enabled,
+                           schema_json,
+                           schema_name,
+                           temperature
                     FROM agent_run_configs
                     WHERE run_id = ?
                     """,
@@ -482,6 +486,10 @@ class RunDAO:
                              endpoint,
                              use_responses_api,
                              provider_features_json,
+                             structured_output_enabled,
+                             schema_json,
+                             schema_name,
+                             temperature,
                              prompt_template,
                              role,
                              input_vars,
@@ -493,7 +501,7 @@ class RunDAO:
                              reasoning_config_json,
                              extra_config_json,
                              system_prompt_template)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             run_id,
@@ -504,6 +512,10 @@ class RunDAO:
                             cfg.get("endpoint"),
                             1 if cfg.get("use_responses_api") else 0,
                             json.dumps(cfg.get("provider_features") or {}),
+                            1 if cfg.get("structured_output_enabled") else 0,
+                            cfg.get("schema_json"),
+                            cfg.get("schema_name"),
+                            cfg.get("temperature"),
                             cfg.get("prompt_template"),
                             cfg.get("role"),
                             json.dumps(cfg.get("input_vars") or []),

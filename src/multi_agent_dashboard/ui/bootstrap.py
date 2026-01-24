@@ -156,6 +156,10 @@ def reload_agents_into_engine():
             endpoint=a.get("endpoint"),
             use_responses_api=bool(a.get("use_responses_api")),
             provider_features=a.get("provider_features") or {},
+            structured_output_enabled=bool(a.get("structured_output_enabled")),
+            schema_json=a.get("schema_json"),
+            schema_name=a.get("schema_name"),
+            temperature=a.get("temperature"),
         )
         engine.add_agent(spec)
 

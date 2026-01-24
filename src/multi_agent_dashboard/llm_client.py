@@ -186,7 +186,7 @@ class ChatModelFactory:
             raise RuntimeError("LangChain not available; cannot create ChatModelFactory without init function.")
         self._init_fn = init_fn or _init_chat_model
         # include timeout as final component in key tuple (Optional[float])
-        self._cache: Dict[Tuple[str, str, Optional[str], bool, Optional[str], str, Optional[float]], Any] = {}
+        self._cache: Dict[Tuple[str, str, Optional[str], bool, Optional[str], str, Optional[float], Optional[float]], Any] = {}
 
 
     def _key(
@@ -198,7 +198,8 @@ class ChatModelFactory:
         model_class: Optional[str],
         provider_features: Optional[Dict[str, Any]] = None,
         timeout: Optional[float] = None,
-    ) -> Tuple[str, str, Optional[str], bool, Optional[str], str, Optional[float]]:
+        temperature: Optional[float] = None,
+    ) -> Tuple[str, str, Optional[str], bool, Optional[str], str, Optional[float], Optional[float]]:
         """
         Build a stable cache key for a chat model, including a fingerprint of provider_features
         and the timeout so that changes to capability hints or per-call timeout cause a fresh
@@ -227,6 +228,13 @@ class ChatModelFactory:
             except Exception:
                 timeout_val = None
 
+        temp_val: Optional[float] = None
+        if temperature is not None:
+            try:
+                temp_val = float(temperature)
+            except Exception:
+                temp_val = None
+
         return (
             model or "",
             provider_id or "",
@@ -235,6 +243,7 @@ class ChatModelFactory:
             model_class or "",
             features_key,
             timeout_val,
+            temp_val,
         )
 
 
@@ -248,6 +257,7 @@ class ChatModelFactory:
         model_class: Optional[str] = None,
         provider_features: Optional[Dict[str, Any]] = None,
         timeout: Optional[float] = None,
+        temperature: Optional[float] = None,
     ):
         """
         Return a LangChain chat model instance for the provided metadata.
@@ -268,6 +278,7 @@ class ChatModelFactory:
             model_class,
             provider_features,
             timeout=timeout,
+            temperature=temperature,
         )
         if key in self._cache:
             return self._cache[key]
@@ -302,6 +313,12 @@ class ChatModelFactory:
         if provider_features:
             # Some providers accept a 'profile' or 'model_profile' kwarg; pass under 'profile' and let integration ignore unknown keys.
             init_kwargs["profile"] = provider_features
+
+        if temperature is not None:
+            try:
+                init_kwargs["temperature"] = float(temperature)
+            except Exception:
+                init_kwargs["temperature"] = temperature
 
         model_provider = provider_id or None
 
@@ -424,6 +441,7 @@ class LLMClient:
             model_class=getattr(spec, "model_class", None),
             provider_features=getattr(spec, "provider_features", None),
             timeout=timeout or self._timeout,
+            temperature=getattr(spec, "temperature", None),
         )
 
         # Normalize middleware list and instantiate classes when provided.

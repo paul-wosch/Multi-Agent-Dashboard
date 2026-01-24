@@ -199,6 +199,11 @@ class AgentSpec:
     endpoint: Optional[str] = None          # optional host/URL override
     use_responses_api: bool = False         # whether to prefer Responses API or equivalent
     provider_features: Dict[str, Any] = field(default_factory=dict)  # capability hints
+    # Structured output configuration (provider-agnostic)
+    structured_output_enabled: bool = False
+    schema_json: Optional[str] = None
+    schema_name: Optional[str] = None
+    temperature: Optional[float] = None
 
 
 @dataclass

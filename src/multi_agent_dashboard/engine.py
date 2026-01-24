@@ -544,6 +544,11 @@ class MultiAgentEngine:
                 "use_responses_api": bool(getattr(agent.spec, "use_responses_api", False)),
                 # Persist provider feature hints (explicit OR derived)
                 "provider_features": provider_features_to_store,
+                # Structured output configuration (provider-agnostic)
+                "structured_output_enabled": bool(getattr(agent.spec, "structured_output_enabled", False)),
+                "schema_json": getattr(agent.spec, "schema_json", None),
+                "schema_name": getattr(agent.spec, "schema_name", None),
+                "temperature": getattr(agent.spec, "temperature", None),
             }
 
             # -------------------------

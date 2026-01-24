@@ -96,6 +96,10 @@ def render_agent_editor():
             "endpoint": a.get("endpoint"),
             "use_responses_api": a.get("use_responses_api"),
             "provider_features": a.get("provider_features") or {},
+            "structured_output_enabled": bool(a.get("structured_output_enabled")),
+            "schema_json": a.get("schema_json") or "",
+            "schema_name": a.get("schema_name") or "",
+            "temperature": a.get("temperature"),
         }
         for a in agents_raw
     ]
@@ -151,6 +155,10 @@ def render_agent_editor():
             "endpoint_port": None,
             "use_responses_api": True,
             "provider_features": {},
+            "structured_output_enabled": False,
+            "schema_json": "",
+            "schema_name": "",
+            "temperature": None,
         }
     state = st.session_state.agent_editor_state
 
@@ -202,6 +210,10 @@ def render_agent_editor():
                 "endpoint_port": None,
                 "use_responses_api": True,
                 "provider_features": {},
+                "structured_output_enabled": False,
+                "schema_json": "",
+                "schema_name": "",
+                "temperature": None,
             }
         else:
             base_agent = next(a for a in agents if a["name"] == selected)
@@ -233,6 +245,10 @@ def render_agent_editor():
                 "endpoint_port": str(port) if port is not None else None,
                 "use_responses_api": bool(base_agent.get("use_responses_api")),
                 "provider_features": base_agent.get("provider_features") or {},
+                "structured_output_enabled": bool(base_agent.get("structured_output_enabled")),
+                "schema_json": base_agent.get("schema_json") or "",
+                "schema_name": base_agent.get("schema_name") or "",
+                "temperature": base_agent.get("temperature"),
             }
         )
 
@@ -644,6 +660,42 @@ def render_agent_editor():
         provider_feats["tool_calling"] = bool(tool_calling_checked)
         provider_feats["reasoning"] = bool(reasoning_checked)
 
+        st.markdown("#### Structured output settings")
+        st.caption("Provider-agnostic controls for schema-based output enforcement.")
+
+        structured_enabled = st.checkbox(
+            "Enable structured output enforcement",
+            value=bool(state.get("structured_output_enabled")),
+            help="When enabled, the runtime will attempt provider-specific structured output enforcement.",
+        )
+
+        schema_name_val = st.text_input(
+            "Schema name (optional)",
+            value=state.get("schema_name") or "",
+            help="Optional registry key for a reusable schema (Pydantic/Zod).",
+        )
+
+        schema_json_val = st.text_area(
+            "Schema JSON (optional)",
+            value=state.get("schema_json") or "",
+            height=140,
+            help="JSON Schema used to validate/enforce structured output.",
+        )
+
+        temperature_val = st.number_input(
+            "Temperature",
+            min_value=0.0,
+            max_value=2.0,
+            value=float(state.get("temperature") or 0.0),
+            step=0.1,
+            help="Lower values (e.g., 0) improve structured output reliability.",
+        )
+
+        state["structured_output_enabled"] = bool(structured_enabled)
+        state["schema_name"] = schema_name_val or ""
+        state["schema_json"] = schema_json_val or ""
+        state["temperature"] = float(temperature_val)
+
         st.markdown("#### Capability summary")
         caps = []
         if provider_feats.get("structured_output"):
@@ -894,6 +946,10 @@ def render_agent_editor():
                     endpoint=ep,
                     use_responses_api=bool(state.get("use_responses_api")),
                     provider_features=provider_features_to_save,
+                    structured_output_enabled=bool(state.get("structured_output_enabled")),
+                    schema_json=state.get("schema_json") or None,
+                    schema_name=state.get("schema_name") or None,
+                    temperature=state.get("temperature"),
                 )
             except Exception:
                 logger.exception("Failed to save agent")
@@ -930,6 +986,10 @@ def render_agent_editor():
                     endpoint=state.get("endpoint"),
                     use_responses_api=bool(state.get("use_responses_api")),
                     provider_features=state.get("provider_features"),
+                    structured_output_enabled=bool(state.get("structured_output_enabled")),
+                    schema_json=state.get("schema_json") or None,
+                    schema_name=state.get("schema_name") or None,
+                    temperature=state.get("temperature"),
                 )
             except Exception:
                 logger.exception("Failed to duplicate agent")

@@ -70,6 +70,11 @@ SCHEMA = {
             "endpoint": "TEXT",                       # optional host/URL override
             "use_responses_api": "INTEGER DEFAULT 1", # boolean flag (0/1)
             "provider_features_json": "TEXT",         # JSON-encoded capability hints (structured_output, tool_calling, etc.)
+            # structured output configuration
+            "structured_output_enabled": "INTEGER DEFAULT 0",  # boolean flag (0/1)
+            "schema_json": "TEXT",                   # JSON Schema for structured outputs
+            "schema_name": "TEXT",                   # Optional schema registry name
+            "temperature": "REAL",                   # Optional temperature override
             # tool & reasoning config (backward compatible: all nullable/text)
             "tools_json": "TEXT",
             # Reasoning effort: none|low|medium|high|xhigh
@@ -128,6 +133,11 @@ SCHEMA = {
             "endpoint": "TEXT",
             "use_responses_api": "INTEGER DEFAULT 1",
             "provider_features_json": "TEXT",
+            # structured output configuration captured at run time
+            "structured_output_enabled": "INTEGER DEFAULT 0",
+            "schema_json": "TEXT",
+            "schema_name": "TEXT",
+            "temperature": "REAL",
             "prompt_template": "TEXT",
             "role": "TEXT",
             # JSON-encoded lists of variable names at the time of the run

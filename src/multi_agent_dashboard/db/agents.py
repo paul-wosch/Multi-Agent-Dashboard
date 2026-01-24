@@ -79,7 +79,11 @@ class AgentDAO:
                            model_class,
                            endpoint,
                            use_responses_api,
-                           provider_features_json
+                           provider_features_json,
+                           structured_output_enabled,
+                           schema_json,
+                           schema_name,
+                           temperature
                     FROM agents
                     """
                 ).fetchall()
@@ -110,6 +114,10 @@ class AgentDAO:
                     "endpoint": row["endpoint"],
                     "use_responses_api": bool(row["use_responses_api"]) if row["use_responses_api"] is not None else False,
                     "provider_features": safe_json_loads(row["provider_features_json"], {}),
+                    "structured_output_enabled": bool(row["structured_output_enabled"]) if row["structured_output_enabled"] is not None else False,
+                    "schema_json": row["schema_json"],
+                    "schema_name": row["schema_name"],
+                    "temperature": row["temperature"],
                 }
             )
         return agents
@@ -140,7 +148,11 @@ class AgentDAO:
                            model_class,
                            endpoint,
                            use_responses_api,
-                           provider_features_json
+                           provider_features_json,
+                           structured_output_enabled,
+                           schema_json,
+                           schema_name,
+                           temperature
                     FROM agents
                     WHERE agent_name = ?
                     """,
@@ -173,6 +185,10 @@ class AgentDAO:
             "endpoint": row["endpoint"],
             "use_responses_api": bool(row["use_responses_api"]) if row["use_responses_api"] is not None else False,
             "provider_features": safe_json_loads(row["provider_features_json"], {}),
+            "structured_output_enabled": bool(row["structured_output_enabled"]) if row["structured_output_enabled"] is not None else False,
+            "schema_json": row["schema_json"],
+            "schema_name": row["schema_name"],
+            "temperature": row["temperature"],
         }
 
     # -----------------------
@@ -320,6 +336,11 @@ class AgentDAO:
             endpoint: Optional[str] = None,
             use_responses_api: bool = False,
             provider_features: Optional[dict] = None,
+            # Structured output config
+            structured_output_enabled: bool = False,
+            schema_json: Optional[str] = None,
+            schema_name: Optional[str] = None,
+            temperature: Optional[float] = None,
     ) -> None:
         input_json = json.dumps(input_vars or [])
         output_json = json.dumps(output_vars or [])
@@ -350,11 +371,15 @@ class AgentDAO:
                          endpoint,
                          use_responses_api,
                          provider_features_json,
+                         structured_output_enabled,
+                         schema_json,
+                         schema_name,
+                         temperature,
                          tools_json,
                          reasoning_effort,
                          reasoning_summary,
                          system_prompt_template)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         agent_name,
@@ -370,6 +395,10 @@ class AgentDAO:
                         endpoint,
                         1 if use_responses_api else 0,
                         provider_features_json,
+                        1 if structured_output_enabled else 0,
+                        schema_json,
+                        schema_name,
+                        temperature,
                         tools_json,
                         reasoning_effort,
                         reasoning_summary,

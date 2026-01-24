@@ -97,6 +97,11 @@ class AgentService:
             endpoint: Optional[str] = None,
             use_responses_api: bool = False,
             provider_features: Optional[dict] = None,
+            # Structured output config
+            structured_output_enabled: bool = False,
+            schema_json: Optional[str] = None,
+            schema_name: Optional[str] = None,
+            temperature: Optional[float] = None,
     ) -> None:
         """
         Save an agent non-atomically. Detect provider metadata changes and, if
@@ -123,6 +128,10 @@ class AgentService:
             endpoint=endpoint,
             use_responses_api=use_responses_api,
             provider_features=provider_features,
+            structured_output_enabled=structured_output_enabled,
+            schema_json=schema_json,
+            schema_name=schema_name,
+            temperature=temperature,
         )
 
         # Decide whether provider metadata changed (or a new agent created).
@@ -193,6 +202,11 @@ class AgentService:
             endpoint: Optional[str] = None,
             use_responses_api: bool = False,
             provider_features: Optional[dict] = None,
+            # Structured output config
+            structured_output_enabled: bool = False,
+            schema_json: Optional[str] = None,
+            schema_name: Optional[str] = None,
+            temperature: Optional[float] = None,
     ) -> None:
         """Atomically save agent metadata. The legacy 'prompt version' system
         has been removed in favour of agent snapshots. The `save_prompt_version`
@@ -216,12 +230,16 @@ class AgentService:
                 reasoning_effort=reasoning_effort,
                 reasoning_summary=reasoning_summary,
                 system_prompt_template=system_prompt,
-                provider_id=provider_id,
-                model_class=model_class,
-                endpoint=endpoint,
-                use_responses_api=use_responses_api,
-                provider_features=provider_features,
-            )
+            provider_id=provider_id,
+            model_class=model_class,
+            endpoint=endpoint,
+            use_responses_api=use_responses_api,
+            provider_features=provider_features,
+            structured_output_enabled=structured_output_enabled,
+            schema_json=schema_json,
+            schema_name=schema_name,
+            temperature=temperature,
+        )
 
             # Optional automatic snapshot (configurable)
             if AGENT_SNAPSHOTS_AUTO:
