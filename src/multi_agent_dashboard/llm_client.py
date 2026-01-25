@@ -637,6 +637,27 @@ class LLMClient:
                 for chunk in self._inner.stream(*args, **kwargs):
                     yield _wrap_result(chunk)
 
+            def bind(self, *args, **kwargs):
+                try:
+                    bound = self._inner.bind(*args, **kwargs)
+                except Exception:
+                    bound = self._inner
+                return _StructuredOutputMessageAdapter(bound)
+
+            def bind_tools(self, *args, **kwargs):
+                try:
+                    bound = self._inner.bind_tools(*args, **kwargs)
+                except Exception:
+                    bound = self._inner
+                return _StructuredOutputMessageAdapter(bound)
+
+            def with_config(self, *args, **kwargs):
+                try:
+                    bound = self._inner.with_config(*args, **kwargs)
+                except Exception:
+                    bound = self._inner
+                return _StructuredOutputMessageAdapter(bound)
+
             def __getattr__(self, name: str):
                 return getattr(self._inner, name)
 
