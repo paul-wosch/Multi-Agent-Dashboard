@@ -20,12 +20,13 @@ _LANGCHAIN_AVAILABLE = False
 _init_chat_model = None
 _SystemMessage = None
 _HumanMessage = None
+_AIMessage = None
 _create_agent = None
 _AgentMiddleware = None
 
 try:
     from langchain.chat_models import init_chat_model  # type: ignore
-    from langchain.messages import SystemMessage, HumanMessage  # type: ignore
+    from langchain.messages import SystemMessage, HumanMessage, AIMessage  # type: ignore
     from langchain.agents import create_agent  # type: ignore
     from langchain.agents.middleware import AgentMiddleware  # type: ignore
 
@@ -33,6 +34,7 @@ try:
     _init_chat_model = init_chat_model
     _SystemMessage = SystemMessage
     _HumanMessage = HumanMessage
+    _AIMessage = AIMessage
     _create_agent = create_agent
     _AgentMiddleware = AgentMiddleware
 except Exception:
@@ -41,6 +43,7 @@ except Exception:
     _init_chat_model = None
     _SystemMessage = None
     _HumanMessage = None
+    _AIMessage = None
     _create_agent = None
     _AgentMiddleware = None
 
@@ -453,6 +456,10 @@ class LLMClient:
                 structured = getattr(model_instance, "with_structured_output", None)
                 if callable(structured):
                     model_instance = structured(response_format, method="json_schema")
+
+                    # Wrap structured output dicts into AIMessage so LangChain agents
+                    # do not attempt to coerce dicts into messages and fail.
+                    model_instance = self._wrap_structured_output_model(model_instance)
             except Exception:
                 logger.debug("with_structured_output failed for ollama; falling back to prompt-only", exc_info=True)
 
@@ -581,6 +588,59 @@ class LLMClient:
         except Exception as e:
             logger.debug("create_agent_for_spec failed for spec=%s: %s", getattr(spec, "name", "<unnamed>"), e, exc_info=True)
             raise
+
+    def _wrap_structured_output_model(self, model_instance: Any) -> Any:
+        """
+        Wrap a chat model that returns structured dicts so the agent pipeline
+        always receives a BaseMessage (AIMessage) or role/content dict.
+        """
+        def _normalize_payload(value: Any) -> Optional[Dict[str, Any]]:
+            if isinstance(value, dict):
+                return value
+            if hasattr(value, "model_dump"):
+                try:
+                    payload = value.model_dump()
+                    return payload if isinstance(payload, dict) else None
+                except Exception:
+                    return None
+            if hasattr(value, "dict"):
+                try:
+                    payload = value.dict()
+                    return payload if isinstance(payload, dict) else None
+                except Exception:
+                    return None
+            return None
+
+        def _wrap_result(result: Any) -> Any:
+            payload = _normalize_payload(result)
+            if payload is None:
+                return result
+            # If the payload already looks like a message dict, pass through.
+            if "role" in payload and "content" in payload:
+                return payload
+            content = json.dumps(payload)
+            if _AIMessage is not None:
+                return _AIMessage(content=content, additional_kwargs={"structured_response": payload})
+            return {"role": "assistant", "content": content, "structured_response": payload}
+
+        class _StructuredOutputMessageAdapter:
+            def __init__(self, inner: Any):
+                self._inner = inner
+
+            def invoke(self, *args, **kwargs):
+                return _wrap_result(self._inner.invoke(*args, **kwargs))
+
+            async def ainvoke(self, *args, **kwargs):
+                return _wrap_result(await self._inner.ainvoke(*args, **kwargs))
+
+            def stream(self, *args, **kwargs):
+                for chunk in self._inner.stream(*args, **kwargs):
+                    yield _wrap_result(chunk)
+
+            def __getattr__(self, name: str):
+                return getattr(self._inner, name)
+
+        return _StructuredOutputMessageAdapter(model_instance)
 
     def _build_structured_output_adapter(self, spec, response_format: Optional[Any]) -> Optional[Any]:
         """
