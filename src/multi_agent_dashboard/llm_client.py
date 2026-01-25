@@ -4,6 +4,7 @@ import logging
 import json
 from typing import Any, Dict, List, Optional, Callable, Tuple
 from dataclasses import dataclass
+from multi_agent_dashboard.structured_schemas import resolve_schema_json
 
 logger = logging.getLogger(__name__)
 
@@ -444,6 +445,17 @@ class LLMClient:
             temperature=getattr(spec, "temperature", None),
         )
 
+        # Provider-agnostic structured output adapter
+        response_format = self._build_structured_output_adapter(spec, response_format)
+        provider_id = (getattr(spec, "provider_id", None) or "").lower()
+        if response_format is not None and provider_id == "ollama":
+            try:
+                structured = getattr(model_instance, "with_structured_output", None)
+                if callable(structured):
+                    model_instance = structured(response_format, method="json_schema")
+            except Exception:
+                logger.debug("with_structured_output failed for ollama; falling back to prompt-only", exc_info=True)
+
         # Normalize middleware list and instantiate classes when provided.
         middleware_list: List[Any] = []
         for mw in (middleware or []):
@@ -535,7 +547,7 @@ class LLMClient:
                 tools=tools or [],
                 system_prompt=getattr(spec, "system_prompt_template", None),
                 middleware=middleware_list,
-                response_format=response_format,
+                response_format=response_format if provider_id == "openai" else None,
             )
             # Annotate agent with instrumentation/profile hints for downstream runtime checks
             try:
@@ -569,6 +581,37 @@ class LLMClient:
         except Exception as e:
             logger.debug("create_agent_for_spec failed for spec=%s: %s", getattr(spec, "name", "<unnamed>"), e, exc_info=True)
             raise
+
+    def _build_structured_output_adapter(self, spec, response_format: Optional[Any]) -> Optional[Any]:
+        """
+        Centralized provider-agnostic structured output adapter.
+        Returns provider-specific response_format payload or schema for Ollama.
+        """
+        if response_format is not None:
+            return response_format
+        if not getattr(spec, "structured_output_enabled", False):
+            return None
+        schema = resolve_schema_json(
+            getattr(spec, "schema_json", None),
+            getattr(spec, "schema_name", None),
+        )
+        if not schema:
+            return None
+        provider_id = (getattr(spec, "provider_id", None) or "").lower()
+        if provider_id == "openai":
+            return {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": getattr(spec, "schema_name", None) or "schema",
+                    "schema": schema,
+                },
+            }
+        if provider_id == "ollama":
+            return schema
+        if provider_id == "deepseek":
+            # Placeholder for future mapping; falls back to prompt-only + validation
+            return None
+        return None
 
 
     def invoke_agent(
