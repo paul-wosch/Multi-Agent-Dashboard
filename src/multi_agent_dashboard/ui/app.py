@@ -244,6 +244,12 @@ strict_mode = st.sidebar.checkbox(
     help="Fail fast on agent output mismatches",
 )
 
+strict_schema_validation = st.sidebar.checkbox(
+    "Strict schema validation",
+    value=False,
+    help="Fail fast when structured output JSON does not match schema (skips remaining agents).",
+)
+
 st.divider()
 
 # Import per-mode renderers (extracted into dedicated modules in Phase 4)
@@ -257,7 +263,7 @@ from multi_agent_dashboard.ui.logging_ui import render_logs_mode
 # ======================================================
 
 if mode == MODE_RUN:
-    render_run_mode(strict_mode=strict_mode)
+    render_run_mode(strict_mode=strict_mode, strict_schema_validation=strict_schema_validation)
 elif mode == MODE_AGENTS:
     render_agent_editor()
 elif mode == MODE_HISTORY:

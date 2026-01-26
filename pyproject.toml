@@ -16,6 +16,7 @@ dependencies = [
     "langchain-openai==1.1.7",
     "openai==2.9.0",
     "python-dotenv==1.2.1",
+    "jsonschema==4.23.0",
     "streamlit==1.52.1",
 ]
 

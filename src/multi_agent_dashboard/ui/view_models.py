@@ -43,6 +43,9 @@ class AgentConfigView(NamedTuple):
     raw_tools_config: Optional[dict] = None
     raw_reasoning_config: Optional[dict] = None
     raw_extra_config: Optional[dict] = None
+    # Schema validation flags (observability)
+    schema_validation_failed: bool = False
+    strict_schema_validation: bool = False
 
 
 def summarize_agent_metrics(
@@ -287,6 +290,8 @@ def config_view_from_db_rows(
                 raw_tools_config=parsed["tools_config_json"] or None,
                 raw_reasoning_config=parsed["reasoning_config_json"] or None,
                 raw_extra_config=parsed["extra_config_json"] or None,
+                schema_validation_failed=bool(a.get("schema_validation_failed")),
+                strict_schema_validation=bool(cfg.get("strict_schema_validation")),
             )
         )
     return views

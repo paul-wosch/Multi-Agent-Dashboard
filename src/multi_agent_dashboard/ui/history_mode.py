@@ -117,6 +117,10 @@ def render_history_mode():
     final_is_json = run["final_is_json"]
     final_model = run["final_model"]
 
+    # Run-level badge for strict schema exit
+    if run.get("strict_schema_exit"):
+        st.warning("This run exited early due to strict schema validation.")
+
     # Shared cost & latency rendering for stored metrics
     # Pass agent_run_configs so we can populate the Model column for historic runs.
     metrics_view = metrics_view_from_db_rows(metrics, agent_run_configs)
@@ -292,6 +296,8 @@ def render_history_mode():
                 "use_responses_api": bool(cfg.get("use_responses_api")),
                 "provider_features": provider_feats or None,
             },
+            "schema_validation_failed": bool(a.get("schema_validation_failed")),
+            "strict_schema_validation": bool(cfg.get("strict_schema_validation")),
         }
 
         # Also explicitly expose content_blocks and instrumentation events if present in extra_config_json:
@@ -329,6 +335,7 @@ def render_history_mode():
             "total_output_cost": round(total_output_cost, 6),
             "total_cost": round(total_cost, 6),
         },
+        "strict_schema_exit": bool(run.get("strict_schema_exit")),
         "task_input": task,
         "final_output": {
             "output": final,

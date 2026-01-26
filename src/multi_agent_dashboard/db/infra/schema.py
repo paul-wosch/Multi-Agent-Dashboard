@@ -16,6 +16,8 @@ SCHEMA = {
             "final_output": "TEXT",
             "final_is_json": "INTEGER DEFAULT 0",
             "final_model": "TEXT",
+            # Set when pipeline exited early due to strict schema validation
+            "strict_schema_exit": "INTEGER DEFAULT 0",
         },
     },
 
@@ -27,6 +29,8 @@ SCHEMA = {
             "output": "TEXT",
             "is_json": "INTEGER DEFAULT 0",
             "model": "TEXT",
+            # Flag that schema validation failed for this agent output
+            "schema_validation_failed": "INTEGER DEFAULT 0",
         },
 
         "constraints": {
@@ -138,6 +142,7 @@ SCHEMA = {
             "schema_json": "TEXT",
             "schema_name": "TEXT",
             "temperature": "REAL",
+            "strict_schema_validation": "INTEGER DEFAULT 0",
             "prompt_template": "TEXT",
             "role": "TEXT",
             # JSON-encoded lists of variable names at the time of the run

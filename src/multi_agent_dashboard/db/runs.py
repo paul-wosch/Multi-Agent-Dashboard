@@ -138,7 +138,7 @@ class RunDAO:
             with self._connection() as conn:
                 run = conn.execute(
                     """
-                    SELECT timestamp, task_input, final_output, final_is_json, final_model
+                    SELECT timestamp, task_input, final_output, final_is_json, final_model, strict_schema_exit
                     FROM runs
                     WHERE id = ?
                     """,
@@ -147,7 +147,7 @@ class RunDAO:
 
                 agents = conn.execute(
                     """
-                    SELECT agent_name, output, is_json, model
+                    SELECT agent_name, output, is_json, model, schema_validation_failed
                     FROM agent_outputs
                     WHERE run_id = ?
                     """,
@@ -205,7 +205,8 @@ class RunDAO:
                            structured_output_enabled,
                            schema_json,
                            schema_name,
-                           temperature
+                           temperature,
+                           strict_schema_validation
                     FROM agent_run_configs
                     WHERE run_id = ?
                     """,
@@ -383,12 +384,15 @@ class RunDAO:
             agent_configs: Dict[str, Dict[str, Any]] | None = None,
             agent_metrics: Dict[str, Dict[str, Any]] | None = None,
             tool_usages: Dict[str, List[Dict[str, Any]]] | None = None,
+            strict_schema_exit: bool = False,
+            agent_schema_validation_failed: Dict[str, bool] | None = None,
     ) -> int:
         ts = datetime.now(timezone.utc).isoformat()
         agent_models = agent_models or {}
         agent_configs = agent_configs or {}
         agent_metrics = agent_metrics or {}
         tool_usages = tool_usages or {}
+        agent_schema_validation_failed = agent_schema_validation_failed or {}
 
         if isinstance(final_output, str):
             final_text = final_output
@@ -409,10 +413,10 @@ class RunDAO:
                 c.execute(
                     """
                     INSERT INTO runs
-                        (timestamp, task_input, final_output, final_is_json, final_model)
-                    VALUES (?, ?, ?, ?, ?)
+                        (timestamp, task_input, final_output, final_is_json, final_model, strict_schema_exit)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     """,
-                    (ts, task_input, final_text, final_is_json, final_model),
+                    (ts, task_input, final_text, final_is_json, final_model, 1 if strict_schema_exit else 0),
                 )
                 run_id = c.lastrowid
 
@@ -432,8 +436,8 @@ class RunDAO:
                     c.execute(
                         """
                         INSERT INTO agent_outputs
-                            (run_id, agent_name, output, is_json, model)
-                        VALUES (?, ?, ?, ?, ?)
+                            (run_id, agent_name, output, is_json, model, schema_validation_failed)
+                        VALUES (?, ?, ?, ?, ?, ?)
                         """,
                         (
                             run_id,
@@ -441,6 +445,7 @@ class RunDAO:
                             raw,
                             is_json,
                             agent_models.get(agent),
+                            1 if agent_schema_validation_failed.get(agent) else 0,
                         ),
                     )
 
@@ -490,6 +495,7 @@ class RunDAO:
                              schema_json,
                              schema_name,
                              temperature,
+                             strict_schema_validation,
                              prompt_template,
                              role,
                              input_vars,
@@ -501,7 +507,7 @@ class RunDAO:
                              reasoning_config_json,
                              extra_config_json,
                              system_prompt_template)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             run_id,
@@ -516,6 +522,7 @@ class RunDAO:
                             cfg.get("schema_json"),
                             cfg.get("schema_name"),
                             cfg.get("temperature"),
+                            1 if cfg.get("strict_schema_validation") else 0,
                             cfg.get("prompt_template"),
                             cfg.get("role"),
                             json.dumps(cfg.get("input_vars") or []),

@@ -94,7 +94,22 @@ def render_agent_config_section(
     }
 
     for cfg in config_view:
-        with st.expander(f"{cfg.agent_name} — Configuration", expanded=False):
+        title_badges = []
+        if cfg.strict_schema_validation:
+            title_badges.append("[strict schema]")
+        if cfg.schema_validation_failed:
+            title_badges.append("[schema failed]")
+        badge_suffix = f" {' '.join(title_badges)}" if title_badges else ""
+
+        with st.expander(f"{cfg.agent_name} — Configuration{badge_suffix}", expanded=False):
+            if cfg.schema_validation_failed or cfg.strict_schema_validation:
+                badge_parts = []
+                if cfg.strict_schema_validation:
+                    badge_parts.append("`Strict schema validation: on`")
+                if cfg.schema_validation_failed:
+                    badge_parts.append(":warning: `Schema validation failed`")
+                st.markdown(" ".join(badge_parts))
+
             # Model & role
             st.markdown(f"**Model:** `{cfg.model}`")
             st.markdown(f"**Role:** {cfg.role}")

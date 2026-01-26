@@ -28,6 +28,8 @@ class RunService:
             agent_configs: Optional[Dict[str, Dict[str, Any]]] = None,
             agent_metrics: Optional[Dict[str, Dict[str, Any]]] = None,
             tool_usages: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+            strict_schema_exit: bool = False,
+            agent_schema_validation_failed: Optional[Dict[str, bool]] = None,
     ) -> int:
         with run_dao(self.db_path) as dao:
             run_id = dao.save(
@@ -39,6 +41,8 @@ class RunService:
                 agent_configs=agent_configs,
                 agent_metrics=agent_metrics,
                 tool_usages=tool_usages,
+                strict_schema_exit=strict_schema_exit,
+                agent_schema_validation_failed=agent_schema_validation_failed,
             )
             return run_id
 

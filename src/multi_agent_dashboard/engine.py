@@ -7,9 +7,12 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Callable
 
+from jsonschema import validate as jsonschema_validate, ValidationError  # type: ignore
+
 from multi_agent_dashboard.config import OPENAI_PRICING
 from multi_agent_dashboard.models import AgentSpec, AgentRuntime
 from multi_agent_dashboard.llm_client import LLMClient
+from multi_agent_dashboard.structured_schemas import resolve_schema_json
 
 logger = logging.getLogger(__name__)
 
@@ -188,6 +191,9 @@ class EngineResult:
     total_output_cost: float = 0.0
     # per-agent tool usage, as parsed from LLM responses
     tool_usages: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
+    # schema validation flags
+    strict_schema_exit: bool = False
+    agent_schema_validation_failed: Dict[str, bool] = field(default_factory=dict)
 
 
 # =========================
@@ -296,6 +302,7 @@ class MultiAgentEngine:
         steps: List[str],
         initial_input: Any,
         strict: bool = False,
+        strict_schema_validation: bool = False,
         last_agent: Optional[str] = None,
         files: Optional[List[Dict[str, Any]]] = None,
         # Can be either:
@@ -325,6 +332,9 @@ class MultiAgentEngine:
         tool_usages: Dict[str, List[Dict[str, Any]]] = {}
         # Per-agent configuration snapshot filled as agents run
         agent_configs: Dict[str, Dict[str, Any]] = {}
+        # Strict schema validation flags
+        strict_schema_exit = False
+        agent_schema_validation_failed: Dict[str, bool] = {}
 
         # Store initial files in state so all agents can access
         if files:
@@ -549,6 +559,7 @@ class MultiAgentEngine:
                 "schema_json": getattr(agent.spec, "schema_json", None),
                 "schema_name": getattr(agent.spec, "schema_name", None),
                 "temperature": getattr(agent.spec, "temperature", None),
+                "strict_schema_validation": bool(strict_schema_validation),
             }
 
             # -------------------------
@@ -662,6 +673,41 @@ class MultiAgentEngine:
             else:
                 self.state[agent_name] = raw_output
 
+            # ---- Strict schema validation (no retry, early exit) ----
+            if getattr(agent.spec, "structured_output_enabled", False) and strict_schema_validation:
+                schema = resolve_schema_json(
+                    getattr(agent.spec, "schema_json", None),
+                    getattr(agent.spec, "schema_name", None),
+                )
+                if schema:
+                    candidate = parsed if isinstance(parsed, dict) else LLMClient.safe_json(raw_output) if isinstance(raw_output, str) else None
+                    valid = True
+                    err_msg = ""
+                    if candidate is None:
+                        valid = False
+                        err_msg = "No JSON payload to validate"
+                    else:
+                        try:
+                            jsonschema_validate(candidate, schema)
+                        except ValidationError as ve:
+                            valid = False
+                            err_msg = str(ve).splitlines()[0]
+                        except Exception as ve:
+                            valid = False
+                            err_msg = str(ve)
+
+                    if not valid:
+                        strict_schema_exit = True
+                        agent_schema_validation_failed[agent_name] = True
+                        logger.error(
+                            "[%s] Schema validation failed (strict); output preserved. Advice: try lower temperature, adjust prompt, or pick another model. Error: %s",
+                            agent_name,
+                            err_msg,
+                        )
+                        self._warn(f"[{agent_name}] schema validation failed (strict): {err_msg}")
+                        # Exit early: skip remaining agents, keep observability/costs
+                        break
+
             # ---- Progress bar: agent end ----
             end_tick = 2 * i + 2
             end_pct = int(100 * end_tick / total_ticks)
@@ -697,4 +743,6 @@ class MultiAgentEngine:
             total_input_cost=total_input_cost,
             total_output_cost=total_output_cost,
             tool_usages=tool_usages,
+            strict_schema_exit=strict_schema_exit,
+            agent_schema_validation_failed=agent_schema_validation_failed,
         )

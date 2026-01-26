@@ -550,6 +550,8 @@ def config_view_from_engine_result(
                 raw_tools_config=raw_tools_config or None,
                 raw_reasoning_config=raw_reasoning_config or None,
                 raw_extra_config=raw_extra_config or None,
+                schema_validation_failed=bool((result.agent_schema_validation_failed or {}).get(name)),
+                strict_schema_validation=bool((result.agent_configs or {}).get(name, {}).get("strict_schema_validation")),
             )
         )
     return views
@@ -594,7 +596,7 @@ def render_run_results(
         render_tools_advanced_tab(result, steps)
 
 
-def render_run_mode(strict_mode: bool = False):
+def render_run_mode(strict_mode: bool = False, strict_schema_validation: bool = False):
     (
         pipeline,
         steps,
@@ -666,6 +668,7 @@ def render_run_mode(strict_mode: bool = False):
                     steps=steps,
                     initial_input=task,
                     strict=strict_mode,
+                    strict_schema_validation=strict_schema_validation,
                     files=files_payload if files_payload else None,
                     allowed_domains=allowed_domains_by_agent,
                 )
@@ -745,6 +748,8 @@ def render_run_mode(strict_mode: bool = False):
                 agent_configs=result.agent_configs,
                 agent_metrics=result.agent_metrics,
                 tool_usages=result.tool_usages,
+                strict_schema_exit=result.strict_schema_exit,
+                agent_schema_validation_failed=result.agent_schema_validation_failed,
             )
         except Exception:
             logger.exception("Failed to persist run")
@@ -752,6 +757,9 @@ def render_run_mode(strict_mode: bool = False):
         invalidate_runs()
 
         st.success("Pipeline completed!")
+
+        if result.strict_schema_exit:
+            st.warning("Pipeline exited early due to strict schema validation failure.")
 
         # Inline warning banner
         if "__warnings__" in st.session_state.engine.memory:

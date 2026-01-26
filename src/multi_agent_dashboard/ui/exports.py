@@ -268,6 +268,9 @@ def build_export_from_engine_result(
             "structured_response": structured_response,
             # Raw extra for auditing / debugging
             "raw_extra": extra,
+            # Schema validation flags
+            "schema_validation_failed": bool((result.agent_schema_validation_failed or {}).get(name)),
+            "strict_schema_validation": bool(run_cfg.get("strict_schema_validation")),
         }
 
         export_agents[name] = {
@@ -304,6 +307,7 @@ def build_export_from_engine_result(
             "total_cost": round(total_cost, 6),
         },
         "task_input": task,
+        "strict_schema_exit": bool(getattr(result, "strict_schema_exit", False)),
         "final_output": {
             "output": result.final_output,
             "is_json": False,
