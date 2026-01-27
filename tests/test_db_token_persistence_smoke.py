@@ -20,7 +20,8 @@ def test_db_persists_agent_token_counts(tmp_path: Path) -> None:
         task_input TEXT,
         final_output TEXT,
         final_is_json INTEGER DEFAULT 0,
-        final_model TEXT
+        final_model TEXT,
+        strict_schema_exit BOOLEAN DEFAULT 0
     );
 
     CREATE TABLE agent_outputs (
@@ -30,6 +31,7 @@ def test_db_persists_agent_token_counts(tmp_path: Path) -> None:
         output TEXT,
         is_json INTEGER DEFAULT 0,
         model TEXT,
+        schema_validation_failed BOOLEAN DEFAULT 0,
         FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE
     );
 
@@ -67,6 +69,11 @@ def test_db_persists_agent_token_counts(tmp_path: Path) -> None:
         reasoning_config_json TEXT,
         extra_config_json TEXT,
         system_prompt_template TEXT,
+        structured_output_enabled BOOLEAN DEFAULT 0,
+        schema_json TEXT,
+        schema_name TEXT,
+        temperature REAL,
+        strict_schema_validation BOOLEAN DEFAULT 0,
         FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE
     );
 

@@ -673,38 +673,60 @@ class MultiAgentEngine:
             else:
                 self.state[agent_name] = raw_output
 
-            # ---- Strict schema validation (no retry, early exit) ----
-            if getattr(agent.spec, "structured_output_enabled", False) and strict_schema_validation:
-                schema = resolve_schema_json(
-                    getattr(agent.spec, "schema_json", None),
-                    getattr(agent.spec, "schema_name", None),
-                )
-                if schema:
+            # ---- Structured output validation (per-agent; global strict optionally exits) ----
+            def _schema_resolution_state() -> Dict[str, Any]:
+                cfg_schema_json = getattr(agent.spec, "schema_json", None)
+                cfg_schema_name = getattr(agent.spec, "schema_name", None)
+                configured = bool(cfg_schema_json) or bool(cfg_schema_name)
+                if not configured:
+                    return {"status": "missing", "schema": None, "error": "Schema not configured"}
+                try:
+                    schema = resolve_schema_json(cfg_schema_json, cfg_schema_name)
+                except Exception as e:
+                    return {"status": "invalid_json", "schema": None, "error": str(e)}
+                if schema is None:
+                    return {"status": "invalid_json", "schema": None, "error": "Schema could not be resolved"}
+                if isinstance(schema, dict) and len(schema) == 0:
+                    return {"status": "empty", "schema": schema, "error": "Schema resolved to empty object"}
+                return {"status": "resolved", "schema": schema, "error": None}
+
+            if getattr(agent.spec, "structured_output_enabled", False):
+                res = _schema_resolution_state()
+                validation_failed = False
+                fail_reason = ""
+
+                if res["status"] != "resolved":
+                    validation_failed = True
+                    fail_reason = res.get("error") or res["status"]
+                    self._warn(f"[{agent_name}] schema validation skipped: {fail_reason}")
+                else:
+                    schema = res["schema"]
                     candidate = parsed if isinstance(parsed, dict) else LLMClient.safe_json(raw_output) if isinstance(raw_output, str) else None
-                    valid = True
-                    err_msg = ""
                     if candidate is None:
-                        valid = False
-                        err_msg = "No JSON payload to validate"
+                        validation_failed = True
+                        fail_reason = "No JSON payload to validate"
+                        self._warn(f"[{agent_name}] schema validation failed: {fail_reason}")
                     else:
                         try:
                             jsonschema_validate(candidate, schema)
                         except ValidationError as ve:
-                            valid = False
-                            err_msg = str(ve).splitlines()[0]
+                            validation_failed = True
+                            fail_reason = str(ve).splitlines()[0]
+                            self._warn(f"[{agent_name}] schema validation failed: {fail_reason}")
                         except Exception as ve:
-                            valid = False
-                            err_msg = str(ve)
+                            validation_failed = True
+                            fail_reason = str(ve)
+                            self._warn(f"[{agent_name}] schema validation failed: {fail_reason}")
 
-                    if not valid:
+                if validation_failed:
+                    agent_schema_validation_failed[agent_name] = True
+                    if strict_schema_validation:
                         strict_schema_exit = True
-                        agent_schema_validation_failed[agent_name] = True
                         logger.error(
-                            "[%s] Schema validation failed (strict); output preserved. Advice: try lower temperature, adjust prompt, or pick another model. Error: %s",
+                            "[%s] Strict schema validation triggered early exit; output preserved. Reason: %s",
                             agent_name,
-                            err_msg,
+                            fail_reason or "schema validation failed",
                         )
-                        self._warn(f"[{agent_name}] schema validation failed (strict): {err_msg}")
                         # Exit early: skip remaining agents, keep observability/costs
                         break
 
