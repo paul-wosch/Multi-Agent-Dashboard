@@ -102,14 +102,41 @@ def render_agent_config_section(
         badge_suffix = f" {' '.join(title_badges)}" if title_badges else ""
 
         with st.expander(f"{cfg.agent_name} — Configuration{badge_suffix}", expanded=False):
-            if cfg.schema_validation_failed or cfg.strict_schema_validation:
-                badge_parts = []
-                if cfg.strict_schema_validation:
-                    badge_parts.append("`Strict schema validation: on`")
-                if cfg.schema_validation_failed:
-                    badge_parts.append(":warning: `Schema validation failed`")
-                st.markdown(" ".join(badge_parts))
+            # Structured output & validation status
+            st.subheader("Structured output & validation status")
+            st.markdown(f"Strict schema validation: `{'on' if cfg.strict_schema_validation else 'off'}`")
+            st.markdown(f"Structured output: `{'on' if cfg.structured_output_enabled else 'off'}`")
 
+            if cfg.structured_output_enabled:
+                if cfg.schema_validation_failed:
+                    st.warning("Schema validation failed", icon=":material/warning:")
+                else:
+                    st.success("Schema validation passed", icon=":material/check:")
+
+                # Show configured schema (and note if malformed)
+                schema_display = "Not configured"
+                schema_malformed = False
+                parsed_schema = None
+                if cfg.schema_json:
+                    schema_display = cfg.schema_json
+                    try:
+                        import json
+                        parsed_schema = json.loads(cfg.schema_json)
+                        if not isinstance(parsed_schema, dict) or len(parsed_schema) == 0:
+                            schema_malformed = True
+                    except Exception:
+                        schema_malformed = True
+
+                st.markdown("**Configured schema:**")
+                if parsed_schema and not schema_malformed:
+                    st.json(parsed_schema)
+                else:
+                    st.code(schema_display or "Not configured", language="json")
+                    if schema_malformed:
+                        st.caption(":warning: Schema appears malformed or empty.")
+            st.divider()
+
+            st.subheader("Model and Provider settings")
             # Model & role
             st.markdown(f"**Model:** `{cfg.model}`")
             st.markdown(f"**Role:** {cfg.role}")
@@ -120,7 +147,9 @@ def render_agent_config_section(
             st.markdown(f"- **Provider model class:** `{cfg.model_class or '–'}`")
             st.markdown(f"- **Endpoint:** `{cfg.endpoint or '–'}`")
             st.markdown(f"- **Use Responses API:** `{'Yes' if cfg.use_responses_api else 'No'}`")
+            st.divider()
 
+            st.subheader("Prompt templates")
             st.markdown("**System prompt (system/developer role):**")
             if cfg.system_prompt_template:
                 st.code(cfg.system_prompt_template, language=None)
@@ -134,7 +163,9 @@ def render_agent_config_section(
                 st.code(cfg.prompt_template, language=None)
             else:
                 st.markdown("–")
+            st.divider()
 
+            st.subheader("Advanced configuration")
             # Tools summary
             st.markdown(
                 f"**Tool calling enabled:** {'Yes' if cfg.tools_enabled else 'No'}"

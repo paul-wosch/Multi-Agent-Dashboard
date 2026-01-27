@@ -552,6 +552,9 @@ def config_view_from_engine_result(
                 raw_extra_config=raw_extra_config or None,
                 schema_validation_failed=bool((result.agent_schema_validation_failed or {}).get(name)),
                 strict_schema_validation=bool((result.agent_configs or {}).get(name, {}).get("strict_schema_validation")),
+                structured_output_enabled=bool((result.agent_configs or {}).get(name, {}).get("structured_output_enabled")),
+                schema_json=(result.agent_configs or {}).get(name, {}).get("schema_json"),
+                schema_name=(result.agent_configs or {}).get(name, {}).get("schema_name"),
             )
         )
     return views
@@ -759,7 +762,7 @@ def render_run_mode(strict_mode: bool = False, strict_schema_validation: bool = 
         st.success("Pipeline completed!")
 
         if result.strict_schema_exit:
-            st.warning("Pipeline exited early due to strict schema validation failure.")
+            st.error("Pipeline exited early due to strict schema validation failure.", icon=":material/error:")
 
         # Inline warning banner
         if "__warnings__" in st.session_state.engine.memory:

@@ -119,7 +119,7 @@ def render_history_mode():
 
     # Run-level badge for strict schema exit
     if run.get("strict_schema_exit"):
-        st.warning("This run exited early due to strict schema validation.")
+        st.error("This run exited early due to strict schema validation.", icon=":material/error:")
 
     # Shared cost & latency rendering for stored metrics
     # Pass agent_run_configs so we can populate the Model column for historic runs.

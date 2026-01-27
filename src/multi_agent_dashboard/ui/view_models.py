@@ -46,6 +46,9 @@ class AgentConfigView(NamedTuple):
     # Schema validation flags (observability)
     schema_validation_failed: bool = False
     strict_schema_validation: bool = False
+    structured_output_enabled: bool = False
+    schema_json: Optional[str] = None
+    schema_name: Optional[str] = None
 
 
 def summarize_agent_metrics(
@@ -292,6 +295,9 @@ def config_view_from_db_rows(
                 raw_extra_config=parsed["extra_config_json"] or None,
                 schema_validation_failed=bool(a.get("schema_validation_failed")),
                 strict_schema_validation=bool(cfg.get("strict_schema_validation")),
+                structured_output_enabled=bool(cfg.get("structured_output_enabled")),
+                schema_json=cfg.get("schema_json"),
+                schema_name=cfg.get("schema_name"),
             )
         )
     return views
