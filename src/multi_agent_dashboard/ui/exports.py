@@ -38,6 +38,7 @@ def _provider_friendly_name(provider_id: Optional[str]) -> str:
         "azure_openai": "Azure OpenAI",
         "ollama": "Ollama (local)",
         "anthropic": "Anthropic",
+        "deepseek": "DeepSeek",
         "custom": "Custom",
         "": "OpenAI",
         None: "OpenAI",

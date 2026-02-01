@@ -289,8 +289,13 @@ def render_agent_editor():
 
         # Provider selection
         st.markdown("### Provider (per-agent)")
-        provider_options = ["openai", "ollama", "custom"]
-        provider_display = {"openai": "OpenAI", "ollama": "Ollama (local)", "custom": "Custom"}
+        provider_options = ["openai", "ollama", "deepseek", "custom"]
+        provider_display = {
+            "openai": "OpenAI",
+            "ollama": "Ollama (local)",
+            "deepseek": "DeepSeek",
+            "custom": "Custom",
+        }
         provider_index = provider_options.index(state.get("provider_id") or "openai") if (state.get("provider_id") or "openai") in provider_options else 0
         provider_choice = st.selectbox(
             "Provider",

@@ -336,6 +336,15 @@ class ChatModelFactory:
             except Exception:
                 pass
 
+        if provider_norm == "deepseek":
+            try:
+                from multi_agent_dashboard import config as _cfg_ds
+                ds_key = getattr(_cfg_ds, "DEEPSEEK_API_KEY", None)
+                if ds_key:
+                    init_kwargs.setdefault("api_key", ds_key)
+            except Exception:
+                pass
+
         # Attempt to initialize via the unified helper
         try:
             chat_model = self._init_fn(
@@ -466,6 +475,29 @@ class LLMClient:
                     model_instance = self._wrap_structured_output_model(model_instance)
             except Exception:
                 logger.debug("with_structured_output failed for ollama; falling back to prompt-only", exc_info=True)
+
+        if response_format is not None and provider_id == "deepseek":
+            try:
+                structured = getattr(model_instance, "with_structured_output", None)
+                if callable(structured):
+                    # DeepSeek supports function_calling on chat model; reasoner often rejects tool_choice.
+                    model_name = getattr(spec, "model", "") or ""
+                    prefer_json_mode = "reasoner" in model_name.lower()
+                    methods = ["json_mode", "function_calling"] if prefer_json_mode else ["function_calling", "json_mode"]
+                    last_err = None
+                    for m in methods:
+                        try:
+                            model_instance = structured(response_format, method=m, include_raw=True)
+                            last_err = None
+                            break
+                        except Exception as e_method:
+                            last_err = e_method
+                            continue
+                    if last_err:
+                        raise last_err
+                    model_instance = self._wrap_structured_output_model(model_instance)
+            except Exception:
+                logger.debug("with_structured_output failed for deepseek; falling back to prompt-only", exc_info=True)
 
         # Normalize middleware list and instantiate classes when provided.
         middleware_list: List[Any] = []
@@ -829,10 +861,17 @@ class LLMClient:
             return response_format
         if not getattr(spec, "structured_output_enabled", False):
             return None
-        schema = resolve_schema_json(
-            getattr(spec, "schema_json", None),
-            getattr(spec, "schema_name", None),
-        )
+
+        raw_schema = getattr(spec, "schema_json", None)
+        schema = None
+        # Accept dicts directly; fall back to resolver for string/json or registry name.
+        if isinstance(raw_schema, dict):
+            schema = raw_schema
+        else:
+            schema = resolve_schema_json(
+                raw_schema,
+                getattr(spec, "schema_name", None),
+            )
         if not schema:
             return None
         provider_id = (getattr(spec, "provider_id", None) or "").lower()
@@ -847,8 +886,14 @@ class LLMClient:
         if provider_id == "ollama":
             return schema
         if provider_id == "deepseek":
-            # Placeholder for future mapping; falls back to prompt-only + validation
-            return None
+            # DeepSeek uses function-calling; wrap plain JSON schema as a tool definition.
+            if isinstance(schema, dict) and "parameters" not in schema:
+                return {
+                    "name": getattr(spec, "schema_name", None) or "schema",
+                    "description": "Structured output schema",
+                    "parameters": schema,
+                }
+            return schema
         return None
 
 

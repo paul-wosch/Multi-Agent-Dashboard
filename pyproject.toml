@@ -12,11 +12,12 @@ requires-python = ">=3.10"
 dependencies = [
     "graphviz==0.21",
     "langchain==1.2.4",
+    "langchain-deepseek==1.0.1",
     "langchain-ollama==1.0.1",
     "langchain-openai==1.1.7",
     "openai==2.9.0",
     "python-dotenv==1.2.1",
-    "jsonschema==4.23.0",
+    "jsonschema==4.25.1",
     "streamlit==1.52.1",
 ]
 

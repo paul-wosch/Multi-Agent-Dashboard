@@ -36,6 +36,7 @@ if _db_file_env is not None and str(_db_file_env).strip():
 DB_FILE_PATH = (DATA_PATH / DB_DIR / DB_FILE).resolve()
 
 OPENAI_API_KEY = _env.get("OPENAI_API_KEY", None)
+DEEPSEEK_API_KEY = _env.get("DEEPSEEK_API_KEY", None)
 
 LOG_LEVEL = _env.get("LOG_LEVEL", "INFO").upper()
 
@@ -99,6 +100,19 @@ OPENAI_PRICING = {
         "output": 0.00,
     },
     # Add more models as needed
+}
+
+# DeepSeek pricing (USD per 1M tokens)
+# Sources: https://api-docs.deepseek.com/quick_start/pricing (accessed 2026-01)
+DEEPSEEK_PRICING = {
+    "deepseek-chat": {
+        "input": 0.28,
+        "output": 0.42,
+    },
+    "deepseek-reasoner": {
+        "input": 0.28,
+        "output": 0.42,
+    },
 }
 
 # Toggle whether the UI file uploader restricts selectable file extensions.

@@ -281,7 +281,15 @@ class MultiAgentEngine:
         # Backwards-compatible default: treat missing provider_id as OpenAI.
         is_openai_family = (not provider) or provider in ("openai", "azure_openai")
 
-        pricing = OPENAI_PRICING.get(model) if is_openai_family else None
+        pricing = None
+        if is_openai_family:
+            pricing = OPENAI_PRICING.get(model)
+        elif provider == "deepseek":
+            try:
+                from multi_agent_dashboard.config import DEEPSEEK_PRICING
+                pricing = DEEPSEEK_PRICING.get(model)
+            except Exception:
+                pricing = None
         if not pricing:
             return 0.0, 0.0, 0.0
 
