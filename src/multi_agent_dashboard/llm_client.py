@@ -5,11 +5,13 @@ import json
 from typing import Any, Dict, List, Optional, Callable, Tuple
 from dataclasses import dataclass
 from multi_agent_dashboard.structured_schemas import resolve_schema_json
+from multi_agent_dashboard import litellm_config
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "LLMClient",
+    "LiteLLMClient",
     "TextResponse",
     "LLMError",
     "INSTRUMENTATION_MIDDLEWARE",
@@ -46,6 +48,27 @@ except Exception:
     _AIMessage = None
     _create_agent = None
     _AgentMiddleware = None
+
+# Try to import LiteLLM pieces (optional)
+_LITELLM_AVAILABLE = False
+_litellm = None
+_ChatLiteLLM = None
+_litellm_completion = None
+
+try:
+    import litellm
+    from langchain_litellm import ChatLiteLLM
+    
+    _LITELLM_AVAILABLE = True
+    _litellm = litellm
+    _ChatLiteLLM = ChatLiteLLM
+    _litellm_completion = litellm.completion
+except Exception:
+    # LiteLLM not installed; the LiteLLMClient will raise appropriate errors.
+    _LITELLM_AVAILABLE = False
+    _litellm = None
+    _ChatLiteLLM = None
+    _litellm_completion = None
 
 # If AgentMiddleware import failed, provide a minimal fallback so that tests and
 # environments without langchain.agents.middleware can still instantiate and use
@@ -385,6 +408,244 @@ class ChatModelFactory:
 # =========================
 # LLM Client
 # =========================
+
+class LiteLLMClient:
+    """
+    LiteLLM client for unified LLM API access across multiple providers.
+    
+    Uses LiteLLM's universal completion interface to support OpenAI, Ollama,
+    DeepSeek, and other providers with a consistent API.
+    
+    Responsibilities:
+    - Provider/model string normalization
+    - Environment variable configuration
+    - Request execution with retries
+    - Response normalization to TextResponse
+    """
+    
+    def __init__(
+        self,
+        *,
+        timeout: float = 600.0,
+        max_retries: int = 3,
+        backoff_base: float = 1.5,
+        on_rate_limit: Optional[Callable[[int], None]] = None,
+    ):
+        self._timeout = timeout
+        self._max_retries = max_retries
+        self._backoff_base = backoff_base
+        self._on_rate_limit = on_rate_limit
+        
+        # LiteLLM availability check
+        if not _LITELLM_AVAILABLE:
+            raise RuntimeError(
+                "LiteLLM is not available. Install with: pip install litellm langchain-litellm"
+            )
+        self._litellm = _litellm
+        self._litellm_completion = _litellm_completion
+        
+        # Capabilities detection (simplistic, can be enhanced)
+        self._capabilities = {"json_mode", "streaming", "function_calling", "tools"}
+    
+    def invoke(
+        self,
+        model: str,
+        *,
+        provider_id: Optional[str] = None,
+        messages: Optional[List[Dict[str, Any]]] = None,
+        prompt: Optional[str] = None,
+        endpoint: Optional[str] = None,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        response_format: Optional[Dict[str, Any]] = None,
+        stream: bool = False,
+        **extra_kwargs,
+    ) -> TextResponse:
+        """
+        Invoke the LLM via LiteLLM.
+        
+        Args:
+            model: Model identifier (e.g., "gpt-4o", "llama3") or LiteLLM model string.
+            provider_id: Provider identifier (openai, ollama, deepseek).
+            messages: List of chat messages in OpenAI format.
+            prompt: Single text prompt (converted to a single user message).
+            endpoint: Custom endpoint URL (overrides environment).
+            api_key: Custom API key (overrides environment).
+            base_url: Custom base URL (overrides environment).
+            temperature: Sampling temperature.
+            max_tokens: Maximum tokens to generate.
+            response_format: Response format specification (e.g., {"type": "json_object"}).
+            stream: Whether to stream the response.
+            **extra_kwargs: Additional arguments passed to litellm.completion.
+        
+        Returns:
+            TextResponse with normalized text and metadata.
+        
+        Raises:
+            LLMError: If the request fails after retries.
+        """
+        from multi_agent_dashboard.litellm_config import (
+            normalize_model_and_provider,
+            get_litellm_model_string,
+            get_litellm_completion_kwargs,
+        )
+        
+        # Normalize provider and model
+        provider_id_norm, model_name = normalize_model_and_provider(model, provider_id)
+        litellm_model = get_litellm_model_string(provider_id_norm, model_name)
+        
+        # Prepare messages
+        if prompt is not None and messages is not None:
+            raise ValueError("Cannot specify both prompt and messages")
+        
+        if messages is None:
+            if prompt is None:
+                raise ValueError("Either messages or prompt must be provided")
+            messages = [{"role": "user", "content": prompt}]
+        
+        # Build completion kwargs
+        completion_kwargs = get_litellm_completion_kwargs(
+            provider_id=provider_id_norm,
+            endpoint=endpoint,
+            api_key=api_key,
+            base_url=base_url,
+            timeout=self._timeout,
+            **extra_kwargs,
+        )
+        
+        # Add standard parameters
+        if temperature is not None:
+            completion_kwargs["temperature"] = temperature
+        if max_tokens is not None:
+            completion_kwargs["max_tokens"] = max_tokens
+        if response_format is not None:
+            completion_kwargs["response_format"] = response_format
+        if stream:
+            completion_kwargs["stream"] = True
+        
+        # Execute with retries
+        start_time = time.perf_counter()
+        last_exception = None
+        
+        for attempt in range(self._max_retries + 1):
+            try:
+                response = self._litellm_completion(
+                    model=litellm_model,
+                    messages=messages,
+                    **completion_kwargs,
+                )
+                break
+            except Exception as e:
+                last_exception = e
+                logger.warning(
+                    f"LiteLLM request failed (attempt {attempt + 1}/{self._max_retries + 1}): {e}"
+                )
+                if attempt < self._max_retries:
+                    # Exponential backoff
+                    delay = self._backoff_base ** attempt
+                    time.sleep(delay)
+                else:
+                    raise LLMError(f"LiteLLM request failed after {self._max_retries + 1} attempts") from last_exception
+        
+        end_time = time.perf_counter()
+        latency = end_time - start_time
+        
+        # Normalize response
+        if stream:
+            # Streaming responses require different handling
+            # For now, we'll collect chunks (simplified)
+            collected_chunks = []
+            collected_content = ""
+            try:
+                for chunk in response:
+                    if hasattr(chunk, "choices") and chunk.choices:
+                        delta = chunk.choices[0].delta
+                        if hasattr(delta, "content") and delta.content:
+                            collected_content += delta.content
+                    collected_chunks.append(chunk)
+                # Convert to a mock non-stream response for normalization
+                # This is a placeholder; proper streaming support needs integration
+                response = type("MockResponse", (), {
+                    "choices": [type("Choice", (), {
+                        "message": type("Message", (), {
+                            "content": collected_content,
+                            "role": "assistant"
+                        })()
+                    })()],
+                    "usage": getattr(chunk, "usage", None) if collected_chunks else None,
+                })()
+            except Exception as e:
+                raise LLMError(f"Stream processing failed: {e}") from e
+        
+        # Extract text and usage
+        text = ""
+        usage = None
+        raw_dict = {}
+        
+        try:
+            # Handle OpenAI-style response
+            if hasattr(response, "choices") and response.choices:
+                message = response.choices[0].message
+                if hasattr(message, "content"):
+                    text = message.content or ""
+                elif isinstance(message, dict):
+                    text = message.get("content", "")
+            
+            # Extract usage
+            if hasattr(response, "usage"):
+                usage = response.usage
+            elif hasattr(response, "_usage"):
+                usage = response._usage
+            
+            # Convert raw response to dict
+            raw_dict = self._response_to_dict(response)
+        except Exception as e:
+            logger.warning(f"Failed to normalize LiteLLM response: {e}")
+            text = str(response)
+            raw_dict = {"raw": response}
+        
+        # Normalize usage fields
+        input_tokens = None
+        output_tokens = None
+        if usage is not None:
+            if isinstance(usage, dict):
+                input_tokens = usage.get("prompt_tokens") or usage.get("input_tokens")
+                output_tokens = usage.get("completion_tokens") or usage.get("output_tokens")
+            elif hasattr(usage, "prompt_tokens"):
+                input_tokens = usage.prompt_tokens
+                output_tokens = usage.completion_tokens
+        
+        return TextResponse(
+            text=text,
+            raw=raw_dict,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            latency=latency,
+        )
+    
+    def _response_to_dict(self, response: Any) -> Dict[str, Any]:
+        """
+        Convert a LiteLLM response object to a serializable dictionary.
+        """
+        try:
+            if isinstance(response, dict):
+                return dict(response)
+            if hasattr(response, "model_dump") and callable(getattr(response, "model_dump")):
+                try:
+                    return response.model_dump()
+                except TypeError:
+                    return response.model_dump()
+            if hasattr(response, "to_dict") and callable(getattr(response, "to_dict")):
+                return response.to_dict()
+            if hasattr(response, "dict"):
+                return response.dict()
+            return {"repr": repr(response)}
+        except Exception:
+            logger.exception("Failed to convert LiteLLM response to dict")
+            return {"repr": repr(response)}
+
 
 class LLMClient:
     """
