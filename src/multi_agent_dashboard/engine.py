@@ -276,6 +276,23 @@ class MultiAgentEngine:
         if input_tokens is None and output_tokens is None:
             return 0.0, 0.0, 0.0
 
+        # Parse LiteLLM-style model string (provider/model)
+        model_for_pricing = model
+        if "/" in model:
+            # Split only on first slash
+            maybe_provider, model_name = model.split("/", 1)
+            model_for_pricing = model_name
+            # If provider_id not specified, use extracted provider
+            if provider_id is None:
+                provider_id = maybe_provider
+            # If provider_id specified but differs, log warning but use extracted provider
+            elif provider_id != maybe_provider:
+                logger.debug(
+                    f"Provider mismatch in _compute_cost: model suggests '{maybe_provider}', "
+                    f"but provider_id is '{provider_id}'. Using '{maybe_provider}' for pricing."
+                )
+                provider_id = maybe_provider
+
         provider = (provider_id or "").strip().lower()
 
         # Backwards-compatible default: treat missing provider_id as OpenAI.
@@ -283,11 +300,11 @@ class MultiAgentEngine:
 
         pricing = None
         if is_openai_family:
-            pricing = OPENAI_PRICING.get(model)
+            pricing = OPENAI_PRICING.get(model_for_pricing)
         elif provider == "deepseek":
             try:
                 from multi_agent_dashboard.config import DEEPSEEK_PRICING
-                pricing = DEEPSEEK_PRICING.get(model)
+                pricing = DEEPSEEK_PRICING.get(model_for_pricing)
             except Exception:
                 pricing = None
         if not pricing:

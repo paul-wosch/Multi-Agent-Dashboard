@@ -525,6 +525,13 @@ class LiteLLMClient:
         if stream:
             completion_kwargs["stream"] = True
         
+        # Ensure metadata is included for unified usage tracking
+        extra_body = completion_kwargs.get("extra_body", {})
+        if not isinstance(extra_body, dict):
+            extra_body = {}
+        extra_body["metadata"] = True
+        completion_kwargs["extra_body"] = extra_body
+        
         # Execute with retries
         start_time = time.perf_counter()
         last_exception = None
@@ -585,19 +592,33 @@ class LiteLLMClient:
         raw_dict = {}
         
         try:
-            # Handle OpenAI-style response
-            if hasattr(response, "choices") and response.choices:
-                message = response.choices[0].message
-                if hasattr(message, "content"):
-                    text = message.content or ""
-                elif isinstance(message, dict):
-                    text = message.get("content", "")
-            
-            # Extract usage
-            if hasattr(response, "usage"):
-                usage = response.usage
-            elif hasattr(response, "_usage"):
-                usage = response._usage
+            # Handle OpenAI-style response (object or dict)
+            if isinstance(response, dict):
+                if "choices" in response and response["choices"]:
+                    message = response["choices"][0].get("message")
+                    if isinstance(message, dict):
+                        text = message.get("content", "")
+                    elif hasattr(message, "content"):
+                        text = message.content or ""
+                # Extract usage from dict
+                if "usage" in response:
+                    usage = response["usage"]
+                elif "_usage" in response:
+                    usage = response["_usage"]
+            else:
+                # Response is an object
+                if hasattr(response, "choices") and response.choices:
+                    message = response.choices[0].message
+                    if hasattr(message, "content"):
+                        text = message.content or ""
+                    elif isinstance(message, dict):
+                        text = message.get("content", "")
+                
+                # Extract usage
+                if hasattr(response, "usage"):
+                    usage = response.usage
+                elif hasattr(response, "_usage"):
+                    usage = response._usage
             
             # Convert raw response to dict
             raw_dict = self._response_to_dict(response)
@@ -616,6 +637,14 @@ class LiteLLMClient:
             elif hasattr(usage, "prompt_tokens"):
                 input_tokens = usage.prompt_tokens
                 output_tokens = usage.completion_tokens
+        
+        # Ensure usage_metadata is present in raw dict for compatibility
+        if usage is not None:
+            if isinstance(usage, dict):
+                raw_dict["usage_metadata"] = usage
+            else:
+                # Convert usage object to dict
+                raw_dict["usage_metadata"] = self._response_to_dict(usage)
         
         return TextResponse(
             text=text,

@@ -70,24 +70,31 @@ Integration will use the `langchain‑litellm` package to keep the existing Lang
 
 ---
 
-### Step 2 – Replace Provider‑Specific Token Counting
+### Step 2 – Replace Provider‑Specific Token Counting ⚠️ PARTIALLY COMPLETED
 
 **Current problem:** `llm_client.py` and `engine.py` contain separate logic to extract `usage` from OpenAI, `prompt_eval_count`/`completion_eval_count` from Ollama, and `usage_metadata` from DeepSeek.
 
 **Sub‑steps:**
 
-1. In `LiteLLMClient.invoke`, call `litellm.completion(…, extra_body={"metadata": true})` to guarantee a unified `usage` object in the response (LiteLLM normalizes this across providers).
+1. ✅ In `LiteLLMClient.invoke`, call `litellm.completion(…, extra_body={"metadata": true})` to guarantee a unified `usage` object in the response (LiteLLM normalizes this across providers).  
+   *Implemented in `llm_client.py:527-533`; verified with unit tests.*
 
-2. Remove all provider‑specific usage‑extraction helpers (`_extract_usage_from_candidate`, `_extract_usage_from_ollama`, `_extract_usage_from_deepseek`).
+2. ⏳ Remove all provider‑specific usage‑extraction helpers (`_extract_usage_from_candidate`, `_extract_usage_from_ollama`, `_extract_usage_from_deepseek`).  
+   *Deferred to Phase 4: these helpers are still used by the legacy `LLMClient`. Will be removed when `LiteLLMClient` becomes the primary client.*
 
-3. Update `engine.py`’s `_compute_cost` to read the normalized `usage` object and map provider‑ID to LiteLLM’s pricing dictionary (LiteLLM provides per‑model pricing; we can keep our own `*_PRICING` tables for consistency).
+3. ✅ Update `engine.py`’s `_compute_cost` to read the normalized `usage` object and map provider‑ID to LiteLLM’s pricing dictionary (LiteLLM provides per‑model pricing; we can keep our own `*_PRICING` tables for consistency).  
+   *Implemented in `engine.py:258-301`; added parsing of LiteLLM‑style `provider/model` strings and extraction of provider prefix for pricing lookup.*
 
-4. Ensure token counts are stored in the database exactly as before (no schema change).
+4. ✅ Ensure token counts are stored in the database exactly as before (no schema change).  
+   *Token counting via normalized `usage` object preserves existing database fields.*
 
 **Verification:**
-- Existing cost‑tracking tests pass
-- Manual test with each provider shows correct token counts in the UI
-- No regression in pricing calculations
+- ✅ Existing cost‑tracking tests pass (no regressions)
+- ✅ Unit tests for `LiteLLMClient` token extraction (`tests/test_litellm_client.py`) pass
+- ✅ Engine cost calculation handles both old model strings and LiteLLM `provider/model` formats
+- ⚠️ Manual integration with each provider pending (requires full LiteLLM rollout)
+
+**Status:** Core token‑counting normalization implemented for `LiteLLMClient`. Legacy `LLMClient` still uses provider‑specific helpers (will be removed in Phase 4).
 
 ---
 
