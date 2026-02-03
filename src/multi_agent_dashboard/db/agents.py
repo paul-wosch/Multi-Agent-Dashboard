@@ -57,7 +57,7 @@ class AgentDAO:
     # READ operations
     # -----------------------
 
-    def list(self) -> list[dict]:
+    def list(self) -> List[dict]:
         logger.debug("Loading agents from DB")
         try:
             with self._connection() as conn:
@@ -237,7 +237,7 @@ class AgentDAO:
             logger.exception("Failed to save snapshot for %s to DB", agent_name)
             raise
 
-    def list_snapshots(self, agent_name: str) -> list[dict]:
+    def list_snapshots(self, agent_name: str) -> List[dict]:
         """
         List snapshots for an agent ordered by version DESC.
         """
@@ -517,7 +517,7 @@ def agent_dao(db_path: str):
 # Compatibility wrappers
 # -----------------------
 
-def load_agents_from_db(db_path: str) -> list[dict]:
+def load_agents_from_db(db_path: str) -> List[dict]:
     warnings.warn(
         "load_agents_from_db is deprecated; use AgentDAO.list",
         DeprecationWarning,

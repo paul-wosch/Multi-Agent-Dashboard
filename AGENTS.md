@@ -273,6 +273,36 @@ Color themes and emoji symbols are centralized in `config.UI_COLORS`. Avoid hard
 
 10. **Provider features normalization** – Provider features (`provider_features`) are normalized to keys `tool_calling`, `structured_output`, `reasoning`, `image_inputs`, `max_input_tokens`. The engine also accepts variations (`tool_calls`, `toolcalling`, `toolCalling`, etc.) but stores them normalized.
 
+## LiteLLM Integration & Architectural Guidelines
+
+**Current Initiative**: Integrating LiteLLM as a universal translation layer to normalize provider‑specific handling (token counting, structured output, file uploads, tool calling). Refer to `PLAN.md` for detailed rollout.
+
+**High‑Level Directives**:
+
+1. **Dual‑Path Architecture**:
+   - Maintain both `USE_LITELLM=true` (full LiteLLM) and `USE_LITELLM=false` (original provider‑specific implementations) until LiteLLM path is validated.
+   - The `use_litellm` flag defaults to `False` during development; switch to `True` after Phase 4 validation.
+
+2. **Isolation Guardrail**:
+   - **Prefer new modules/functions/classes** for the `langchain‑litellm` path over modifications/conditionals inside existing structures.
+   - Keep new and old logic as separated and uncoupled as possible.
+   - Examples: Add `LiteLLMClient` class instead of modifying `LLMClient` with branches; create `litellm_config.py` instead of extending `config.py`.
+
+3. **Graceful Parameter Handling**:
+   - Enable `litellm.drop_params = True` globally to log warnings about dropping unsupported parameters (e.g., GPT‑5 temperature) instead of raising errors.
+   - Use `litellm.supports_response_schema()` and `litellm.get_supported_openai_params()` for feature detection.
+
+4. **Latest Dependencies**:
+   - Install `langchain‑litellm` from GitHub main (includes PR 62 fixes for JSON Schema support, `tool_choice="any"` mapping, and proper `tool_calls` population).
+   - Keep existing provider‑specific packages (`langchain‑openai`, `langchain‑ollama`, `langchain‑deepseek`) for dual‑path operation.
+
+5. **Validation & Rollout**:
+   - Each rollout phase maintains dual‑path functionality.
+   - Removal of old adapters (Phase 5) is optional and can be deferred if continued dual‑path operation is preferred.
+   - All existing tests must pass without regressions in both `USE_LITELLM` modes.
+
+**Key Benefit**: Once validated, adding a new provider requires only adding its model string to the LiteLLM mapping—no code changes in `llm_client.py`, `engine.py`, or the UI.
+
 ## Further Reading
 
 - `README.md` – Quick start and overview

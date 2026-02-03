@@ -59,6 +59,9 @@ try:
     import litellm
     from langchain_litellm import ChatLiteLLM
     
+    # Drop unsupported parameters to avoid errors with providers like GPT‑5
+    litellm.drop_params = True
+    
     _LITELLM_AVAILABLE = True
     _litellm = litellm
     _ChatLiteLLM = ChatLiteLLM
@@ -69,6 +72,68 @@ except Exception:
     _litellm = None
     _ChatLiteLLM = None
     _litellm_completion = None
+
+
+def _init_chat_model_with_litellm(model: str, model_provider: Optional[str] = None, **kwargs) -> Any:
+    """
+    Initialize a ChatLiteLLM instance with provider mapping.
+    
+    This function is used when USE_LITELLM config flag is True.
+    It translates provider-specific parameters into LiteLLM model strings and kwargs.
+    """
+    from multi_agent_dashboard import config
+    from multi_agent_dashboard.litellm_config import get_litellm_model_string, get_provider_config
+    
+    # Determine provider ID
+    provider_id = model_provider or "openai"
+    
+    # Convert to LiteLLM model string
+    litellm_model = get_litellm_model_string(provider_id, model)
+    
+    # Get provider config from environment
+    provider_config = get_provider_config(provider_id)
+    
+    # Build ChatLiteLLM kwargs
+    litellm_kwargs = {}
+    
+    # Map API key
+    api_key = kwargs.get("api_key") or provider_config.get("api_key")
+    if api_key:
+        litellm_kwargs["api_key"] = api_key
+    
+    # Map base_url
+    base_url = kwargs.get("base_url") or provider_config.get("base_url")
+    if base_url:
+        litellm_kwargs["base_url"] = base_url
+    
+    # Map timeout (convert request_timeout to timeout)
+    timeout = kwargs.get("request_timeout") or kwargs.get("timeout")
+    if timeout is not None:
+        litellm_kwargs["timeout"] = float(timeout)
+    
+    # Map temperature
+    temperature = kwargs.get("temperature")
+    if temperature is not None:
+        litellm_kwargs["temperature"] = float(temperature)
+    
+    # Map max_tokens (if present)
+    max_tokens = kwargs.get("max_tokens")
+    if max_tokens is not None:
+        litellm_kwargs["max_tokens"] = int(max_tokens)
+    
+    # Pass through other kwargs that ChatLiteLLM might accept
+    # Filter out known unsupported keys
+    unsupported_keys = {"use_responses_api", "output_version", "profile", "model_class"}
+    for key, value in kwargs.items():
+        if key not in unsupported_keys and key not in litellm_kwargs:
+            litellm_kwargs[key] = value
+    
+    # Instantiate ChatLiteLLM
+    if _ChatLiteLLM is None:
+        raise RuntimeError("ChatLiteLLM is not available. Install langchain-litellm.")
+    
+    return _ChatLiteLLM(model=litellm_model, **litellm_kwargs)
+
 
 # If AgentMiddleware import failed, provide a minimal fallback so that tests and
 # environments without langchain.agents.middleware can still instantiate and use
@@ -701,7 +766,19 @@ class LLMClient:
 
         # SDK / LangChain capability detection (best-effort)
         self._langchain_available = _LANGCHAIN_AVAILABLE
-        self._init_chat_model = _init_chat_model
+        
+        # Determine which chat model initializer to use
+        from multi_agent_dashboard import config
+        use_litellm = getattr(config, "USE_LITELLM", False) and _LITELLM_AVAILABLE and _ChatLiteLLM is not None
+        self._use_litellm = use_litellm
+        
+        if use_litellm:
+            # Use LiteLLM-based chat model initializer
+            self._init_chat_model = _init_chat_model_with_litellm
+        else:
+            # Use standard LangChain init_chat_model (may be None if LangChain not available)
+            self._init_chat_model = _init_chat_model
+        
         self._SystemMessage = _SystemMessage
         self._HumanMessage = _HumanMessage
         self._create_agent = _create_agent
@@ -750,44 +827,48 @@ class LLMClient:
         # Provider-agnostic structured output adapter
         response_format = self._build_structured_output_adapter(spec, response_format)
         provider_id = (getattr(spec, "provider_id", None) or "").lower()
-        if response_format is not None and provider_id == "ollama":
-            try:
-                structured = getattr(model_instance, "with_structured_output", None)
-                if callable(structured):
-                    # Prefer include_raw=True so we can preserve token/usage metadata from the raw AIMessage.
-                    try:
-                        model_instance = structured(response_format, method="json_schema", include_raw=True)
-                    except TypeError:
-                        model_instance = structured(response_format, method="json_schema")
 
-                    # Wrap structured output dicts into AIMessage so LangChain agents
-                    # do not attempt to coerce dicts into messages and fail.
-                    model_instance = self._wrap_structured_output_model(model_instance)
-            except Exception:
-                logger.debug("with_structured_output failed for ollama; falling back to prompt-only", exc_info=True)
-
-        if response_format is not None and provider_id == "deepseek":
-            try:
-                structured = getattr(model_instance, "with_structured_output", None)
-                if callable(structured):
-                    # DeepSeek supports function_calling on chat model; reasoner often rejects tool_choice.
-                    model_name = getattr(spec, "model", "") or ""
-                    prefer_json_mode = "reasoner" in model_name.lower()
-                    methods = ["json_mode", "function_calling"] if prefer_json_mode else ["function_calling", "json_mode"]
-                    last_err = None
-                    for m in methods:
+        # Provider-specific structured output wrapping (only when not using LiteLLM)
+        if not self._use_litellm:
+            if response_format is not None and provider_id == "ollama":
+                try:
+                    structured = getattr(model_instance, "with_structured_output", None)
+                    if callable(structured):
+                        # Prefer include_raw=True so we can preserve token/usage metadata from the raw AIMessage.
                         try:
-                            model_instance = structured(response_format, method=m, include_raw=True)
-                            last_err = None
-                            break
-                        except Exception as e_method:
-                            last_err = e_method
-                            continue
-                    if last_err:
-                        raise last_err
-                    model_instance = self._wrap_structured_output_model(model_instance)
-            except Exception:
-                logger.debug("with_structured_output failed for deepseek; falling back to prompt-only", exc_info=True)
+                            model_instance = structured(response_format, method="json_schema", include_raw=True)
+                        except TypeError:
+                            model_instance = structured(response_format, method="json_schema")
+
+                        # Wrap structured output dicts into AIMessage so LangChain agents
+                        # do not attempt to coerce dicts into messages and fail.
+                        model_instance = self._wrap_structured_output_model(model_instance)
+                except Exception:
+                    logger.debug("with_structured_output failed for ollama; falling back to prompt-only", exc_info=True)
+
+            if response_format is not None and provider_id == "deepseek":
+                try:
+                    structured = getattr(model_instance, "with_structured_output", None)
+                    if callable(structured):
+                        # DeepSeek supports function_calling on chat model; reasoner often rejects tool_choice.
+                        model_name = getattr(spec, "model", "") or ""
+                        prefer_json_mode = "reasoner" in model_name.lower()
+                        methods = ["json_mode", "function_calling"] if prefer_json_mode else ["function_calling", "json_mode"]
+                        last_err = None
+                        for m in methods:
+                            try:
+                                model_instance = structured(response_format, method=m, include_raw=True)
+                                last_err = None
+                                break
+                            except Exception as e_method:
+                                last_err = e_method
+                                continue
+                        if last_err:
+                            raise last_err
+                        model_instance = self._wrap_structured_output_model(model_instance)
+                except Exception:
+                    logger.debug("with_structured_output failed for deepseek; falling back to prompt-only", exc_info=True)
+
 
         # Normalize middleware list and instantiate classes when provided.
         middleware_list: List[Any] = []
@@ -875,12 +956,18 @@ class LLMClient:
                 logger.exception("Failed to instantiate instrumentation middleware: %s", e)
 
         try:
+            # Determine effective response_format: pass only for OpenAI when not using LiteLLM,
+            # otherwise pass the adapter (LiteLLM handles it, OpenAI uses JSON Schema directly).
+            if self._use_litellm:
+                effective_response_format = response_format
+            else:
+                effective_response_format = response_format if provider_id == "openai" else None
             agent = self._create_agent(
                 model=model_instance,
                 tools=tools or [],
                 system_prompt=getattr(spec, "system_prompt_template", None),
                 middleware=middleware_list,
-                response_format=response_format if provider_id == "openai" else None,
+                response_format=effective_response_format,
             )
             # Annotate agent with instrumentation/profile hints for downstream runtime checks
             try:
@@ -1164,6 +1251,19 @@ class LLMClient:
             )
         if not schema:
             return None
+        # Dual-path structured output: LiteLLM vs provider-specific formats
+        if self._use_litellm:
+            # Unified LiteLLM JSON Schema format for all providers
+            return {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": getattr(spec, "schema_name", None) or "schema",
+                    "schema": schema,
+                    "strict": True,
+                },
+            }
+        
+        # Provider-specific formats for USE_LITELLM=false (original logic)
         provider_id = (getattr(spec, "provider_id", None) or "").lower()
         if provider_id == "openai":
             return {

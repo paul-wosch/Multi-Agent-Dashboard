@@ -96,10 +96,13 @@ Most configuration is centralized in `config.py` and `.env`. See [docs/CONFIG.md
 
 ### 🌱 Environment Variables (`.env` at project root)
 
-| Name             | Required | Default | Description                                                |
-| ---------------- | -------- | ------- | ---------------------------------------------------------- |
-| `OPENAI_API_KEY` | ✅        | None    | OpenAI API key used by the LLM client                      |
-| `LOG_LEVEL`      | ❌        | `INFO`  | Global logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
+| Name              | Required | Default | Description                                                |
+| ----------------- | -------- | ------- | ---------------------------------------------------------- |
+| `OPENAI_API_KEY`  | ✅        | None    | OpenAI API key used by the LLM client                      |
+| `DEEPSEEK_API_KEY`| ❌        | None    | DeepSeek API key for DeepSeek provider                     |
+| `USE_LITELLM`     | ❌        | `false` | Enable unified provider access via LiteLLM (true/false)    |
+| `LOG_LEVEL`       | ❌        | `INFO`  | Global logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
+| `DB_FILE`         | ❌        | `multi_agent_runs.db` | Custom SQLite database filename          |
 
 ---
 

@@ -116,7 +116,7 @@ class RunDAO:
     # READ operations
     # -----------------------
 
-    def list(self) -> list[dict]:
+    def list(self) -> List[dict]:
         logger.debug("Loading runs from DB")
         try:
             with self._connection() as conn:
@@ -132,7 +132,7 @@ class RunDAO:
     def get(
             self,
             run_id: int
-    ) -> Tuple[dict | None, list[dict], list[dict], list[dict], list[dict]]:
+    ) -> Tuple[dict | None, List[dict], List[dict], List[dict], List[dict]]:
         logger.debug("Loading details for run %s from DB", run_id)
         try:
             with self._connection() as conn:
@@ -596,7 +596,7 @@ def run_dao(db_path: str):
 # Compatibility wrappers
 # -----------------------
 
-def load_runs(db_path: str) -> list[dict]:
+def load_runs(db_path: str) -> List[dict]:
     warnings.warn(
         "load_runs is deprecated; use RunDAO.list",
         DeprecationWarning,

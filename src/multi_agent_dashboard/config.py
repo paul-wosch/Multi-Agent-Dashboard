@@ -40,6 +40,9 @@ DEEPSEEK_API_KEY = _env.get("DEEPSEEK_API_KEY", None)
 
 LOG_LEVEL = _env.get("LOG_LEVEL", "INFO").upper()
 
+# Enable LiteLLM integration (default False during phased rollout)
+USE_LITELLM = _env.get("USE_LITELLM", "false").lower() in ("true", "1", "yes")
+
 LOG_FILE = Path("application.log")
 LOG_FILE_PATH = (LOGS_PATH / LOG_FILE).resolve()
 
