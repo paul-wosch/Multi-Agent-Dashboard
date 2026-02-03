@@ -164,6 +164,11 @@ This isolation ensures:
 
 5. ⚠️ Add graceful fallback for unsupported structured‑output features using LiteLLM’s `drop_params=True` to log a warning about dropping unsupported parameters and name them when possible (e.g., GPT‑5 temperature) instead of raising errors.
 
+6. ⚠️ **Fix LiteLLM Configuration Issues**:
+   - Ensure `OLLAMA_HOST` properly maps to `base_url` with `http://` prefix
+   - Fix DeepSeek authentication mapping (use `api_key` not `DEEPSEEK_API_KEY` in LiteLLM context)
+   - Add validation that required environment variables are present
+
 **Verification:**
 - Structured output works for all three providers with the same UI toggle **in both `USE_LITELLM` modes**
 - JSON validation errors are reported consistently
