@@ -87,6 +87,12 @@ def get_provider_config(provider_id: str) -> Dict[str, Any]:
                 config["base_url"] = value
             else:
                 config["api_key"] = value
+        else:
+            # Environment variable is missing or empty
+            if provider_id == "ollama":
+                logger.warning(f"OLLAMA_HOST not set; default endpoint is localhost:11434 (can be overridden per agent). Make sure Ollama is running.")
+            elif provider_id in ["openai", "deepseek"]:
+                logger.warning(f"{env_var} environment variable is not set. API calls will fail.")
     
     # Provider-specific defaults
     if provider_id == "ollama":
@@ -94,6 +100,10 @@ def get_provider_config(provider_id: str) -> Dict[str, Any]:
         base_url = config.get("base_url")
         if base_url and "://" not in base_url:
             config["base_url"] = f"http://{base_url}"
+        elif not base_url:
+            # Set default base_url for Ollama if not provided
+            config["base_url"] = "http://localhost:11434"
+            logger.debug("Using default Ollama base_url: http://localhost:11434")
     
     return config
 

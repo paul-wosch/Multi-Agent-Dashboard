@@ -27,7 +27,7 @@ This fragmentation increases code complexity, hinders adding new providers, and 
 **Critical Regressions Identified** (✅ All Resolved):
 1. ✅ **Unified JSON Schema Format Incompatibility**: Fixed by dual‑path adapter in `_build_structured_output_adapter` that returns provider‑specific formats when `USE_LITELLM=false` and LiteLLM JSON‑Schema format only when `USE_LITELLM=true`.
 2. ✅ **Provider‑Specific Logic Still Present But Overridden**: Restored provider‑specific `with_structured_output` wrapping loops in `create_agent_for_spec` with `if not self._use_litellm` guard. The `USE_LITELLM` flag now controls both model initialization and structured‑output logic.
-3. ✅ **LiteLLM Configuration Issues**: Verified `litellm_config.py` correctly maps `OLLAMA_HOST` → `base_url` and DeepSeek authentication (`api_key`). No mapping issues found.
+3. ✅ **LiteLLM Configuration Issues**: Verified `litellm_config.py` correctly maps `OLLAMA_HOST` → `base_url` and DeepSeek authentication (`api_key`). Ollama endpoint propagation issue resolved (custom agent endpoints now properly override environment defaults).
 4. ✅ **Temperature Handling for GPT‑5**: Enabled `litellm.drop_params = True` globally in LiteLLM import block, allowing graceful parameter dropping for unsupported parameters.
 
 **Root Cause (Now Resolved)**: The integration attempted to unify structured output handling before LiteLLM path was fully validated, creating a single code path that broke backward compatibility. The `USE_LITELLM` flag initially only switched model initialization, not complete logic paths. **Fix applied**: Dual‑path logic now fully separates `USE_LITELLM=true` (LiteLLM JSON‑Schema) and `USE_LITELLM=false` (provider‑specific formats).
@@ -165,9 +165,9 @@ This isolation ensures:
 5. ⚠️ Add graceful fallback for unsupported structured‑output features using LiteLLM’s `drop_params=True` to log a warning about dropping unsupported parameters and name them when possible (e.g., GPT‑5 temperature) instead of raising errors.
 
 6. ⚠️ **Fix LiteLLM Configuration Issues**:
-   - Ensure `OLLAMA_HOST` properly maps to `base_url` with `http://` prefix
-   - Fix DeepSeek authentication mapping (use `api_key` not `DEEPSEEK_API_KEY` in LiteLLM context)
-   - Add validation that required environment variables are present
+   - ✅ `OLLAMA_HOST` properly maps to `base_url` with `http://` prefix; custom agent endpoints override environment defaults (implemented in `_init_chat_model_with_litellm()` with comprehensive logging)
+   - ⚠️ Fix DeepSeek authentication mapping (use `api_key` not `DEEPSEEK_API_KEY` in LiteLLM context)
+   - ⚠️ Add validation that required environment variables are present
 
 **Verification:**
 - Structured output works for all three providers with the same UI toggle **in both `USE_LITELLM` modes**
@@ -175,7 +175,7 @@ This isolation ensures:
 - Token counts include the structured‑output overhead
 - All existing structured‑output tests pass (23/23) **without regressions**
 
-**Status:** Unified structured output adapter implemented with dual‑path handling restored. The regression affecting legacy providers has been resolved. Remaining work: implement strict validation, schema compatibility, and graceful fallback (sub‑steps 3‑5).
+**Status:** Unified structured output adapter implemented with dual‑path handling restored. The regression affecting legacy providers has been resolved. Configuration issues partially resolved (Ollama endpoint propagation fixed). Remaining work: implement strict validation, schema compatibility, and graceful fallback (sub‑steps 3‑5), plus DeepSeek authentication mapping.
 
 ---
 

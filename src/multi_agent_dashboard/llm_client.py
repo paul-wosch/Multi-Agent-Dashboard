@@ -92,6 +92,7 @@ def _init_chat_model_with_litellm(model: str, model_provider: Optional[str] = No
     
     # Get provider config from environment
     provider_config = get_provider_config(provider_id)
+    logger.info("_init_chat_model_with_litellm kwargs: %s", kwargs)
     
     # Build ChatLiteLLM kwargs
     litellm_kwargs = {}
@@ -103,8 +104,20 @@ def _init_chat_model_with_litellm(model: str, model_provider: Optional[str] = No
     
     # Map base_url
     base_url = kwargs.get("base_url") or provider_config.get("base_url")
+    # Ensure base_url has scheme for known providers
+    if base_url and "://" not in base_url:
+        # Default to http for local endpoints (Ollama, custom)
+        base_url = f"http://{base_url}"
+        logger.debug("Added missing scheme to base_url: %s", base_url)
+    logger.debug(
+        "LiteLLM init: provider=%s, model=%s, base_url=%s, from_kwargs=%s, from_config=%s",
+        provider_id, model, base_url, kwargs.get("base_url"), provider_config.get("base_url")
+    )
+    if provider_id == "ollama" and base_url and base_url != provider_config.get("base_url"):
+        logger.info("Using custom Ollama endpoint: %s (overriding default)", base_url)
     if base_url:
         litellm_kwargs["base_url"] = base_url
+        litellm_kwargs["api_base"] = base_url  # Some providers use api_base
     
     # Map timeout (convert request_timeout to timeout)
     timeout = kwargs.get("request_timeout") or kwargs.get("timeout")
@@ -128,6 +141,7 @@ def _init_chat_model_with_litellm(model: str, model_provider: Optional[str] = No
         if key not in unsupported_keys and key not in litellm_kwargs:
             litellm_kwargs[key] = value
     
+    logger.info("LiteLLM kwargs: %s", litellm_kwargs)
     # Instantiate ChatLiteLLM
     if _ChatLiteLLM is None:
         raise RuntimeError("ChatLiteLLM is not available. Install langchain-litellm.")
