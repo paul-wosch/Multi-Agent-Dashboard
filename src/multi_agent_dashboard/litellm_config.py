@@ -66,7 +66,7 @@ def get_provider_config(provider_id: str) -> Dict[str, Any]:
     Get provider-specific configuration for LiteLLM.
     
     Returns a dictionary with api_key, base_url, and other provider-specific
-    settings extracted from environment variables.
+    settings extracted from environment variables and config module.
     
     Args:
         provider_id: Provider identifier (openai, ollama, deepseek)
@@ -77,10 +77,22 @@ def get_provider_config(provider_id: str) -> Dict[str, Any]:
     provider_id = provider_id.lower() if provider_id else ""
     config = {}
     
-    # Get API key or host from environment
+    # Get API key or host from environment or config module
     env_var = PROVIDER_ENV_VARS.get(provider_id)
     if env_var:
-        value = os.getenv(env_var)
+        value = None
+        
+        # Try config module first (reads from .env file)
+        if provider_id == "openai":
+            from multi_agent_dashboard import config as app_config
+            value = getattr(app_config, "OPENAI_API_KEY", None)
+        elif provider_id == "deepseek":
+            from multi_agent_dashboard import config as app_config
+            value = getattr(app_config, "DEEPSEEK_API_KEY", None)
+        elif provider_id == "ollama":
+            # OLLAMA_HOST is not in config module, read from os.environ
+            value = os.getenv(env_var)
+        
         if value:
             # For Ollama, the host goes into base_url
             if provider_id == "ollama":

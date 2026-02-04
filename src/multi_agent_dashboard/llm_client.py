@@ -92,7 +92,9 @@ def _init_chat_model_with_litellm(model: str, model_provider: Optional[str] = No
     
     # Get provider config from environment
     provider_config = get_provider_config(provider_id)
-    logger.info("_init_chat_model_with_litellm kwargs: %s", kwargs)
+    # Redact sensitive keys before logging
+    safe_kwargs = {k: '***REDACTED***' if any(sensitive in k.lower() for sensitive in ['key', 'secret', 'token', 'password']) else v for k, v in kwargs.items()}
+    logger.info("_init_chat_model_with_litellm kwargs: %s", safe_kwargs)
     
     # Build ChatLiteLLM kwargs
     litellm_kwargs = {}
@@ -141,7 +143,9 @@ def _init_chat_model_with_litellm(model: str, model_provider: Optional[str] = No
         if key not in unsupported_keys and key not in litellm_kwargs:
             litellm_kwargs[key] = value
     
-    logger.info("LiteLLM kwargs: %s", litellm_kwargs)
+    # Redact sensitive keys before logging
+    safe_litellm_kwargs = {k: '***REDACTED***' if any(sensitive in k.lower() for sensitive in ['key', 'secret', 'token', 'password']) else v for k, v in litellm_kwargs.items()}
+    logger.info("LiteLLM kwargs: %s", safe_litellm_kwargs)
     # Instantiate ChatLiteLLM
     if _ChatLiteLLM is None:
         raise RuntimeError("ChatLiteLLM is not available. Install langchain-litellm.")
