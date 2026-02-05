@@ -104,9 +104,11 @@ def _init_chat_model_with_litellm(model: str, model_provider: Optional[str] = No
     api_key = kwargs.get("api_key") or provider_config.get("api_key")
     if api_key:
         litellm_kwargs["api_key"] = api_key
-        # Ensure DEEPSEEK_API_KEY environment variable is set for LiteLLM compatibility
-        if provider_id == "deepseek":
-            os.environ["DEEPSEEK_API_KEY"] = api_key
+        # Set provider API key in os.environ for consistent LiteLLM compatibility
+        env_var_name = litellm_config.PROVIDER_ENV_VARS.get(provider_id)
+        if env_var_name and "key" in env_var_name.lower():
+            os.environ[env_var_name] = api_key
+            logger.debug(f"Set {env_var_name} in os.environ for LiteLLM compatibility")
     
     # Map base_url
     base_url = kwargs.get("base_url") or provider_config.get("base_url")
