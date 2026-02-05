@@ -117,6 +117,18 @@ def get_provider_config(provider_id: str) -> Dict[str, Any]:
             config["base_url"] = "http://localhost:11434"
             logger.debug("Using default Ollama base_url: http://localhost:11434")
     
+    if provider_id == "deepseek":
+        # Set default base_url for DeepSeek if not provided
+        base_url = config.get("base_url")
+        if not base_url:
+            # Use environment variable or default to official v1 endpoint
+            base_url = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com/v1")
+            config["base_url"] = base_url
+            logger.debug("Using DeepSeek base_url: %s", base_url)
+        elif "://" not in base_url:
+            # Ensure scheme for custom base_url
+            config["base_url"] = f"https://{base_url}"
+
     return config
 
 

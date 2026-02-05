@@ -1,5 +1,6 @@
 # multi_agent_dashboard/llm_client.py
 import time
+import os
 import logging
 import json
 from typing import Any, Dict, List, Optional, Callable, Tuple
@@ -103,6 +104,9 @@ def _init_chat_model_with_litellm(model: str, model_provider: Optional[str] = No
     api_key = kwargs.get("api_key") or provider_config.get("api_key")
     if api_key:
         litellm_kwargs["api_key"] = api_key
+        # Ensure DEEPSEEK_API_KEY environment variable is set for LiteLLM compatibility
+        if provider_id == "deepseek":
+            os.environ["DEEPSEEK_API_KEY"] = api_key
     
     # Map base_url
     base_url = kwargs.get("base_url") or provider_config.get("base_url")
