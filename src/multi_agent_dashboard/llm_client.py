@@ -850,8 +850,118 @@ class LLMClient:
 
         # Provider-agnostic structured output adapter
         response_format = self._build_structured_output_adapter(spec, response_format)
-        provider_id = (getattr(spec, "provider_id", None) or "").lower()
+        provider_id = (getattr(spec, "provider_id", None) or "openai").lower()
+        logger.debug("Before workaround: provider_id=%s, response_format=%s", provider_id, response_format)
 
+        # Workaround for LiteLLM bug with OpenAI JSON Schema (extended to all providers)
+        if self._use_litellm and response_format is not None:
+            # Only apply workaround for JSON Schema structured output, not arbitrary response_format
+            if isinstance(response_format, dict) and response_format.get("type") == "json_schema":
+                logger.info("LiteLLM JSON Schema workaround condition passed for provider %s", provider_id)
+                logger.info("Applying LiteLLM JSON Schema workaround (bypassing buggy response_format)")
+                try:
+                    logger.info("Entering workaround try block, model_instance type: %s", type(model_instance).__name__)
+                    structured = getattr(model_instance, "with_structured_output", None)
+                    logger.info("structured attribute present: %s (type: %s)", structured is not None, type(structured).__name__)
+                    if callable(structured):
+                        logger.info("with_structured_output is callable, applying workaround")
+                        # Extract actual schema from response_format
+                        json_schema = response_format.get("json_schema", {})
+                        schema = json_schema.get("schema")
+                        strict = json_schema.get("strict")
+                        logger.info("Extracted schema=%s, strict=%s", schema, strict)
+                        if schema is None:
+                            logger.debug("No schema found in response_format, falling back")
+                            # Fall back to original response_format (will likely fail)
+                            schema = response_format
+                        elif isinstance(schema, dict):
+                            # Ensure schema has title and description for convert_to_openai_tool
+                            schema = schema.copy()
+                            if "title" not in schema:
+                                schema["title"] = json_schema.get("name", "schema")
+                            if "description" not in schema:
+                                schema["description"] = "Generated from structured output"
+                            logger.info("Schema after title/description addition: %s", schema)
+                        # Determine method based on provider
+                        if provider_id == "openai":
+                            method = "json_schema"
+                        elif provider_id == "deepseek":
+                            # Try function_calling first, fallback to json_mode
+                            method = "function_calling"
+                        elif provider_id == "ollama":
+                            method = "json_schema"
+                        else:
+                            method = "json_schema"
+                        # For DeepSeek, try function_calling then json_mode (reverse for reasoner models)
+                        if provider_id == "deepseek":
+                            model_name = getattr(spec, "model", "").lower()
+                            prefer_json_mode = "reasoner" in model_name
+                            methods = ["json_mode", "function_calling"] if prefer_json_mode else ["function_calling", "json_mode"]
+                            last_err = None
+                            for m in methods:
+                                try:
+                                    model_instance = structured(schema, method=m, include_raw=True)
+                                    logger.debug("with_structured_output succeeded with %s", m)
+                                    last_err = None
+                                    break
+                                except Exception as e_method:
+                                    last_err = e_method
+                                    continue
+                            if last_err:
+                                raise last_err
+                        else:
+                            # For other providers, use selected method
+                            if provider_id == "ollama":
+                                # Try json_schema, then json_mode
+                                methods = ["json_schema", "json_mode"]
+                                last_err = None
+                                for m in methods:
+                                    try:
+                                        model_instance = structured(schema, method=m, include_raw=True)
+                                        logger.debug("with_structured_output succeeded with %s", m)
+                                        break
+                                    except TypeError:
+                                        try:
+                                            model_instance = structured(schema, method=m)
+                                            logger.debug("with_structured_output succeeded with %s (without include_raw)", m)
+                                            break
+                                        except Exception as e:
+                                            last_err = e
+                                            continue
+                                    except Exception as e:
+                                        last_err = e
+                                        continue
+                                if last_err:
+                                    raise last_err
+                            else:
+                                try:
+                                    model_instance = structured(schema, method=method, include_raw=True)
+                                    logger.debug("with_structured_output succeeded with include_raw=True")
+                                except TypeError:
+                                    try:
+                                        model_instance = structured(schema, method=method)
+                                        logger.debug("with_structured_output succeeded without include_raw")
+                                    except Exception as inner_e:
+                                        logger.debug("with_structured_output failed even without include_raw: %s", inner_e)
+                                        raise
+                        model_instance = self._wrap_structured_output_model(model_instance)
+                        # Clear response_format to avoid LiteLLM buggy handling and ToolStrategy errors
+                        logger.info("Before assignment response_format id=%s value=%s", id(response_format), response_format)
+                        response_format = None
+                        logger.info("After assignment response_format id=%s value=%s", id(response_format), response_format)
+                        logger.info("LiteLLM JSON Schema workaround succeeded for %s", provider_id)
+                    else:
+                        logger.info("with_structured_output not callable, clearing response_format to avoid ToolStrategy errors")
+                        response_format = None
+                except Exception as e:
+                    logger.error("with_structured_output failed for %s with LiteLLM: %s; clearing response_format to avoid ToolStrategy errors", provider_id, e)
+                    logger.error("with_structured_output failed for %s with LiteLLM; clearing response_format to avoid ToolStrategy errors", provider_id, exc_info=True)
+                    response_format = None
+            else:
+                logger.info("Skipping LiteLLM JSON Schema workaround: response_format is not JSON Schema (%s)", response_format)
+
+
+        logger.info("After workaround block: provider_id=%s, response_format id=%s value=%s, _use_litellm=%s", provider_id, id(response_format), response_format, self._use_litellm)
         # Provider-specific structured output wrapping (only when not using LiteLLM)
         if not self._use_litellm:
             if response_format is not None and provider_id == "ollama":
@@ -986,6 +1096,8 @@ class LLMClient:
                 effective_response_format = response_format
             else:
                 effective_response_format = response_format if provider_id == "openai" else None
+            logger.debug("create_agent_for_spec: provider_id=%s, response_format id=%s value=%s", provider_id, id(response_format), response_format)
+            logger.debug("create_agent_for_spec: effective_response_format id=%s value=%s, _use_litellm=%s", id(effective_response_format), effective_response_format, self._use_litellm)
             agent = self._create_agent(
                 model=model_instance,
                 tools=tools or [],
@@ -1258,9 +1370,12 @@ class LLMClient:
         Centralized provider-agnostic structured output adapter.
         Returns provider-specific response_format payload or schema for Ollama.
         """
+        logger.info("_build_structured_output_adapter called with spec=%s", spec.name if hasattr(spec, 'name') else spec)
         if response_format is not None:
+            logger.info("Returning existing response_format")
             return response_format
         if not getattr(spec, "structured_output_enabled", False):
+            logger.info("structured_output_enabled is False")
             return None
 
         raw_schema = getattr(spec, "schema_json", None)
@@ -1276,27 +1391,40 @@ class LLMClient:
         if not schema:
             return None
         # Dual-path structured output: LiteLLM vs provider-specific formats
+        raw_provider = getattr(spec, "provider_id", None)
+        logger.info("_build_structured_output_adapter: raw provider_id=%s", raw_provider)
+        provider_id = (raw_provider or "openai").lower()
+        logger.info("_build_structured_output_adapter: provider_id=%s, _use_litellm=%s", provider_id, self._use_litellm)
         if self._use_litellm:
             # Unified LiteLLM JSON Schema format for all providers
-            return {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": getattr(spec, "schema_name", None) or "schema",
-                    "schema": schema,
-                    "strict": True,
-                },
+            json_schema = {
+                "name": getattr(spec, "schema_name", None) or "schema",
+                "schema": schema,
             }
+            # Only include strict for providers that support it (OpenAI rejects it)
+            if provider_id != "openai":
+                json_schema["strict"] = True
+                logger.info("Adding strict=True to JSON schema for provider %s", provider_id)
+            else:
+                logger.info("Skipping strict parameter for OpenAI provider")
+            result = {
+                "type": "json_schema",
+                "json_schema": json_schema,
+            }
+            logger.info("Returning LiteLLM response_format: %s", result)
+            return result
         
         # Provider-specific formats for USE_LITELLM=false (original logic)
-        provider_id = (getattr(spec, "provider_id", None) or "").lower()
         if provider_id == "openai":
-            return {
+            result = {
                 "type": "json_schema",
                 "json_schema": {
                     "name": getattr(spec, "schema_name", None) or "schema",
                     "schema": schema,
                 },
             }
+            logger.info("Returning OpenAI response_format (no strict): %s", result)
+            return result
         if provider_id == "ollama":
             return schema
         if provider_id == "deepseek":

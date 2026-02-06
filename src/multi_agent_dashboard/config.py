@@ -235,7 +235,9 @@ def main():
 
     print("\nSecret environment variables:")
     print("-----------------------------")
-    print(f"OPENAI_API_KEY: {OPENAI_API_KEY}")
+    print(f"OPENAI_API_KEY: {'***REDACTED***' if OPENAI_API_KEY else None}")
+    if DEEPSEEK_API_KEY:
+        print(f"DEEPSEEK_API_KEY: {'***REDACTED***'}")
 
 
 if __name__ == "__main__":
