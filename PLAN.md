@@ -198,54 +198,75 @@ This isolation ensures:
 
 **Sub‑steps:**
 
-1. **Research LiteLLM capability APIs** (prerequisite):
-   - Verify existence of `litellm.supports_feature()`, `litellm.get_supported_openai_params()`, or other dynamic detection APIs.
-   - Identify provider‑specific size limits and supported MIME types from LiteLLM documentation.
-   - If no API exists, plan runtime probing with small test files and graceful error handling.
+1. ✅ **Research LiteLLM capability APIs** (prerequisite):
+   - Verified existence of `litellm.supports_response_schema()` and `litellm.get_supported_openai_params()` (though they may return `None` or incorrect values).
+   - Identified that `litellm.supports_feature()` does **not** exist in the installed version.
+   - Updated `litellm_config.supports_feature` to attempt dynamic detection first, then fall back to static mapping.
 
-2. **Create `multimodal_handler.py` module** with responsibilities:
-   - Define interface: `prepare_messages(prompt, files, provider_id, model, use_litellm)` returning LiteLLM‑ready messages.
-   - Detect provider capabilities via LiteLLM’s dynamic feature‑detection APIs (`litellm.supports_feature()`).
-   - Convert file payloads (bytes + metadata) into provider‑appropriate content blocks (`image_url`, `document_url`, `text`).
-   - Implement fallback routing: unsupported file types → local text extraction → filename‑only mention.
-   - Enforce provider‑specific size limits (accounting for base64 overhead) and MIME‑type validation.
-   - Cache capability detection results per (provider, model) to avoid repeated checks.
-   - Ensure ChatLiteLLM can handle the generated content‑block messages (OpenAI‑style).
+2. ✅ **Create `multimodal_handler.py` module** with responsibilities:
+   - Defined interface: `prepare_multimodal_content(provider_id, model, files, profile, prompt)` returning either a string (text concatenation) or a list of content parts (OpenAI‑style).
+   - Detects provider capabilities via `litellm_config.supports_feature` (cached).
+   - Converts image files to base64 `image_url` content blocks when provider supports vision.
+   - Implements fallback routing: unsupported file types → text placeholder.
+   - Enforces size limits (10 MB for base64 encoding).
+   - Caches capability detection per (provider, model) using `lru_cache`.
 
-3. **Extend `llm_client.py` with isolated LiteLLM‑path logic**:
-   - Add conditional branch in `invoke_agent` that only activates when `self._use_litellm` is True.
-   - Inside the branch, lazily import `MultimodalHandler` (to avoid dependency issues) and call `prepare_messages()` to convert `prompt` + `files` into LiteLLM‑ready messages.
-   - Keep the `else` branch **byte‑for‑byte identical** to current text‑concatenation logic.
-   - Add a new helper method `_invoke_litellm_agent` that accepts pre‑built messages and adapts the agent‑invocation flow to use `ChatLiteLLM`.
-   - The helper method should accept agent, messages, provider_id, model, tools, structured_output_schema, temperature, max_tokens, etc., and call `litellm.completion` or `ChatLiteLLM` with appropriate parameter translation.
-   - Ensure any failure in multimodal preparation falls back to text‑concatenation (matching legacy behavior).
+3. ✅ **Extend `llm_client.py` with isolated LiteLLM‑path logic**:
+   - Added conditional branch in `invoke_agent` that activates when `self._use_litellm` is True.
+   - Inside the branch, lazily imports `multimodal_handler` and calls `prepare_multimodal_content`.
+   - Keeps the `else` branch **byte‑for‑byte identical** to current text‑concatenation logic.
+   - Propagates provider info (`_provider_id`, `_model`, `_provider_features`) to the agent instance in `create_agent_for_spec`.
+   - Builds the user message content as either a list (multimodal parts) or a string (text concatenation).
+   - Ensures any failure in multimodal preparation falls back to text‑concatenation (matching legacy behavior).
 
-4. **Implement capability‑aware file processing with fallbacks**:
-   - **Text files** (txt, md, csv, json): Always embedded as plain text (universal fallback).
-   - **Images** (jpg, png, gif, webp): Convert to base64 `image_url` content blocks if provider supports vision.
-   - **Documents** (pdf, docx, txt): Use LiteLLM document upload if supported; otherwise fallback to local text extraction.
-   - **Binary unsupported**: Mention filename only.
-   - Perform base64 encoding lazily only when provider supports the file type (to avoid unnecessary CPU/memory overhead).
-   - Provide example fallback function `provider_supports_vision()` that uses LiteLLM detection first, static mapping as backup.
+4. **Implement capability‑aware file processing with fallbacks** (in progress, bugs identified):
+   - ✅ **Images** (jpg, png, gif, webp): Convert to base64 `image_url` content blocks if provider supports vision.
+   - ❌ **Text files** (txt, md, csv, json): Currently **broken** – text MIME types are not recognized, causing them to be treated as unsupported binary. **Fix required**: add branch for `TEXT_MIME_TYPES` that decodes bytes to UTF‑8 and appends as `{"type": "text", "text": …}`.
+   - ❌ **PDFs** (pdf, docx): Currently **broken** – PDFs are neither vision nor text MIME types, resulting in “binary not attached” placeholder. **PDF inspection is a required feature**. **Fix required**: (a) decode PDF bytes with `errors="replace"` to allow metadata extraction (mimicking legacy path) as immediate fallback; (b) integrate a PDF text‑extraction library (`pypdf`, `pdfplumber`) to extract plain text before sending (required for proper inspection).
+   - ✅ **Binary unsupported**: Mention filename only (placeholder).
+   - ✅ **Base64 encoding lazily**: Only performed when provider supports vision and file is an image.
+   - ✅ **Fallback function**: `provider_supports_vision()` uses cached detection.
 
-5. **Preserve existing layers unchanged**:
+5. ✅ **Preserve existing layers unchanged**:
    - **UI** (`run_mode.py`): File uploader, size limits, metadata collection – no changes.
    - **Engine** (`engine.py`): Files stored in `engine.state["files"]` and injected into agents – no changes.
    - **Agent Runtime** (`models.py`): Text/binary splitting, UTF‑8 decoding, `llm_files_payload` building – no changes.
 
-6. **Testing and documentation**:
-   - Run existing file‑attachment tests with `USE_LITELLM=false` (must pass unchanged).
-   - Add new integration tests for `USE_LITELLM=true` with image/PDF uploads and verify fallback behavior.
+6. **Testing and documentation** (in progress):
+   - ✅ Run existing file‑attachment tests with `USE_LITELLM=false` (pass unchanged).
+   - ✅ Smoke tests with mocked agents confirm dual‑path isolation works.
+   - ❌ **Manual testing reveals bugs** (text files & PDFs broken on LiteLLM path).
+   - ❌ Integration tests for `USE_LITELLM=true` with image/PDF uploads **not yet added**.
+   - ❌ `AGENTS.md` update pending.
+
+**Verification** (current state):
+- ✅ **Isolation**: Legacy path (`USE_LITELLM=false`) works exactly as before – text‑concatenation only.
+- ✅ **Image handling**: PNG files are base64‑encoded for vision‑capable providers (OpenAI) and fall back to text concatenation for non‑vision providers (DeepSeek, Ollama).
+- ❌ **Text files**: Broken on LiteLLM path for all providers – receive “binary not attached” placeholder.
+- ❌ **PDF files**: Broken on LiteLLM path for all providers – receive “binary not attached” placeholder.
+- ✅ **No UI changes**: File‑upload component unchanged.
+- ✅ **Caching**: Capability detection cached via `lru_cache`.
+- ✅ **Fallback**: Non‑vision providers automatically fall back to text concatenation.
+
+**Status:** Core integration complete, dual‑path isolation validated, but two critical bugs must be fixed before Step 4 can be considered fully implemented. The architectural foundation is solid; the remaining work is limited to extending the MIME‑type detection in `multimodal_handler.py`.
+
+**Recommendations & Next Steps:**
+
+1. **Immediate fixes (required before validation):**
+   - Extend `multimodal_handler` to handle `TEXT_MIME_TYPES` by decoding bytes to UTF‑8 and appending as text parts.
+   - Add a fallback for unsupported binary files (PDFs, etc.) that decodes with `errors="replace"` and includes the resulting text (mimicking legacy path). This preserves metadata‑extraction capability.
+   - Ensure PDF inspection works: integrate a lightweight PDF library (`pypdf` or `pdfplumber`) to extract plain text from PDFs before sending them to the LLM (required feature).
+   - Verify provider‑feature detection works correctly for all three providers.
+
+2. **Enhancements (optional but valuable):**
+   - Improve image‑size handling with clearer warnings and fallback to text concatenation when base64 would exceed provider limits.
+
+3. **Validation plan:**
+   - Run the same manual test suite after fixes to confirm text files and PDFs are correctly attached.
+   - Add integration tests for `USE_LITELLM=true` with image, PDF, and text uploads.
    - Update `AGENTS.md` with new file‑upload architecture and usage notes.
 
-**Verification:**
-- Upload a `.txt`, `.pdf`, `.csv` file with each provider; the agent receives the file content.
-- Image files are accepted for vision‑capable models (e.g., GPT‑4o, Claude) via native content blocks when `USE_LITELLM=true`.
-- Legacy path (`USE_LITELLM=false`) continues to work exactly as before – text‑concatenation only.
-- No breaking changes to the UI file‑upload component.
-- Capability detection caching works (no repeated API calls).
-- Fallback to text‑concatenation when provider lacks multimodal support.
-- Base64 encoding does not exceed provider size limits (accounting for ~33% overhead).
+**Estimated effort:** 1–2 hours for fixes, plus testing.
 
 ---
 
