@@ -1125,6 +1125,14 @@ class LLMClient:
             except Exception:
                 logger.debug("Failed to propagate effective_request_timeout to agent instance", exc_info=True)
 
+            # Propagate provider info for multimodal file handling
+            try:
+                setattr(agent, "_provider_id", getattr(spec, "provider_id", None))
+                setattr(agent, "_model", getattr(spec, "model", None))
+                setattr(agent, "_provider_features", getattr(spec, "provider_features", None))
+            except Exception:
+                logger.debug("Unable to set provider info on agent instance", exc_info=True)
+
             # If instrumentation was not attached, log an explicit warning so operators are aware
             if not instrumentation_attached:
                 logger.warning(
@@ -1456,24 +1464,63 @@ class LLMClient:
             raise RuntimeError("LangChain invoke_agent not available")
 
         combined_prompt = str(prompt or "")
+        multimodal_content_parts = None  # If list, use this instead of combined_prompt
+        processed_files = []
+
         if files:
-            for f in files:
-                filename = f.get("filename", "file")
-                content = f.get("content")
+            files_processed = False
+            if self._use_litellm:
+                # Lazy import to avoid overhead for legacy path
                 try:
-                    if isinstance(content, (bytes, bytearray)):
-                        text = content.decode("utf-8", errors="replace")
-                        combined_prompt += f"\n\n--- FILE: {filename} ---\n{text}"
+                    from multi_agent_dashboard.multimodal_handler import prepare_multimodal_content
+                except ImportError:
+                    logger.warning("multimodal_handler not available, falling back to text concatenation")
+                    prepare_multimodal_content = None
+
+                if prepare_multimodal_content:
+                    provider_id = getattr(agent, "_provider_id", None)
+                    model = getattr(agent, "_model", None)
+                    provider_features = getattr(agent, "_provider_features", None)
+                    content, processed_files = prepare_multimodal_content(
+                        provider_id=provider_id,
+                        model=model,
+                        files=files,
+                        profile=provider_features,
+                        prompt=combined_prompt,
+                    )
+                    if isinstance(content, list):
+                        multimodal_content_parts = content
+                        combined_prompt = ""  # not used
                     else:
-                        combined_prompt += f"\n\n--- FILE: {filename} ---\n{str(content)}"
-                except Exception:
-                    combined_prompt += f"\n\n--- FILE: {filename} (binary not attached) ---\n"
+                        combined_prompt = content  # string
+                    files_processed = True
+                # If prepare_multimodal_content is None, fall through to legacy concatenation
+
+            if not files_processed:
+                # Legacy concatenation (original logic)
+                for f in files:
+                    filename = f.get("filename", "file")
+                    content = f.get("content")
+                    try:
+                        if isinstance(content, (bytes, bytearray)):
+                            text = content.decode("utf-8", errors="replace")
+                            combined_prompt += f"\n\n--- FILE: {filename} ---\n{text}"
+                        else:
+                            combined_prompt += f"\n\n--- FILE: {filename} ---\n{str(content)}"
+                    except Exception:
+                        combined_prompt += f"\n\n--- FILE: {filename} (binary not attached) ---\n"
 
         # Build the state expected by agent.invoke (messages array)
+        # Determine user message content based on multimodal handling
+        if multimodal_content_parts is not None:
+            user_content = multimodal_content_parts
+        else:
+            user_content = combined_prompt
+        
         state = {
             "messages": [
                 self._SystemMessage(getattr(agent, "system_prompt", "") or "") if (getattr(agent, "system_prompt", None) and self._SystemMessage) else None,
-                self._HumanMessage(combined_prompt) if self._HumanMessage else {"role": "user", "content": combined_prompt},
+                self._HumanMessage(user_content) if self._HumanMessage else {"role": "user", "content": user_content},
             ]
         }
         # Clean None if we didn't build a SystemMessage instance

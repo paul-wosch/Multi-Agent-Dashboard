@@ -249,6 +249,41 @@ def supports_feature(provider_id: str, feature: str) -> bool:
         True if the feature is supported.
     """
     provider_id = provider_id.lower() if provider_id else ""
+    
+    # Try LiteLLM's dynamic detection first
+    try:
+        import litellm
+        
+        # Map feature names to LiteLLM detection methods
+        if feature == "json_mode":
+            # Check if provider supports response schema (JSON mode)
+            if hasattr(litellm, "supports_response_schema"):
+                if litellm.supports_response_schema(provider_id):
+                    return True
+                # If detection returns False, continue to fallback
+        
+        # For vision, check if vision is in supported OpenAI params
+        if feature == "vision":
+            if hasattr(litellm, "get_supported_openai_params"):
+                params = litellm.get_supported_openai_params(provider_id)
+                if params and "vision" in params:
+                    return True
+        
+        # For function_calling and tools, check if tools param supported
+        if feature in ("function_calling", "tools"):
+            if hasattr(litellm, "get_supported_openai_params"):
+                params = litellm.get_supported_openai_params(provider_id)
+                if params and "tools" in params:
+                    return True
+        
+        # For streaming, most providers support it; default True
+        if feature == "streaming":
+            return True
+            
+    except Exception as e:
+        logger.debug(f"LiteLLM dynamic feature detection failed for {provider_id}.{feature}: {e}")
+    
+    # Fallback to static mapping
     return feature in SUPPORTED_FEATURES.get(provider_id, [])
 
 
