@@ -189,25 +189,63 @@ This isolation ensures:
 
 **Current problem:** File attachments are only processed for OpenAI’s Responses API (`use_responses_api=True`); other providers receive a plain‑text concatenation.
 
+**Updated constraints:**
+- **Legacy path locked**: `USE_LITELLM=false` path must stay unchanged – no modifications to existing file‑handling logic.
+- **Isolation**: All new logic must be isolated from legacy code in dedicated module(s).
+- **Separation of concerns**: New logic must not touch legacy branches; reuse existing UI, engine, and agent‑runtime layers unchanged.
+- **Non‑persistent storage**: Files remain in pipeline state only (no disk/database writes).
+- **Dynamic capability detection**: Use `litellm.supports_feature()` or equivalent runtime detection instead of static mapping.
+
 **Sub‑steps:**
 
-1. Leverage LiteLLM’s native multimodal support: convert file attachments into `content` blocks with `type: "image_url"`, `type: "document_url"`, or `type: "text"`.
+1. **Research LiteLLM capability APIs** (prerequisite):
+   - Verify existence of `litellm.supports_feature()`, `litellm.get_supported_openai_params()`, or other dynamic detection APIs.
+   - Identify provider‑specific size limits and supported MIME types from LiteLLM documentation.
+   - If no API exists, plan runtime probing with small test files and graceful error handling.
 
-2. Add a preprocessing function in `llm_client.py` that:
-   - Detects file MIME types
-   - Encodes small files inline (base64)
-   - For large files, uploads to a temporary store and passes a URL (if the provider supports URL‑based content)
+2. **Create `multimodal_handler.py` module** with responsibilities:
+   - Define interface: `prepare_messages(prompt, files, provider_id, model, use_litellm)` returning LiteLLM‑ready messages.
+   - Detect provider capabilities via LiteLLM’s dynamic feature‑detection APIs (`litellm.supports_feature()`).
+   - Convert file payloads (bytes + metadata) into provider‑appropriate content blocks (`image_url`, `document_url`, `text`).
+   - Implement fallback routing: unsupported file types → local text extraction → filename‑only mention.
+   - Enforce provider‑specific size limits (accounting for base64 overhead) and MIME‑type validation.
+   - Cache capability detection results per (provider, model) to avoid repeated checks.
+   - Ensure ChatLiteLLM can handle the generated content‑block messages (OpenAI‑style).
 
-3. Modify the `files` parameter in `invoke_agent` to pass the processed content blocks directly to LiteLLM.
+3. **Extend `llm_client.py` with isolated LiteLLM‑path logic**:
+   - Add conditional branch in `invoke_agent` that only activates when `self._use_litellm` is True.
+   - Inside the branch, lazily import `MultimodalHandler` (to avoid dependency issues) and call `prepare_messages()` to convert `prompt` + `files` into LiteLLM‑ready messages.
+   - Keep the `else` branch **byte‑for‑byte identical** to current text‑concatenation logic.
+   - Add a new helper method `_invoke_litellm_agent` that accepts pre‑built messages and adapts the agent‑invocation flow to use `ChatLiteLLM`.
+   - The helper method should accept agent, messages, provider_id, model, tools, structured_output_schema, temperature, max_tokens, etc., and call `litellm.completion` or `ChatLiteLLM` with appropriate parameter translation.
+   - Ensure any failure in multimodal preparation falls back to text‑concatenation (matching legacy behavior).
 
-4. Ensure fallback for providers without multimodal support: LiteLLM will automatically strip unsupported content types and keep only the text parts.
+4. **Implement capability‑aware file processing with fallbacks**:
+   - **Text files** (txt, md, csv, json): Always embedded as plain text (universal fallback).
+   - **Images** (jpg, png, gif, webp): Convert to base64 `image_url` content blocks if provider supports vision.
+   - **Documents** (pdf, docx, txt): Use LiteLLM document upload if supported; otherwise fallback to local text extraction.
+   - **Binary unsupported**: Mention filename only.
+   - Perform base64 encoding lazily only when provider supports the file type (to avoid unnecessary CPU/memory overhead).
+   - Provide example fallback function `provider_supports_vision()` that uses LiteLLM detection first, static mapping as backup.
 
-5. **Dual‑path handling**: Keep existing file‑attachment logic for `USE_LITELLM=false` (legacy providers) until LiteLLM path is fully validated.
+5. **Preserve existing layers unchanged**:
+   - **UI** (`run_mode.py`): File uploader, size limits, metadata collection – no changes.
+   - **Engine** (`engine.py`): Files stored in `engine.state["files"]` and injected into agents – no changes.
+   - **Agent Runtime** (`models.py`): Text/binary splitting, UTF‑8 decoding, `llm_files_payload` building – no changes.
+
+6. **Testing and documentation**:
+   - Run existing file‑attachment tests with `USE_LITELLM=false` (must pass unchanged).
+   - Add new integration tests for `USE_LITELLM=true` with image/PDF uploads and verify fallback behavior.
+   - Update `AGENTS.md` with new file‑upload architecture and usage notes.
 
 **Verification:**
-- Upload a `.txt`, `.pdf`, `.csv` file with each provider; the agent receives the file content
-- Image files are accepted for vision‑capable models (e.g., GPT‑4o, Claude)
-- No breaking changes to the UI file‑upload component
+- Upload a `.txt`, `.pdf`, `.csv` file with each provider; the agent receives the file content.
+- Image files are accepted for vision‑capable models (e.g., GPT‑4o, Claude) via native content blocks when `USE_LITELLM=true`.
+- Legacy path (`USE_LITELLM=false`) continues to work exactly as before – text‑concatenation only.
+- No breaking changes to the UI file‑upload component.
+- Capability detection caching works (no repeated API calls).
+- Fallback to text‑concatenation when provider lacks multimodal support.
+- Base64 encoding does not exceed provider size limits (accounting for ~33% overhead).
 
 ---
 
@@ -246,9 +284,9 @@ This isolation ensures:
    *Implemented for `USE_LITELLM=true` path.*
 
 2. ✅ Map agent‑spec fields (`temperature`, `max_output_tokens`, `stop_sequences`) to these parameters.  
-   *Mapping exists but needs graceful handling for unsupported values.*
+   *Mapping implemented; unsupported values are logged via `drop_params`.*
 
-3. ⚠️ **Fix: Use LiteLLM’s `drop_params` feature for graceful parameter handling**:
+3. ✅ **Fix: Use LiteLLM’s `drop_params` feature for graceful parameter handling**:
    - Set `litellm.drop_params = True` globally to log warnings about dropping unsupported parameters instead of raising errors.
    - This solves the GPT‑5 temperature issue and other provider‑specific constraints without hardcoded exceptions.
    - Keep provider‑specific parameter translation in `ChatModelFactory.get_model` for the `USE_LITELLM=false` path until full migration.
@@ -312,7 +350,7 @@ This isolation ensures:
 
 1. Update provider dropdowns to reflect that LiteLLM is the underlying engine (keep same provider IDs for backward compatibility).
 
-2. Add a hidden advanced setting `use_litellm` (default `True`) that can be turned off to revert to the old provider‑specific adapters (safety switch).
+2. Add a hidden advanced setting `USE_LITELLM` (default `False`) that can be turned off to revert to the old provider‑specific adapters (safety switch).
 
 3. Extend the provider‑features detection in `ui/agent_editor_mode.py` to query LiteLLM for supported capabilities (streaming, tools, vision, JSON mode) and grey out unsupported options.
 
@@ -356,7 +394,7 @@ This isolation ensures:
 **Phase 1 (Steps 1–3)** – Core LiteLLM integration and token‑counting normalization.  
 - Implement `LiteLLMClient` and configuration mapping (already completed).
 - **Critical**: Maintain dual‑path architecture—keep legacy provider‑specific code fully functional for `USE_LITELLM=false`.
-- Set `use_litellm` flag default to `False` (already set).
+- Set `USE_LITELLM` flag default to `False` (already set).
 
 **Phase 2 (Steps 4–6)** – File uploads, tool calling, parameter standardization.  
 - Implement file‑upload preprocessing using LiteLLM’s multimodal support.
@@ -372,7 +410,7 @@ This isolation ensures:
 - Comprehensive unit and integration tests for both `USE_LITELLM` paths.
 - End‑to‑end smoke tests with all three providers.
 - Performance benchmarking and token‑counting validation.
-- Switch `use_litellm` default to `True` after validation passes.
+- Switch `USE_LITELLM` default to `True` after validation passes.
 
 **Phase 5 (Post‑validation)** – Remove old adapters and provider‑specific code.  
 - Delete provider‑specific usage extraction helpers (`_extract_usage_from_*`).
@@ -380,7 +418,7 @@ This isolation ensures:
 - Remove provider‑specific fallback loops (DeepSeek `methods` loop, etc.).
 - Final code reduction goal: ~300 lines removed.
 
-Each phase should be merged separately, with the `use_litellm` flag defaulting to `False` until Phase 4. Removal of old adapters (Phase 5) is **optional** and can be deferred if continued dual‑path operation is preferred.
+Each phase should be merged separately, with the `USE_LITELLM` flag defaulting to `False` until Phase 4. Removal of old adapters (Phase 5) is **optional** and can be deferred if continued dual‑path operation is preferred.
 
 ## Success Metrics
 
@@ -388,7 +426,7 @@ Each phase should be merged separately, with the `use_litellm` flag defaulting t
 - **Feature parity:** All existing features work identically across providers in both `USE_LITELLM` modes.
 - **Extensibility:** Adding a new provider requires only adding its model string to the LiteLLM mapping (once LiteLLM path is default).
 - **Performance:** No significant increase in latency or token‑counting errors compared to native provider implementations.
-- **User experience:** No visible change for existing users except improved consistency; advanced `use_litellm` toggle allows fallback to legacy adapters if needed.
+- **User experience:** No visible change for existing users except improved consistency; advanced `USE_LITELLM` toggle allows fallback to legacy adapters if needed.
 
 ## Risks and Mitigations
 

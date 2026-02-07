@@ -10,7 +10,7 @@ The Multi-Agent Dashboard is a Streamlit-based Python application for building, 
 - **Persistent SQLite storage** with automatic migrations
 - **Rich observability** (cost, latency, logs, history)
 - **Tool calling** with per-agent controls
-- **Provider-agnostic LLM integration** (OpenAI, DeepSeek, Ollama)
+- **Provider-agnostic LLM integration** (OpenAI, DeepSeek, Ollama) with LiteLLM translation layer for normalization
 - **Structured output** with JSON schema validation
 
 The codebase follows a clean separation between UI (`src/multi_agent_dashboard/ui/`) and engine (`src/multi_agent_dashboard/`). Database access is layered with low-level infra (`db/infra/`), DAOs (`db/*.py`), and high-level services (`db/services.py`).
@@ -148,10 +148,10 @@ docs/                      # Project documentation
 
 ### LLM Provider Integration
 
-- Provider‑agnostic client in `llm_client.py` with factory pattern
+- Provider‑agnostic client in `llm_client.py` with factory pattern; LiteLLM integration path (`USE_LITELLM=true`) uses `LiteLLMClient` for unified provider handling
 - Supported providers: `openai`, `deepseek`, `ollama`
 - Provider‑specific logic is encapsulated in `_build_structured_output_adapter` and `_compute_cost`
-- Structured output uses `with_structured_output(method="function_calling")` where available
+- Structured output uses `with_structured_output(method="function_calling")` where available; the LiteLLM path (`USE_LITELLM=true`) normalizes JSON‑Schema formatting across all providers via LiteLLM’s `response_format` parameter
 - Token accounting and pricing are preserved across all providers
 
 **Key provider‑aware functions:**
@@ -235,6 +235,7 @@ A database is considered “fresh” if no user‑created tables exist or existi
 |----------|----------|-------------|
 | `OPENAI_API_KEY` | Yes | OpenAI API key |
 | `DEEPSEEK_API_KEY` | Optional | DeepSeek API key |
+| `OLLAMA_HOST` | Optional | Ollama server URL (maps to LiteLLM `base_url`) |
 | `DB_FILE` | Optional | Override default database filename |
 | `LOG_LEVEL` | Optional | Logging level (INFO, DEBUG, etc.) |
 
@@ -273,9 +274,11 @@ Color themes and emoji symbols are centralized in `config.UI_COLORS`. Avoid hard
 
 10. **Provider features normalization** – Provider features (`provider_features`) are normalized to keys `tool_calling`, `structured_output`, `reasoning`, `image_inputs`, `max_input_tokens`. The engine also accepts variations (`tool_calls`, `toolcalling`, `toolCalling`, etc.) but stores them normalized.
 
+11. **LiteLLM parameter dropping** – Enable `litellm.drop_params = True` to log warnings about unsupported parameters (e.g., GPT‑5 temperature) instead of raising errors; use `litellm.supports_response_schema()` and `litellm.get_supported_openai_params()` for dynamic feature detection.
+
 ## LiteLLM Integration & Architectural Guidelines
 
-**Current Initiative**: Integrating LiteLLM as a universal translation layer to normalize provider‑specific handling (token counting, structured output, file uploads, tool calling). Refer to `PLAN.md` for detailed rollout.
+**Current Initiative**: Integrating LiteLLM as a universal translation layer to normalize provider‑specific handling (token counting, structured output, file uploads, tool calling). Token counting and structured output have been normalized for the `USE_LITELLM=true` path; file uploads integration is in progress. Refer to `PLAN.md` for detailed rollout.
 
 **High‑Level Directives**:
 
@@ -287,6 +290,7 @@ Color themes and emoji symbols are centralized in `config.UI_COLORS`. Avoid hard
    - **Prefer new modules/functions/classes** for the `langchain‑litellm` path over modifications/conditionals inside existing structures.
    - Keep new and old logic as separated and uncoupled as possible.
    - Examples: Add `LiteLLMClient` class instead of modifying `LLMClient` with branches; create `litellm_config.py` instead of extending `config.py`.
+   - **File upload integration**: New file handling logic must be isolated in dedicated modules; legacy path (`USE_LITELLM=false`) must remain unchanged. See PLAN.md Step 4 for full constraints (dynamic capability detection, non‑persistent storage, etc.).
 
 3. **Graceful Parameter Handling**:
    - Enable `litellm.drop_params = True` globally to log warnings about dropping unsupported parameters (e.g., GPT‑5 temperature) instead of raising errors.
