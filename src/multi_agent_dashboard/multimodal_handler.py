@@ -148,6 +148,18 @@ def prepare_multimodal_content(
                 continue
             except Exception as e:
                 logger.warning("Failed to base64 encode %s: %s", filename, e)
+        
+        elif mime_type in TEXT_MIME_TYPES:
+            # Text file: decode to UTF-8 and include as text part
+            try:
+                text = content.decode("utf-8", errors="replace")
+                content_parts.append(
+                    {"type": "text", "text": f"--- FILE: {filename} ---\n{text}"}
+                )
+                continue
+            except Exception as e:
+                logger.warning("Failed to decode text file %s: %s", filename, e)
+                # fall through to placeholder
 
         # Non-image binary or unsupported MIME type: fallback to text placeholder
         content_parts.append(

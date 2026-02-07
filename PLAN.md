@@ -221,7 +221,7 @@ This isolation ensures:
 
 4. **Implement capability‑aware file processing with fallbacks** (in progress, bugs identified):
    - ✅ **Images** (jpg, png, gif, webp): Convert to base64 `image_url` content blocks if provider supports vision.
-   - ❌ **Text files** (txt, md, csv, json): Currently **broken** – text MIME types are not recognized, causing them to be treated as unsupported binary. **Fix required**: add branch for `TEXT_MIME_TYPES` that decodes bytes to UTF‑8 and appends as `{"type": "text", "text": …}`.
+   - ✅ **Text files** (txt, md, csv, json): Decode to UTF‑8 and append as `{"type": "text", "text": …}` content parts.
    - ❌ **PDFs** (pdf, docx): Currently **broken** – PDFs are neither vision nor text MIME types, resulting in “binary not attached” placeholder. **PDF inspection is a required feature**. **Fix required**: (a) decode PDF bytes with `errors="replace"` to allow metadata extraction (mimicking legacy path) as immediate fallback; (b) integrate a PDF text‑extraction library (`pypdf`, `pdfplumber`) to extract plain text before sending (required for proper inspection).
    - ✅ **Binary unsupported**: Mention filename only (placeholder).
    - ✅ **Base64 encoding lazily**: Only performed when provider supports vision and file is an image.
@@ -242,7 +242,7 @@ This isolation ensures:
 **Verification** (current state):
 - ✅ **Isolation**: Legacy path (`USE_LITELLM=false`) works exactly as before – text‑concatenation only.
 - ✅ **Image handling**: PNG files are base64‑encoded for vision‑capable providers (OpenAI) and fall back to text concatenation for non‑vision providers (DeepSeek, Ollama).
-- ❌ **Text files**: Broken on LiteLLM path for all providers – receive “binary not attached” placeholder.
+- ✅ **Text files**: Fixed on LiteLLM path for all providers – text files are decoded and attached as text content parts.
 - ❌ **PDF files**: Broken on LiteLLM path for all providers – receive “binary not attached” placeholder.
 - ✅ **No UI changes**: File‑upload component unchanged.
 - ✅ **Caching**: Capability detection cached via `lru_cache`.
