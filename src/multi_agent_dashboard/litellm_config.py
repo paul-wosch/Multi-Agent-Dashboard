@@ -252,6 +252,12 @@ def supports_feature(provider_id: str, feature: str, model: Optional[str] = None
     """
     provider_id = provider_id.lower() if provider_id else ""
     
+    # Log the detection request
+    if model is not None:
+        logger.info(f"Checking feature support: provider={provider_id}, model={model}, feature={feature}")
+    else:
+        logger.debug(f"Checking feature support: provider={provider_id}, feature={feature}")
+    
     # Helper: heuristic model name pattern matching for vision
     def _model_suggests_vision(model_name: str) -> bool:
         model_lower = model_name.lower()
@@ -267,13 +273,17 @@ def supports_feature(provider_id: str, feature: str, model: Optional[str] = None
         if model is not None:
             # Construct full LiteLLM model string for model-specific detection
             detection_target = get_litellm_model_string(provider_id, model)
+            logger.debug(f"Using LiteLLM detection target: {detection_target}")
         
         # Map feature names to LiteLLM detection methods
         if feature == "json_mode":
             # Check if provider supports response schema (JSON mode)
             if hasattr(litellm, "supports_response_schema"):
                 if litellm.supports_response_schema(detection_target):
+                    logger.info(f"Provider {detection_target} supports JSON mode (detected via LiteLLM)")
                     return True
+                else:
+                    logger.debug(f"Provider {detection_target} does not support JSON mode via LiteLLM detection")
                 # If detection returns False, continue to fallback
         
         # For vision, check if vision is in supported OpenAI params
@@ -281,9 +291,13 @@ def supports_feature(provider_id: str, feature: str, model: Optional[str] = None
             if hasattr(litellm, "get_supported_openai_params"):
                 params = litellm.get_supported_openai_params(detection_target)
                 if params and "vision" in params:
+                    logger.info(f"Provider {detection_target} supports vision (detected via LiteLLM)")
                     return True
+                else:
+                    logger.debug(f"Provider {detection_target} does not have 'vision' in supported OpenAI params")
             # If model provided, also apply heuristic pattern matching
             if model is not None and _model_suggests_vision(model):
+                logger.info(f"Model {model} suggests vision capability via name pattern")
                 return True
         
         # For function_calling and tools, check if tools param supported
@@ -291,17 +305,26 @@ def supports_feature(provider_id: str, feature: str, model: Optional[str] = None
             if hasattr(litellm, "get_supported_openai_params"):
                 params = litellm.get_supported_openai_params(detection_target)
                 if params and "tools" in params:
+                    logger.info(f"Provider {detection_target} supports tools (detected via LiteLLM)")
                     return True
+                else:
+                    logger.debug(f"Provider {detection_target} does not have 'tools' in supported OpenAI params")
         
         # For streaming, most providers support it; default True
         if feature == "streaming":
+            logger.debug(f"Assuming streaming support for {detection_target}")
             return True
             
     except Exception as e:
         logger.debug(f"LiteLLM dynamic feature detection failed for {provider_id}.{feature}: {e}")
     
     # Fallback to static mapping
-    return feature in SUPPORTED_FEATURES.get(provider_id, [])
+    supported = feature in SUPPORTED_FEATURES.get(provider_id, [])
+    if supported:
+        logger.warning(f"Feature {feature} for provider {provider_id} determined via static mapping (LiteLLM detection unavailable or inconclusive)")
+    else:
+        logger.debug(f"Feature {feature} not supported by provider {provider_id} (static mapping)")
+    return supported
 
 
 # Export public interface

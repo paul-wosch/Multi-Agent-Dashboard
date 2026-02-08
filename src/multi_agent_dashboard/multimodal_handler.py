@@ -58,7 +58,10 @@ def provider_supports_vision(provider_id: str, model: str) -> bool:
     """
     Cached check whether a provider/model supports vision (image inputs).
     """
-    return litellm_config.supports_feature(provider_id, "vision", model)
+    logger.debug(f"Checking vision support for provider={provider_id}, model={model}")
+    result = litellm_config.supports_feature(provider_id, "vision", model)
+    logger.info(f"Vision support for provider={provider_id}, model={model}: {result}")
+    return result
 
 
 @lru_cache(maxsize=128)
@@ -66,7 +69,10 @@ def provider_supports_tools(provider_id: str, model: str) -> bool:
     """
     Cached check whether a provider/model supports tool attachments.
     """
-    return litellm_config.supports_feature(provider_id, "tools", model)
+    logger.debug(f"Checking tool support for provider={provider_id}, model={model}")
+    result = litellm_config.supports_feature(provider_id, "tools", model)
+    logger.info(f"Tool support for provider={provider_id}, model={model}: {result}")
+    return result
 
 
 def prepare_multimodal_content(
@@ -97,11 +103,14 @@ def prepare_multimodal_content(
         return prompt, []
 
     # Determine if provider supports vision based on profile or cached detection
+    logger.debug(f"Determining vision support for provider={provider_id}, model={model}")
     vision_supported = False
     if profile is not None and "image_inputs" in profile:
         vision_supported = bool(profile["image_inputs"])
+        logger.info(f"Vision support from profile: {vision_supported}")
     else:
         vision_supported = provider_supports_vision(provider_id, model)
+        logger.info(f"Vision support from detection: {vision_supported}")
 
 
 
