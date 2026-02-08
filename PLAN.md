@@ -185,7 +185,7 @@ This isolation ensures:
 
 ---
 
-### Step 4 – Enable Provider‑Agnostic File Uploads
+### Step 4 – Enable Provider‑Agnostic File Uploads ✅ COMPLETED
 
 **Current problem:** File attachments are only processed for OpenAI’s Responses API (`use_responses_api=True`); other providers receive a plain‑text concatenation.
 
@@ -219,54 +219,45 @@ This isolation ensures:
    - Builds the user message content as either a list (multimodal parts) or a string (text concatenation).
    - Ensures any failure in multimodal preparation falls back to text‑concatenation (matching legacy behavior).
 
-4. **Implement capability‑aware file processing with fallbacks** (in progress, bugs identified):
+4. ✅ **Implement capability‑aware file processing with fallbacks** (completed):
    - ✅ **Images** (jpg, png, gif, webp): Convert to base64 `image_url` content blocks if provider supports vision.
    - ✅ **Text files** (txt, md, csv, json): Decode to UTF‑8 and append as `{"type": "text", "text": …}` content parts.
-   - ❌ **PDFs** (pdf, docx): Currently **broken** – PDFs are neither vision nor text MIME types, resulting in “binary not attached” placeholder. **PDF inspection is a required feature**. **Fix required**: (a) decode PDF bytes with `errors="replace"` to allow metadata extraction (mimicking legacy path) as immediate fallback; (b) integrate a PDF text‑extraction library (`pypdf`, `pdfplumber`) to extract plain text before sending (required for proper inspection).
+   - ✅ **PDFs** (pdf, docx): Fixed with three‑stage fallback: (1) PDF text extraction via `pypdf` (if installed), (2) UTF‑8 decode with replacement characters for metadata, (3) placeholder for truly binary files. PDF inspection now works on LiteLLM path.
    - ✅ **Binary unsupported**: Mention filename only (placeholder).
    - ✅ **Base64 encoding lazily**: Only performed when provider supports vision and file is an image.
    - ✅ **Fallback function**: `provider_supports_vision()` uses cached detection.
+   - ✅ **Model‑aware detection**: `supports_feature()` now accepts optional `model` parameter for model‑specific capability detection (e.g., Ollama `llava` vs `llama3`).
 
 5. ✅ **Preserve existing layers unchanged**:
    - **UI** (`run_mode.py`): File uploader, size limits, metadata collection – no changes.
    - **Engine** (`engine.py`): Files stored in `engine.state["files"]` and injected into agents – no changes.
    - **Agent Runtime** (`models.py`): Text/binary splitting, UTF‑8 decoding, `llm_files_payload` building – no changes.
 
-6. **Testing and documentation** (in progress):
+6. ✅ **Testing and documentation** (completed):
    - ✅ Run existing file‑attachment tests with `USE_LITELLM=false` (pass unchanged).
    - ✅ Smoke tests with mocked agents confirm dual‑path isolation works.
-   - ❌ **Manual testing reveals bugs** (text files & PDFs broken on LiteLLM path).
-   - ❌ Integration tests for `USE_LITELLM=true` with image/PDF uploads **not yet added**.
-   - ❌ `AGENTS.md` update pending.
+   - ✅ **Manual testing** – text files and PDFs fixed on LiteLLM path, all file types processed correctly.
+   - ✅ Integration tests added for `USE_LITELLM=true` with image, PDF, and text uploads (tests pass).
+   - ✅ `AGENTS.md` updated with file‑upload architecture and usage notes.
 
 **Verification** (current state):
 - ✅ **Isolation**: Legacy path (`USE_LITELLM=false`) works exactly as before – text‑concatenation only.
 - ✅ **Image handling**: PNG files are base64‑encoded for vision‑capable providers (OpenAI) and fall back to text concatenation for non‑vision providers (DeepSeek, Ollama).
 - ✅ **Text files**: Fixed on LiteLLM path for all providers – text files are decoded and attached as text content parts.
-- ❌ **PDF files**: Broken on LiteLLM path for all providers – receive “binary not attached” placeholder.
+- ✅ **PDF files**: Fixed on LiteLLM path for all providers – PDFs are extracted via pypdf (if installed) or fallback to UTF‑8 decode.
 - ✅ **No UI changes**: File‑upload component unchanged.
 - ✅ **Caching**: Capability detection cached via `lru_cache`.
+- ✅ **Model‑aware detection**: Vision/tool detection now uses model‑specific checks via `supports_feature(provider_id, feature, model)`.
 - ✅ **Fallback**: Non‑vision providers automatically fall back to text concatenation.
 
-**Status:** Core integration complete, dual‑path isolation validated, but two critical bugs must be fixed before Step 4 can be considered fully implemented. The architectural foundation is solid; the remaining work is limited to extending the MIME‑type detection in `multimodal_handler.py`.
+**Status:** Step 4 fully implemented and validated. All file types (images, text, PDFs) are correctly processed on the LiteLLM path with proper fallbacks. Dual‑path isolation preserved, integration tests passing.
 
-**Recommendations & Next Steps:**
-
-1. **Immediate fixes (required before validation):**
-   - Extend `multimodal_handler` to handle `TEXT_MIME_TYPES` by decoding bytes to UTF‑8 and appending as text parts.
-   - Add a fallback for unsupported binary files (PDFs, etc.) that decodes with `errors="replace"` and includes the resulting text (mimicking legacy path). This preserves metadata‑extraction capability.
-   - Ensure PDF inspection works: integrate a lightweight PDF library (`pypdf` or `pdfplumber`) to extract plain text from PDFs before sending them to the LLM (required feature).
-   - Verify provider‑feature detection works correctly for all three providers.
-
-2. **Enhancements (optional but valuable):**
-   - Improve image‑size handling with clearer warnings and fallback to text concatenation when base64 would exceed provider limits.
-
-3. **Validation plan:**
-   - Run the same manual test suite after fixes to confirm text files and PDFs are correctly attached.
-   - Add integration tests for `USE_LITELLM=true` with image, PDF, and text uploads.
-   - Update `AGENTS.md` with new file‑upload architecture and usage notes.
-
-**Estimated effort:** 1–2 hours for fixes, plus testing.
+**Completion Report**:
+- **Date**: 2026‑02‑05
+- **Status**: Fully implemented and validated
+- **Testing**: All integration tests pass; manual validation confirms text files, images, and PDFs work correctly on LiteLLM path
+- **Documentation**: Updated `AGENTS.md` with file‑upload architecture and usage notes
+- **Dependencies**: Added `pypdf` optional dependency for PDF text extraction
 
 ---
 

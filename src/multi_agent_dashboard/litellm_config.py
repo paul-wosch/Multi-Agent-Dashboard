@@ -234,9 +234,9 @@ SUPPORTED_FEATURES = {
 }
 
 
-def supports_feature(provider_id: str, feature: str) -> bool:
+def supports_feature(provider_id: str, feature: str, model: Optional[str] = None) -> bool:
     """
-    Check if a provider supports a specific feature.
+    Check if a provider (and optionally a specific model) supports a specific feature.
     
     Note: This is a simplistic implementation. In production, you might want
     to query LiteLLM's capability detection or test dynamically.
@@ -244,35 +244,52 @@ def supports_feature(provider_id: str, feature: str) -> bool:
     Args:
         provider_id: Provider identifier
         feature: Feature name (json_mode, function_calling, vision, streaming, tools)
+        model: Optional model name (e.g., "llama3", "gpt-4o", "llava"). If provided,
+               detection is attempted for the specific model.
     
     Returns:
         True if the feature is supported.
     """
     provider_id = provider_id.lower() if provider_id else ""
     
+    # Helper: heuristic model name pattern matching for vision
+    def _model_suggests_vision(model_name: str) -> bool:
+        model_lower = model_name.lower()
+        vision_indicators = ["llava", "bakllava", "vision", "vl", "clip", "visual"]
+        return any(indicator in model_lower for indicator in vision_indicators)
+    
     # Try LiteLLM's dynamic detection first
     try:
         import litellm
+        
+        # Determine target for detection: provider or provider/model
+        detection_target = provider_id
+        if model is not None:
+            # Construct full LiteLLM model string for model-specific detection
+            detection_target = get_litellm_model_string(provider_id, model)
         
         # Map feature names to LiteLLM detection methods
         if feature == "json_mode":
             # Check if provider supports response schema (JSON mode)
             if hasattr(litellm, "supports_response_schema"):
-                if litellm.supports_response_schema(provider_id):
+                if litellm.supports_response_schema(detection_target):
                     return True
                 # If detection returns False, continue to fallback
         
         # For vision, check if vision is in supported OpenAI params
         if feature == "vision":
             if hasattr(litellm, "get_supported_openai_params"):
-                params = litellm.get_supported_openai_params(provider_id)
+                params = litellm.get_supported_openai_params(detection_target)
                 if params and "vision" in params:
                     return True
+            # If model provided, also apply heuristic pattern matching
+            if model is not None and _model_suggests_vision(model):
+                return True
         
         # For function_calling and tools, check if tools param supported
         if feature in ("function_calling", "tools"):
             if hasattr(litellm, "get_supported_openai_params"):
-                params = litellm.get_supported_openai_params(provider_id)
+                params = litellm.get_supported_openai_params(detection_target)
                 if params and "tools" in params:
                     return True
         

@@ -276,9 +276,11 @@ Color themes and emoji symbols are centralized in `config.UI_COLORS`. Avoid hard
 
 11. **LiteLLM parameter dropping** – Enable `litellm.drop_params = True` to log warnings about unsupported parameters (e.g., GPT‑5 temperature) instead of raising errors; use `litellm.supports_response_schema()` and `litellm.get_supported_openai_params()` for dynamic feature detection.
 
+12. **Multimodal file handling** – When `USE_LITELLM=true`, file uploads are processed by `multimodal_handler.py`. Images are base64-encoded for vision-capable providers (OpenAI). Text files (txt, md, csv, json, html, xml) are decoded as UTF-8 text parts. PDFs are extracted as text if `pypdf` is installed, otherwise fall back to UTF-8 decoding. Binary files are decoded with replacement characters. If provider does not support vision, files are concatenated as plain text with headers. **Vision/tool support detection is model‑aware** (e.g., Ollama `llava` vs `llama3`) using `supports_feature` with model parameter.
+
 ## LiteLLM Integration & Architectural Guidelines
 
-**Current Initiative**: Integrating LiteLLM as a universal translation layer to normalize provider‑specific handling (token counting, structured output, file uploads, tool calling). Token counting and structured output have been normalized for the `USE_LITELLM=true` path; file uploads integration is in progress. Refer to `PLAN.md` for detailed rollout.
+**Current Initiative**: Integrating LiteLLM as a universal translation layer to normalize provider‑specific handling (token counting, structured output, file uploads, tool calling). Token counting and structured output have been normalized for the `USE_LITELLM=true` path; file uploads integration is now available with multimodal fallback handling. Refer to `PLAN.md` for detailed rollout.
 
 **High‑Level Directives**:
 
@@ -295,6 +297,8 @@ Color themes and emoji symbols are centralized in `config.UI_COLORS`. Avoid hard
 3. **Graceful Parameter Handling**:
    - Enable `litellm.drop_params = True` globally to log warnings about dropping unsupported parameters (e.g., GPT‑5 temperature) instead of raising errors.
    - Use `litellm.supports_response_schema()` and `litellm.get_supported_openai_params()` for feature detection.
+   - **Environment variable strategy**: Set all provider API keys in `os.environ` for consistent LiteLLM compatibility, avoiding provider‑specific exceptions.
+   - **Leverage built‑in fallbacks**: Use LiteLLM’s provider detection and automatic fallback mechanisms instead of custom logic where possible.
 
 4. **Latest Dependencies**:
    - Install `langchain‑litellm` from GitHub main (includes PR 62 fixes for JSON Schema support, `tool_choice="any"` mapping, and proper `tool_calls` population).
@@ -302,6 +306,7 @@ Color themes and emoji symbols are centralized in `config.UI_COLORS`. Avoid hard
 
 5. **Validation & Rollout**:
    - Each rollout phase maintains dual‑path functionality.
+   - **Dual‑path validation**: Both paths must remain independently testable and functional until explicit removal of old adapters.
    - Removal of old adapters (Phase 5) is optional and can be deferred if continued dual‑path operation is preferred.
    - All existing tests must pass without regressions in both `USE_LITELLM` modes.
 

@@ -15,6 +15,14 @@ from typing import Dict, List, Any, Optional, Tuple, Union
 
 from multi_agent_dashboard import litellm_config
 
+# Optional PDF extraction library
+try:
+    import pypdf
+    PDF_EXTRACTION_AVAILABLE = True
+except ImportError:
+    pypdf = None
+    PDF_EXTRACTION_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 # Supported image MIME types for vision providers
@@ -36,6 +44,11 @@ TEXT_MIME_TYPES = {
     "text/xml",
 }
 
+# PDF MIME types
+PDF_MIME_TYPES = {
+    "application/pdf",
+}
+
 # Maximum file size for base64 encoding (10 MB) to avoid memory issues
 MAX_BASE64_SIZE = 10 * 1024 * 1024
 
@@ -45,7 +58,7 @@ def provider_supports_vision(provider_id: str, model: str) -> bool:
     """
     Cached check whether a provider/model supports vision (image inputs).
     """
-    return litellm_config.supports_feature(provider_id, "vision")
+    return litellm_config.supports_feature(provider_id, "vision", model)
 
 
 @lru_cache(maxsize=128)
@@ -53,7 +66,7 @@ def provider_supports_tools(provider_id: str, model: str) -> bool:
     """
     Cached check whether a provider/model supports tool attachments.
     """
-    return litellm_config.supports_feature(provider_id, "tools")
+    return litellm_config.supports_feature(provider_id, "tools", model)
 
 
 def prepare_multimodal_content(
@@ -85,20 +98,12 @@ def prepare_multimodal_content(
 
     # Determine if provider supports vision based on profile or cached detection
     vision_supported = False
-    if profile and profile.get("image_inputs"):
-        vision_supported = True
+    if profile is not None and "image_inputs" in profile:
+        vision_supported = bool(profile["image_inputs"])
     else:
         vision_supported = provider_supports_vision(provider_id, model)
 
-    # If provider doesn't support vision, fall back to text concatenation
-    if not vision_supported:
-        logger.debug(
-            "Provider %s/%s does not support vision; falling back to text concatenation",
-            provider_id,
-            model,
-        )
-        combined = prompt + _fallback_text_concat(files)
-        return combined, []
+
 
     # Process files: encode images as base64, keep text files as text
     content_parts = []
@@ -117,37 +122,44 @@ def prepare_multimodal_content(
 
         # Binary content
         if mime_type in VISION_MIME_TYPES:
-            # Image file: encode as base64 if size limit allows
-            if len(content) > MAX_BASE64_SIZE:
-                logger.warning(
-                    "Image file %s exceeds size limit (%d > %d), skipping attachment",
-                    filename,
-                    len(content),
-                    MAX_BASE64_SIZE,
-                )
+            if vision_supported:
+                # Image file: encode as base64 if size limit allows
+                if len(content) > MAX_BASE64_SIZE:
+                    logger.warning(
+                        "Image file %s exceeds size limit (%d > %d), skipping attachment",
+                        filename,
+                        len(content),
+                        MAX_BASE64_SIZE,
+                    )
+                    content_parts.append(
+                        {"type": "text", "text": f"--- FILE: {filename} (image too large) ---"}
+                    )
+                    continue
+                try:
+                    b64_data = base64.b64encode(content).decode("utf-8")
+                    content_parts.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{mime_type};base64,{b64_data}"},
+                        }
+                    )
+                    processed_files.append(
+                        {
+                            "filename": filename,
+                            "mime_type": mime_type,
+                            "content": b64_data,
+                            "base64": True,
+                        }
+                    )
+                    continue
+                except Exception as e:
+                    logger.warning("Failed to base64 encode %s: %s", filename, e)
+            else:
+                # Vision not supported: add placeholder text
                 content_parts.append(
-                    {"type": "text", "text": f"--- FILE: {filename} (image too large) ---"}
+                    {"type": "text", "text": f"--- IMAGE: {filename} (vision not supported) ---"}
                 )
                 continue
-            try:
-                b64_data = base64.b64encode(content).decode("utf-8")
-                content_parts.append(
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:{mime_type};base64,{b64_data}"},
-                    }
-                )
-                processed_files.append(
-                    {
-                        "filename": filename,
-                        "mime_type": mime_type,
-                        "content": b64_data,
-                        "base64": True,
-                    }
-                )
-                continue
-            except Exception as e:
-                logger.warning("Failed to base64 encode %s: %s", filename, e)
         
         elif mime_type in TEXT_MIME_TYPES:
             # Text file: decode to UTF-8 and include as text part
@@ -161,10 +173,36 @@ def prepare_multimodal_content(
                 logger.warning("Failed to decode text file %s: %s", filename, e)
                 # fall through to placeholder
 
-        # Non-image binary or unsupported MIME type: fallback to text placeholder
-        content_parts.append(
-            {"type": "text", "text": f"--- FILE: {filename} (binary not attached) ---"}
-        )
+        # Attempt to extract text from PDFs or decode binary as text
+        if mime_type in PDF_MIME_TYPES and PDF_EXTRACTION_AVAILABLE:
+            try:
+                import io
+                pdf_file = io.BytesIO(content)
+                reader = pypdf.PdfReader(pdf_file)
+                text = ""
+                for page in reader.pages:
+                    text += page.extract_text() + "\n"
+                content_parts.append(
+                    {"type": "text", "text": f"--- FILE: {filename} ---\n{text}"}
+                )
+                continue
+            except Exception as e:
+                logger.warning("Failed to extract text from PDF %s: %s", filename, e)
+                # fall through to generic binary handling
+        
+        # Generic binary fallback: attempt to decode as UTF-8 with replacement
+        try:
+            text = content.decode("utf-8", errors="replace")
+            content_parts.append(
+                {"type": "text", "text": f"--- FILE: {filename} ---\n{text}"}
+            )
+            continue
+        except Exception as e:
+            logger.warning("Failed to decode binary file %s: %s", filename, e)
+            # Ultimate fallback: placeholder
+            content_parts.append(
+                {"type": "text", "text": f"--- FILE: {filename} (binary not attached) ---"}
+            )
 
     # If no image parts were added, we could still have text parts.
     # For now, return content_parts as list (OpenAI format).
