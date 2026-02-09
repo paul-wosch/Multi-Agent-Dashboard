@@ -299,7 +299,7 @@ This isolation ensures:
 
 **Note:** Implementation must consult recent official LiteLLM documentation for library‑specific details (see Sources section below). Verify API usage, function signatures, and support detection before implementing.
 
-1. **Create Tool Registry Module** (`src/multi_agent_dashboard/tool_integration/registry.py`):
+1. ✅ **Create Tool Registry Module** (`src/multi_agent_dashboard/tool_integration/registry.py`):
    - Implement `ToolRegistry` class with `register`, `get_tool`, `list_tools` methods.
    - Support decorator `@register_tool(name, description, schema)` for easy registration.
    - Maintain mapping from tool name to LangChain tool instance and metadata.
@@ -340,14 +340,6 @@ This isolation ensures:
 - **Graceful Fallback**: Providers without native tool calling receive a description‑based prompt (LiteLLM automatic fallback).
 - **Transparent Logging**: Successful tool application logged at INFO, warnings logged when tools are dropped, errors logged for unexpected behavior.
 - **Extensibility**: New tools can be added by registering a LangChain tool in the registry; no provider‑specific code required.
-
-**Implementation Plan (Phased Rollout):**
-
-1. **Phase A – Tool Registry & DuckDuckGo Search**: Implement registry and DuckDuckGo search tool; verify tool registration works.
-2. **Phase B – Native Web Search Integration**: Implement native web‑search tool using LiteLLM’s `supports_web_search()` detection; integrate into adapter.
-3. **Phase C – LiteLLM Adapter Integration**: Integrate adapter into `LLMClient` LiteLLM branch; test with mocked providers.
-4. **Phase D – Full Pipeline Test**: End‑to‑end test with real providers (OpenAI, DeepSeek, Ollama) using both search tools.
-5. **Phase E – Migration Documentation**: Update `AGENTS.md` with new tool‑calling architecture.
 
 **Success Metrics:**
 - No regression in legacy tool‑calling (`USE_LITELLM=false`)
