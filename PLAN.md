@@ -263,26 +263,116 @@ This isolation ensures:
 
 ### Step 5 – Implement Tool Calling Across All Providers
 
-**Current problem:** Tool calling is only wired for OpenAI’s Responses API (web search). Custom tools cannot be used with Ollama or DeepSeek.
+**Current problem:** Tool calling is only wired for OpenAI’s Responses API (web search) and uses a provider‑specific `web_search` tool format that is incompatible with LiteLLM. Custom tools cannot be used with Ollama or DeepSeek, and the current LiteLLM path fails for OpenAI agents with web search enabled due to the incompatible tool format.
 
-**Sub‑steps:**
+**Root Cause:** The existing tool configuration (`AgentSpec.tools`) is passed as a list of dictionaries with `type: "web_search"`. LiteLLM expects OpenAI‑compatible tool definitions with `type: "function"` and a JSON Schema `parameters` object. The `web_search` tool type is specific to OpenAI’s Responses API and cannot be translated by LiteLLM.
 
-1. Use LiteLLM’s `tools` parameter (OpenAI‑style tool definitions) which LiteLLM translates to the provider’s native tool‑calling format.
+**Objective:** Create a provider‑agnostic tool‑calling system that works across all providers via LiteLLM while maintaining backward compatibility with the legacy (`USE_LITELLM=false`) path. Fix the regression where OpenAI agents with web search fail on the LiteLLM path.
 
-2. Update `models.py`’s `_build_tools_args` to produce tool schemas compatible with LiteLLM (already OpenAI‑style, so minimal change).
+**Constraints / Clarifications:**
 
-3. In `llm_client.py`, pass the tools list to `litellm.completion(tools=…)` and parse the `tool_calls` response.
+1. **Tools to implement**:
+   - **Native LiteLLM web search tool** (`web_search`): Selectable via UI agent editor, includes per‑run domain filter, restores integrated web search for OpenAI models (still works with `USE_LITELLM=false`), and can enhance other provider models (DeepSeek, Ollama) where supported. Use `litellm.supports_web_search(model="model_name")` to detect support.
+   - **Custom DuckDuckGo search alternative** (`web_search_ddg`): Selectable via UI agent editor as a separate tool, uses same per‑run domain filter as native web search, serves as an alternative for models/providers without native web search support.
 
-4. Add a middleware that executes tool calls and returns results to the LLM (re‑use existing LangChain agent tool‑execution logic).
+2. **Differentiation**:
+   - Native web search and DuckDuckGo search are separate tools that can be enabled independently.
+   - **No automatic fallbacks** from `web_search` to `web_search_ddg` to ensure maximum transparency and reduce complexity.
 
-5. For providers that do not support tool calling (e.g., some local Ollama models), LiteLLM will automatically fall back to a description‑based prompt.
+3. **Log behavior**:
+   - Log successful tool application at INFO level (user‑facing messages).
+   - Log WARNING when tools are dropped due to lack of provider support.
+   - Log ERROR for unexpected tool‑use behavior and handled exceptions.
 
-6. **Dual‑path handling**: Keep existing tool‑calling logic (OpenAI Responses API) for `USE_LITELLM=false` path until LiteLLM path is validated.
+**Architecture Design – Three‑Layer Separation:**
+
+1. **Tool Registry** (`tool_registry.py`): Central registry for registering LangChain‑compatible tool implementations. Uses a decorator pattern for easy extension. Each tool is defined as a LangChain `BaseTool` subclass with a JSON Schema description.
+
+2. **LiteLLM Tool Adapter** (`litellm_tool_adapter.py`): Converts registered tools into LiteLLM‑compatible OpenAI function format (`type: "function"`). Handles provider‑specific transformations:
+   - For `web_search`: Uses LiteLLM’s native web‑search capability when `litellm.supports_web_search()` returns `True`; otherwise logs a warning and excludes the tool.
+   - For `web_search_ddg`: Always converts to a standard function‑calling tool (DuckDuckGo wrapper).
+   - Detects general tool‑calling support via `litellm.supports_feature(provider_id, "tool_calling", model)`.
+
+3. **Provider‑Agnostic Execution Layer**: Integrated into `LLMClient.create_agent_for_spec()` for the `USE_LITELLM=true` branch. Uses `ChatLiteLLM.bind_tools()` to automatically bind tools to the chat model, leveraging LiteLLM’s built‑in translation for each provider.
+
+**Implementation Sub‑steps:**
+
+**Note:** Implementation must consult recent official LiteLLM documentation for library‑specific details (see Sources section below). Verify API usage, function signatures, and support detection before implementing.
+
+1. **Create Tool Registry Module** (`src/multi_agent_dashboard/tool_integration/registry.py`):
+   - Implement `ToolRegistry` class with `register`, `get_tool`, `list_tools` methods.
+   - Support decorator `@register_tool(name, description, schema)` for easy registration.
+   - Maintain mapping from tool name to LangChain tool instance and metadata.
+
+2. **Implement Native Web Search Tool** (`src/multi_agent_dashboard/tool_integration/web_search.py`):
+   - Create a LangChain tool wrapper that invokes LiteLLM’s native web‑search capability (via `litellm.completion` with `web_search=True`).
+   - Add optional `domain_filter` parameter (per‑run) to restrict search results.
+   - Register as `web_search` tool with JSON Schema describing `query` and `domain_filter` parameters.
+
+3. **Implement DuckDuckGo Search Tool** (`src/multi_agent_dashboard/tool_integration/duckduckgo_search.py`):
+   - Create a LangChain `DuckDuckGoSearchRun` wrapper with optional `domain_filter` parameter.
+   - Register as `web_search_ddg` tool with JSON Schema describing `query` and `domain_filter` parameters.
+
+4. **Create LiteLLM Tool Adapter** (`src/multi_agent_dashboard/tool_integration/litellm_tool_adapter.py`):
+   - Function `convert_tools_for_litellm(tool_configs, provider_id, model)`: accepts existing `AgentSpec.tools` configuration, maps `web_search` → native web‑search tool, maps `web_search_ddg` → DuckDuckGo tool, and converts each tool to OpenAI function format.
+   - Uses `litellm.supports_web_search(model)` to decide whether to include the native web‑search tool; logs a clear warning if unsupported.
+   - Uses `litellm.supports_feature(provider_id, "tool_calling", model)` to detect general tool‑calling support; if unsupported, returns empty list (LiteLLM will fall back to description‑based prompting).
+   - Caches tool definitions per provider‑model combination.
+
+5. **Enhance `LLMClient.create_agent_for_spec()` LiteLLM Branch** (`llm_client.py:1095‑1107`):
+   - When `self._use_litellm` is `True`, call `convert_tools_for_litellm()` to transform tool configs.
+   - Pass transformed tools to `ChatLiteLLM.bind_tools()` (already using `ChatLiteLLM` via `_init_chat_model_with_litellm`).
+   - Keep existing LangChain agent tool‑execution middleware unchanged (re‑uses `_extract_tool_info_from_messages` and `_collect_content_blocks`).
+
+6. **Maintain Legacy Path Unchanged**:
+   - For `USE_LITELLM=false`, the existing `_build_tools_config()` in `models.py` continues to produce OpenAI Responses API‑style `web_search` tool definitions.
+   - No modifications to the legacy tool‑calling logic (OpenAI Responses API integration).
+
+7. **Update UI Integration**:
+   - The UI (`tools_view.py`) already displays tool usage from `content_blocks`; no changes required.
+   - Agent editor’s tool configuration must be extended to support both `web_search` and `web_search_ddg` as separate selectable tool types.
 
 **Verification:**
-- Web search tool works with all three providers
-- Custom tools (e.g., calculator, database query) can be added and invoked regardless of provider
-- Tool‑call results are correctly injected into the conversation
+- **Regression Fix**: OpenAI agents with web search work on the LiteLLM path (using native web search where supported, falling back to DuckDuckGo for unsupported models).
+- **Provider‑Agnostic**: Both native web search and DuckDuckGo search tools work with all three providers (OpenAI, DeepSeek, Ollama) via LiteLLM translation where supported.
+- **Backward Compatibility**: Existing agent specs with `web_search` continue to work in legacy mode (`USE_LITELLM=false`).
+- **Domain Filtering**: Optional `domain_filter` parameter preserved as a tool parameter for both search tools.
+- **Graceful Fallback**: Providers without native tool calling receive a description‑based prompt (LiteLLM automatic fallback).
+- **Transparent Logging**: Successful tool application logged at INFO, warnings logged when tools are dropped, errors logged for unexpected behavior.
+- **Extensibility**: New tools can be added by registering a LangChain tool in the registry; no provider‑specific code required.
+
+**Implementation Plan (Phased Rollout):**
+
+1. **Phase A – Tool Registry & DuckDuckGo Search**: Implement registry and DuckDuckGo search tool; verify tool registration works.
+2. **Phase B – Native Web Search Integration**: Implement native web‑search tool using LiteLLM’s `supports_web_search()` detection; integrate into adapter.
+3. **Phase C – LiteLLM Adapter Integration**: Integrate adapter into `LLMClient` LiteLLM branch; test with mocked providers.
+4. **Phase D – Full Pipeline Test**: End‑to‑end test with real providers (OpenAI, DeepSeek, Ollama) using both search tools.
+5. **Phase E – Migration Documentation**: Update `AGENTS.md` with new tool‑calling architecture.
+
+**Success Metrics:**
+- No regression in legacy tool‑calling (`USE_LITELLM=false`)
+- OpenAI web‑search regression fixed in LiteLLM path (native web search works for supported models)
+- DuckDuckGo search returns comparable results to native web search
+- Tool execution results appear in `content_blocks` and UI as before
+- Domain filtering still functional (as tool parameter)
+- Clear logging of tool support status (INFO/WARNING/ERROR)
+
+**Risks & Mitigations:**
+- **DuckDuckGo API rate limits** – Implement caching and rate‑limiting in the tool wrapper.
+- **LiteLLM tool‑calling bugs for specific providers** – Keep legacy path as fallback; test extensively before enabling `USE_LITELLM=true` by default.
+- **Native web search unsupported for some models** – Log clear warning and exclude the tool (no automatic fallback to DuckDuckGo).
+- **Performance impact of additional abstraction** – Benchmark tool‑calling latency; use caching for tool definitions.
+
+**Sources / Examples:**
+
+- [LiteLLM - Web Search](https://docs.litellm.ai/docs/completion/web_search)
+- [LiteLLM - Function Calling / Checking if a model supports function calling](https://docs.litellm.ai/docs/completion/function_call)
+- [LiteLLM - Tool Calling and Function Integration](https://deepwiki.com/BerriAI/litellm/8.1-tool-calling-and-function-integration)
+- [LiteLLM supports all models from Ollama](https://docs.litellm.ai/docs/providers/ollama)
+- [Tool Calling Example with LiteLLM](https://gist.github.com/RahulDas-dev/3cbfc73b89cc5f33c295e8e03d2a3360/raw/baf715ca831bef813bc847154e369f860c542355/litellm_tool_calling.py)
+- [OllamaException - 405 method not allowed](https://github.com/agent0ai/agent-zero/issues/819)
+- [Ollama - Tool calling](https://docs.ollama.com/capabilities/tool-calling)
+- Do your own research if needed (verify latest API changes before implementation)
 
 ---
 
