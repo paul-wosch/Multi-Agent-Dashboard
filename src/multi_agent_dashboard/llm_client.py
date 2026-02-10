@@ -59,10 +59,10 @@ _litellm_completion = None
 try:
     import litellm
     from langchain_litellm import ChatLiteLLM
-    
+
     # Drop unsupported parameters to avoid errors with providers like GPT‑5
     litellm.drop_params = True
-    
+
     _LITELLM_AVAILABLE = True
     _litellm = litellm
     _ChatLiteLLM = ChatLiteLLM
@@ -78,28 +78,30 @@ except Exception:
 def _init_chat_model_with_litellm(model: str, model_provider: Optional[str] = None, **kwargs) -> Any:
     """
     Initialize a ChatLiteLLM instance with provider mapping.
-    
+
     This function is used when USE_LITELLM config flag is True.
     It translates provider-specific parameters into LiteLLM model strings and kwargs.
     """
     from multi_agent_dashboard import config
     from multi_agent_dashboard.litellm_config import get_litellm_model_string, get_provider_config
-    
+
     # Determine provider ID
     provider_id = model_provider or "openai"
-    
+
     # Convert to LiteLLM model string
     litellm_model = get_litellm_model_string(provider_id, model)
-    
+
     # Get provider config from environment
     provider_config = get_provider_config(provider_id)
     # Redact sensitive keys before logging
-    safe_kwargs = {k: '***REDACTED***' if any(sensitive in k.lower() for sensitive in ['key', 'secret', 'token', 'password']) else v for k, v in kwargs.items()}
+    safe_kwargs = {k: '***REDACTED***' if any(
+        sensitive in k.lower() for sensitive in ['key', 'secret', 'token', 'password']) else v for k, v in
+                   kwargs.items()}
     logger.info("_init_chat_model_with_litellm kwargs: %s", safe_kwargs)
-    
+
     # Build ChatLiteLLM kwargs
     litellm_kwargs = {}
-    
+
     # Map API key
     api_key = kwargs.get("api_key") or provider_config.get("api_key")
     if api_key:
@@ -109,7 +111,7 @@ def _init_chat_model_with_litellm(model: str, model_provider: Optional[str] = No
         if env_var_name and "key" in env_var_name.lower():
             os.environ[env_var_name] = api_key
             logger.debug(f"Set {env_var_name} in os.environ for LiteLLM compatibility")
-    
+
     # Map base_url
     base_url = kwargs.get("base_url") or provider_config.get("base_url")
     # Ensure base_url has scheme for known providers
@@ -126,36 +128,38 @@ def _init_chat_model_with_litellm(model: str, model_provider: Optional[str] = No
     if base_url:
         litellm_kwargs["base_url"] = base_url
         litellm_kwargs["api_base"] = base_url  # Some providers use api_base
-    
+
     # Map timeout (convert request_timeout to timeout)
     timeout = kwargs.get("request_timeout") or kwargs.get("timeout")
     if timeout is not None:
         litellm_kwargs["timeout"] = float(timeout)
-    
+
     # Map temperature
     temperature = kwargs.get("temperature")
     if temperature is not None:
         litellm_kwargs["temperature"] = float(temperature)
-    
+
     # Map max_tokens (if present)
     max_tokens = kwargs.get("max_tokens")
     if max_tokens is not None:
         litellm_kwargs["max_tokens"] = int(max_tokens)
-    
+
     # Pass through other kwargs that ChatLiteLLM might accept
     # Filter out known unsupported keys
     unsupported_keys = {"use_responses_api", "output_version", "profile", "model_class"}
     for key, value in kwargs.items():
         if key not in unsupported_keys and key not in litellm_kwargs:
             litellm_kwargs[key] = value
-    
+
     # Redact sensitive keys before logging
-    safe_litellm_kwargs = {k: '***REDACTED***' if any(sensitive in k.lower() for sensitive in ['key', 'secret', 'token', 'password']) else v for k, v in litellm_kwargs.items()}
+    safe_litellm_kwargs = {k: '***REDACTED***' if any(
+        sensitive in k.lower() for sensitive in ['key', 'secret', 'token', 'password']) else v for k, v in
+                           litellm_kwargs.items()}
     logger.info("LiteLLM kwargs: %s", safe_litellm_kwargs)
     # Instantiate ChatLiteLLM
     if _ChatLiteLLM is None:
         raise RuntimeError("ChatLiteLLM is not available. Install langchain-litellm.")
-    
+
     return _ChatLiteLLM(model=litellm_model, **litellm_kwargs)
 
 
@@ -170,6 +174,7 @@ if _AgentMiddleware is None:
         This allows tests and environments without langchain.agents.middleware to still
         instantiate and use the instrumentation middleware defined below.
         """
+
         # Provide multiple common hook names across LangChain minor versions
         def before_model(self, state: Dict[str, Any], runtime: Any) -> Any:
             return None
@@ -183,6 +188,7 @@ if _AgentMiddleware is None:
         # Some versions use wrap_model_call semantics (return-through handler)
         def wrap_model_call(self, request: Any, handler: Callable[..., Any]) -> Any:
             return handler(request)
+
 
     _AgentMiddleware = _FallbackAgentMiddleware
 
@@ -221,6 +227,7 @@ def _extract_content_blocks_from_message(message: Any) -> List[Dict[str, Any]]:
 
 _INSTRUMENTATION_MIDDLEWARE: Optional[type] = None
 
+
 # Always define a dashboard instrumentation middleware class (subclassing the
 # real AgentMiddleware when available, otherwise the fallback above).
 class _DashboardInstrumentationMiddleware(_AgentMiddleware):  # type: ignore
@@ -236,10 +243,10 @@ class _DashboardInstrumentationMiddleware(_AgentMiddleware):  # type: ignore
             event = {
                 "content_blocks": _extract_content_blocks_from_message(messages[-1]),
                 "structured_response": (
-                    state.get("structured_response")
-                    or state.get("structured")
-                    or _normalize_to_dict(messages[-1]).get("structured_response")
-                    or _normalize_to_dict(messages[-1]).get("structured")
+                        state.get("structured_response")
+                        or state.get("structured")
+                        or _normalize_to_dict(messages[-1]).get("structured_response")
+                        or _normalize_to_dict(messages[-1]).get("structured")
                 ),
                 "text": _normalize_to_dict(messages[-1]).get("text"),
                 # attach a monotonic timestamp to aid debugging/auditing
@@ -278,6 +285,7 @@ class TextResponse:
     output_tokens: Optional[int] = None
     latency: Optional[float] = None  # seconds
 
+
 class LLMError(RuntimeError):
     """
     Typed exception raised for LLM failures.
@@ -302,19 +310,19 @@ class ChatModelFactory:
             raise RuntimeError("LangChain not available; cannot create ChatModelFactory without init function.")
         self._init_fn = init_fn or _init_chat_model
         # include timeout as final component in key tuple (Optional[float])
-        self._cache: Dict[Tuple[str, str, Optional[str], bool, Optional[str], str, Optional[float], Optional[float]], Any] = {}
-
+        self._cache: Dict[
+            Tuple[str, str, Optional[str], bool, Optional[str], str, Optional[float], Optional[float]], Any] = {}
 
     def _key(
-        self,
-        model: str,
-        provider_id: Optional[str],
-        endpoint: Optional[str],
-        use_responses_api: bool,
-        model_class: Optional[str],
-        provider_features: Optional[Dict[str, Any]] = None,
-        timeout: Optional[float] = None,
-        temperature: Optional[float] = None,
+            self,
+            model: str,
+            provider_id: Optional[str],
+            endpoint: Optional[str],
+            use_responses_api: bool,
+            model_class: Optional[str],
+            provider_features: Optional[Dict[str, Any]] = None,
+            timeout: Optional[float] = None,
+            temperature: Optional[float] = None,
     ) -> Tuple[str, str, Optional[str], bool, Optional[str], str, Optional[float], Optional[float]]:
         """
         Build a stable cache key for a chat model, including a fingerprint of provider_features
@@ -362,18 +370,17 @@ class ChatModelFactory:
             temp_val,
         )
 
-
     def get_model(
-        self,
-        model: str,
-        *,
-        provider_id: Optional[str] = None,
-        endpoint: Optional[str] = None,
-        use_responses_api: bool = None,
-        model_class: Optional[str] = None,
-        provider_features: Optional[Dict[str, Any]] = None,
-        timeout: Optional[float] = None,
-        temperature: Optional[float] = None,
+            self,
+            model: str,
+            *,
+            provider_id: Optional[str] = None,
+            endpoint: Optional[str] = None,
+            use_responses_api: bool = None,
+            model_class: Optional[str] = None,
+            provider_features: Optional[Dict[str, Any]] = None,
+            timeout: Optional[float] = None,
+            temperature: Optional[float] = None,
     ):
         """
         Return a LangChain chat model instance for the provided metadata.
@@ -501,30 +508,30 @@ class ChatModelFactory:
 class LiteLLMClient:
     """
     LiteLLM client for unified LLM API access across multiple providers.
-    
+
     Uses LiteLLM's universal completion interface to support OpenAI, Ollama,
     DeepSeek, and other providers with a consistent API.
-    
+
     Responsibilities:
     - Provider/model string normalization
     - Environment variable configuration
     - Request execution with retries
     - Response normalization to TextResponse
     """
-    
+
     def __init__(
-        self,
-        *,
-        timeout: float = 600.0,
-        max_retries: int = 3,
-        backoff_base: float = 1.5,
-        on_rate_limit: Optional[Callable[[int], None]] = None,
+            self,
+            *,
+            timeout: float = 600.0,
+            max_retries: int = 3,
+            backoff_base: float = 1.5,
+            on_rate_limit: Optional[Callable[[int], None]] = None,
     ):
         self._timeout = timeout
         self._max_retries = max_retries
         self._backoff_base = backoff_base
         self._on_rate_limit = on_rate_limit
-        
+
         # LiteLLM availability check
         if not _LITELLM_AVAILABLE:
             raise RuntimeError(
@@ -532,29 +539,29 @@ class LiteLLMClient:
             )
         self._litellm = _litellm
         self._litellm_completion = _litellm_completion
-        
+
         # Capabilities detection (simplistic, can be enhanced)
         self._capabilities = {"json_mode", "streaming", "function_calling", "tools"}
-    
+
     def invoke(
-        self,
-        model: str,
-        *,
-        provider_id: Optional[str] = None,
-        messages: Optional[List[Dict[str, Any]]] = None,
-        prompt: Optional[str] = None,
-        endpoint: Optional[str] = None,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-        response_format: Optional[Dict[str, Any]] = None,
-        stream: bool = False,
-        **extra_kwargs,
+            self,
+            model: str,
+            *,
+            provider_id: Optional[str] = None,
+            messages: Optional[List[Dict[str, Any]]] = None,
+            prompt: Optional[str] = None,
+            endpoint: Optional[str] = None,
+            api_key: Optional[str] = None,
+            base_url: Optional[str] = None,
+            temperature: Optional[float] = None,
+            max_tokens: Optional[int] = None,
+            response_format: Optional[Dict[str, Any]] = None,
+            stream: bool = False,
+            **extra_kwargs,
     ) -> TextResponse:
         """
         Invoke the LLM via LiteLLM.
-        
+
         Args:
             model: Model identifier (e.g., "gpt-4o", "llama3") or LiteLLM model string.
             provider_id: Provider identifier (openai, ollama, deepseek).
@@ -568,10 +575,10 @@ class LiteLLMClient:
             response_format: Response format specification (e.g., {"type": "json_object"}).
             stream: Whether to stream the response.
             **extra_kwargs: Additional arguments passed to litellm.completion.
-        
+
         Returns:
             TextResponse with normalized text and metadata.
-        
+
         Raises:
             LLMError: If the request fails after retries.
         """
@@ -580,20 +587,20 @@ class LiteLLMClient:
             get_litellm_model_string,
             get_litellm_completion_kwargs,
         )
-        
+
         # Normalize provider and model
         provider_id_norm, model_name = normalize_model_and_provider(model, provider_id)
         litellm_model = get_litellm_model_string(provider_id_norm, model_name)
-        
+
         # Prepare messages
         if prompt is not None and messages is not None:
             raise ValueError("Cannot specify both prompt and messages")
-        
+
         if messages is None:
             if prompt is None:
                 raise ValueError("Either messages or prompt must be provided")
             messages = [{"role": "user", "content": prompt}]
-        
+
         # Build completion kwargs
         completion_kwargs = get_litellm_completion_kwargs(
             provider_id=provider_id_norm,
@@ -603,7 +610,7 @@ class LiteLLMClient:
             timeout=self._timeout,
             **extra_kwargs,
         )
-        
+
         # Add standard parameters
         if temperature is not None:
             completion_kwargs["temperature"] = temperature
@@ -613,18 +620,18 @@ class LiteLLMClient:
             completion_kwargs["response_format"] = response_format
         if stream:
             completion_kwargs["stream"] = True
-        
+
         # Ensure metadata is included for unified usage tracking
         extra_body = completion_kwargs.get("extra_body", {})
         if not isinstance(extra_body, dict):
             extra_body = {}
         extra_body["metadata"] = True
         completion_kwargs["extra_body"] = extra_body
-        
+
         # Execute with retries
         start_time = time.perf_counter()
         last_exception = None
-        
+
         for attempt in range(self._max_retries + 1):
             try:
                 response = self._litellm_completion(
@@ -644,10 +651,10 @@ class LiteLLMClient:
                     time.sleep(delay)
                 else:
                     raise LLMError(f"LiteLLM request failed after {self._max_retries + 1} attempts") from last_exception
-        
+
         end_time = time.perf_counter()
         latency = end_time - start_time
-        
+
         # Normalize response
         if stream:
             # Streaming responses require different handling
@@ -674,12 +681,12 @@ class LiteLLMClient:
                 })()
             except Exception as e:
                 raise LLMError(f"Stream processing failed: {e}") from e
-        
+
         # Extract text and usage
         text = ""
         usage = None
         raw_dict = {}
-        
+
         try:
             # Handle OpenAI-style response (object or dict)
             if isinstance(response, dict):
@@ -702,20 +709,20 @@ class LiteLLMClient:
                         text = message.content or ""
                     elif isinstance(message, dict):
                         text = message.get("content", "")
-                
+
                 # Extract usage
                 if hasattr(response, "usage"):
                     usage = response.usage
                 elif hasattr(response, "_usage"):
                     usage = response._usage
-            
+
             # Convert raw response to dict
             raw_dict = self._response_to_dict(response)
         except Exception as e:
             logger.warning(f"Failed to normalize LiteLLM response: {e}")
             text = str(response)
             raw_dict = {"raw": response}
-        
+
         # Normalize usage fields
         input_tokens = None
         output_tokens = None
@@ -726,7 +733,7 @@ class LiteLLMClient:
             elif hasattr(usage, "prompt_tokens"):
                 input_tokens = usage.prompt_tokens
                 output_tokens = usage.completion_tokens
-        
+
         # Ensure usage_metadata is present in raw dict for compatibility
         if usage is not None:
             if isinstance(usage, dict):
@@ -734,7 +741,7 @@ class LiteLLMClient:
             else:
                 # Convert usage object to dict
                 raw_dict["usage_metadata"] = self._response_to_dict(usage)
-        
+
         return TextResponse(
             text=text,
             raw=raw_dict,
@@ -742,7 +749,7 @@ class LiteLLMClient:
             output_tokens=output_tokens,
             latency=latency,
         )
-    
+
     def _response_to_dict(self, response: Any) -> Dict[str, Any]:
         """
         Convert a LiteLLM response object to a serializable dictionary.
@@ -776,12 +783,12 @@ class LLMClient:
     """
 
     def __init__(
-        self,
-        *,
-        timeout: float = 600.0,
-        max_retries: int = 3,
-        backoff_base: float = 1.5,
-        on_rate_limit: Optional[Callable[[int], None]] = None,
+            self,
+            *,
+            timeout: float = 600.0,
+            max_retries: int = 3,
+            backoff_base: float = 1.5,
+            on_rate_limit: Optional[Callable[[int], None]] = None,
     ):
         self._timeout = timeout
         self._max_retries = max_retries
@@ -790,19 +797,19 @@ class LLMClient:
 
         # SDK / LangChain capability detection (best-effort)
         self._langchain_available = _LANGCHAIN_AVAILABLE
-        
+
         # Determine which chat model initializer to use
         from multi_agent_dashboard import config
         use_litellm = getattr(config, "USE_LITELLM", False) and _LITELLM_AVAILABLE and _ChatLiteLLM is not None
         self._use_litellm = use_litellm
-        
+
         if use_litellm:
             # Use LiteLLM-based chat model initializer
             self._init_chat_model = _init_chat_model_with_litellm
         else:
             # Use standard LangChain init_chat_model (may be None if LangChain not available)
             self._init_chat_model = _init_chat_model
-        
+
         self._SystemMessage = _SystemMessage
         self._HumanMessage = _HumanMessage
         self._create_agent = _create_agent
@@ -823,13 +830,13 @@ class LLMClient:
     # LangChain agent helpers
     # -------------------------
     def create_agent_for_spec(
-        self,
-        spec,
-        *,
-        tools: Optional[List[Any]] = None,
-        middleware: Optional[List[Any]] = None,
-        response_format: Optional[Any] = None,
-        timeout: Optional[float] = None,
+            self,
+            spec,
+            *,
+            tools: Optional[List[Any]] = None,
+            middleware: Optional[List[Any]] = None,
+            response_format: Optional[Any] = None,
+            timeout: Optional[float] = None,
     ):
         """
         Create a LangChain agent bound to the provided AgentSpec-like object.
@@ -862,7 +869,8 @@ class LLMClient:
                 try:
                     logger.info("Entering workaround try block, model_instance type: %s", type(model_instance).__name__)
                     structured = getattr(model_instance, "with_structured_output", None)
-                    logger.info("structured attribute present: %s (type: %s)", structured is not None, type(structured).__name__)
+                    logger.info("structured attribute present: %s (type: %s)", structured is not None,
+                                type(structured).__name__)
                     if callable(structured):
                         logger.info("with_structured_output is callable, applying workaround")
                         # Extract actual schema from response_format
@@ -896,7 +904,8 @@ class LLMClient:
                         if provider_id == "deepseek":
                             model_name = getattr(spec, "model", "").lower()
                             prefer_json_mode = "reasoner" in model_name
-                            methods = ["json_mode", "function_calling"] if prefer_json_mode else ["function_calling", "json_mode"]
+                            methods = ["json_mode", "function_calling"] if prefer_json_mode else ["function_calling",
+                                                                                                  "json_mode"]
                             last_err = None
                             for m in methods:
                                 try:
@@ -923,7 +932,8 @@ class LLMClient:
                                     except TypeError:
                                         try:
                                             model_instance = structured(schema, method=m)
-                                            logger.debug("with_structured_output succeeded with %s (without include_raw)", m)
+                                            logger.debug(
+                                                "with_structured_output succeeded with %s (without include_raw)", m)
                                             break
                                         except Exception as e:
                                             last_err = e
@@ -942,26 +952,35 @@ class LLMClient:
                                         model_instance = structured(schema, method=method)
                                         logger.debug("with_structured_output succeeded without include_raw")
                                     except Exception as inner_e:
-                                        logger.debug("with_structured_output failed even without include_raw: %s", inner_e)
+                                        logger.debug("with_structured_output failed even without include_raw: %s",
+                                                     inner_e)
                                         raise
                         model_instance = self._wrap_structured_output_model(model_instance)
                         # Clear response_format to avoid LiteLLM buggy handling and ToolStrategy errors
-                        logger.info("Before assignment response_format id=%s value=%s", id(response_format), response_format)
+                        logger.info("Before assignment response_format id=%s value=%s", id(response_format),
+                                    response_format)
                         response_format = None
-                        logger.info("After assignment response_format id=%s value=%s", id(response_format), response_format)
+                        logger.info("After assignment response_format id=%s value=%s", id(response_format),
+                                    response_format)
                         logger.info("LiteLLM JSON Schema workaround succeeded for %s", provider_id)
                     else:
-                        logger.info("with_structured_output not callable, clearing response_format to avoid ToolStrategy errors")
+                        logger.info(
+                            "with_structured_output not callable, clearing response_format to avoid ToolStrategy errors")
                         response_format = None
                 except Exception as e:
-                    logger.error("with_structured_output failed for %s with LiteLLM: %s; clearing response_format to avoid ToolStrategy errors", provider_id, e)
-                    logger.error("with_structured_output failed for %s with LiteLLM; clearing response_format to avoid ToolStrategy errors", provider_id, exc_info=True)
+                    logger.error(
+                        "with_structured_output failed for %s with LiteLLM: %s; clearing response_format to avoid ToolStrategy errors",
+                        provider_id, e)
+                    logger.error(
+                        "with_structured_output failed for %s with LiteLLM; clearing response_format to avoid ToolStrategy errors",
+                        provider_id, exc_info=True)
                     response_format = None
             else:
-                logger.info("Skipping LiteLLM JSON Schema workaround: response_format is not JSON Schema (%s)", response_format)
+                logger.info("Skipping LiteLLM JSON Schema workaround: response_format is not JSON Schema (%s)",
+                            response_format)
 
-
-        logger.info("After workaround block: provider_id=%s, response_format id=%s value=%s, _use_litellm=%s", provider_id, id(response_format), response_format, self._use_litellm)
+        logger.info("After workaround block: provider_id=%s, response_format id=%s value=%s, _use_litellm=%s",
+                    provider_id, id(response_format), response_format, self._use_litellm)
         # Provider-specific structured output wrapping (only when not using LiteLLM)
         if not self._use_litellm:
             if response_format is not None and provider_id == "ollama":
@@ -987,7 +1006,8 @@ class LLMClient:
                         # DeepSeek supports function_calling on chat model; reasoner often rejects tool_choice.
                         model_name = getattr(spec, "model", "") or ""
                         prefer_json_mode = "reasoner" in model_name.lower()
-                        methods = ["json_mode", "function_calling"] if prefer_json_mode else ["function_calling", "json_mode"]
+                        methods = ["json_mode", "function_calling"] if prefer_json_mode else ["function_calling",
+                                                                                              "json_mode"]
                         last_err = None
                         for m in methods:
                             try:
@@ -1001,8 +1021,8 @@ class LLMClient:
                             raise last_err
                         model_instance = self._wrap_structured_output_model(model_instance)
                 except Exception:
-                    logger.debug("with_structured_output failed for deepseek; falling back to prompt-only", exc_info=True)
-
+                    logger.debug("with_structured_output failed for deepseek; falling back to prompt-only",
+                                 exc_info=True)
 
         # Normalize middleware list and instantiate classes when provided.
         middleware_list: List[Any] = []
@@ -1084,7 +1104,8 @@ class LLMClient:
                             "Instrumentation middleware exists but could not be instantiated or appended for agent=%s",
                             getattr(spec, "name", "<unnamed>"),
                         )
-                        logger.debug("Instrumentation instantiation/append error: %s / %s", inst_exc, append_exc, exc_info=True)
+                        logger.debug("Instrumentation instantiation/append error: %s / %s", inst_exc, append_exc,
+                                     exc_info=True)
             except Exception as e:
                 instrumentation_attach_error = str(e)
                 logger.exception("Failed to instantiate instrumentation middleware: %s", e)
@@ -1096,8 +1117,41 @@ class LLMClient:
                 effective_response_format = response_format
             else:
                 effective_response_format = response_format if provider_id == "openai" else None
-            logger.debug("create_agent_for_spec: provider_id=%s, response_format id=%s value=%s", provider_id, id(response_format), response_format)
-            logger.debug("create_agent_for_spec: effective_response_format id=%s value=%s, _use_litellm=%s", id(effective_response_format), effective_response_format, self._use_litellm)
+            logger.debug("create_agent_for_spec: provider_id=%s, response_format id=%s value=%s", provider_id,
+                         id(response_format), response_format)
+            logger.debug("create_agent_for_spec: effective_response_format id=%s value=%s, _use_litellm=%s",
+                         id(effective_response_format), effective_response_format, self._use_litellm)
+            # Convert tools for LiteLLM path (minimal native web‑search integration)
+            if self._use_litellm and tools:
+                converted_tools = []
+                for tool in tools:
+                    if isinstance(tool, dict) and tool.get("type") == "web_search":
+                        # Check if model supports native web search
+                        model_name = getattr(spec, "model", "")
+                        model_str_without_prefix = model_name
+                        model_str_with_prefix = litellm_config.get_litellm_model_string(provider_id, model_name)
+
+                        if _litellm and hasattr(_litellm, "supports_web_search"):
+                            # Try without prefix first, then with prefix
+                            if _litellm.supports_web_search(model_str_without_prefix):
+                                logger.info(
+                                    f"Model {model_str_without_prefix} supports native web search; tool bound successfully.")
+                                converted_tools.append(tool)
+                            elif _litellm.supports_web_search(model_str_with_prefix):
+                                logger.info(
+                                    f"Model {model_str_with_prefix} supports native web search; tool bound successfully.")
+                                converted_tools.append(tool)
+                            else:
+                                logger.warning(
+                                    f"Model {model_str_without_prefix} (and {model_str_with_prefix}) does not support native web search; tool excluded.")
+                        else:
+                            # Assume support if detection unavailable
+                            logger.error("LiteLLM web search detection unavailable; assuming support.")
+                            converted_tools.append(tool)
+                    else:
+                        # Pass through other tools unchanged (will be handled in sub‑step 5)
+                        converted_tools.append(tool)
+                tools = converted_tools
             agent = self._create_agent(
                 model=model_instance,
                 tools=tools or [],
@@ -1121,7 +1175,9 @@ class LLMClient:
                         setattr(agent, "_effective_request_timeout", float(eff_to))
                     except Exception:
                         setattr(agent, "_effective_request_timeout", eff_to)
-                logger.debug("create_agent_for_spec: agent=%s model=%s effective_request_timeout=%s", getattr(spec, "name", "<unnamed>"), spec.model, getattr(agent, "_effective_request_timeout", None))
+                logger.debug("create_agent_for_spec: agent=%s model=%s effective_request_timeout=%s",
+                             getattr(spec, "name", "<unnamed>"), spec.model,
+                             getattr(agent, "_effective_request_timeout", None))
             except Exception:
                 logger.debug("Failed to propagate effective_request_timeout to agent instance", exc_info=True)
 
@@ -1143,7 +1199,8 @@ class LLMClient:
 
             return agent
         except Exception as e:
-            logger.debug("create_agent_for_spec failed for spec=%s: %s", getattr(spec, "name", "<unnamed>"), e, exc_info=True)
+            logger.debug("create_agent_for_spec failed for spec=%s: %s", getattr(spec, "name", "<unnamed>"), e,
+                         exc_info=True)
             raise
 
     def _wrap_structured_output_model(self, model_instance: Any) -> Any:
@@ -1153,6 +1210,7 @@ class LLMClient:
         preserving usage / token metadata (including Ollama prompt_eval_count /
         eval_count) and response_metadata.
         """
+
         def _normalize_payload(value: Any) -> Optional[Dict[str, Any]]:
             if isinstance(value, dict):
                 return value
@@ -1201,7 +1259,8 @@ class LLMClient:
 
             return usage, pe, ce
 
-        def _normalize_usage(usage: Optional[Dict[str, Any]], pe: Optional[int], ce: Optional[int]) -> Optional[Dict[str, Any]]:
+        def _normalize_usage(usage: Optional[Dict[str, Any]], pe: Optional[int], ce: Optional[int]) -> Optional[
+            Dict[str, Any]]:
             usage = dict(usage) if isinstance(usage, dict) else {}
             prompt_tokens = usage.get("prompt_tokens") or usage.get("input_tokens") or pe
             completion_tokens = usage.get("completion_tokens") or usage.get("output_tokens") or ce
@@ -1313,9 +1372,9 @@ class LLMClient:
                 try:
                     rm2 = getattr(usage_source, "response_metadata", None)
                     had_counts = isinstance(rm2, dict) and (
-                        rm2.get("prompt_eval_count") is not None
-                        or rm2.get("eval_count") is not None
-                        or isinstance(rm2.get("usage"), dict)
+                            rm2.get("prompt_eval_count") is not None
+                            or rm2.get("eval_count") is not None
+                            or isinstance(rm2.get("usage"), dict)
                     )
                     if had_counts and not getattr(msg, "usage_metadata", None):
                         logger.warning(
@@ -1378,7 +1437,8 @@ class LLMClient:
         Centralized provider-agnostic structured output adapter.
         Returns provider-specific response_format payload or schema for Ollama.
         """
-        logger.info("_build_structured_output_adapter called with spec=%s", spec.name if hasattr(spec, 'name') else spec)
+        logger.info("_build_structured_output_adapter called with spec=%s",
+                    spec.name if hasattr(spec, 'name') else spec)
         if response_format is not None:
             logger.info("Returning existing response_format")
             return response_format
@@ -1421,7 +1481,7 @@ class LLMClient:
             }
             logger.info("Returning LiteLLM response_format: %s", result)
             return result
-        
+
         # Provider-specific formats for USE_LITELLM=false (original logic)
         if provider_id == "openai":
             result = {
@@ -1446,16 +1506,15 @@ class LLMClient:
             return schema
         return None
 
-
     def invoke_agent(
-        self,
-        agent,
-        prompt: str,
-        *,
-        files: Optional[List[Dict[str, Any]]] = None,
-        response_format: Optional[Dict[str, Any]] = None,
-        stream: bool = False,
-        context: Optional[Dict[str, Any]] = None,
+            self,
+            agent,
+            prompt: str,
+            *,
+            files: Optional[List[Dict[str, Any]]] = None,
+            response_format: Optional[Dict[str, Any]] = None,
+            stream: bool = False,
+            context: Optional[Dict[str, Any]] = None,
     ) -> TextResponse:
         """
         Invoke a LangChain agent and normalize its response into TextResponse.
@@ -1516,10 +1575,11 @@ class LLMClient:
             user_content = multimodal_content_parts
         else:
             user_content = combined_prompt
-        
+
         state = {
             "messages": [
-                self._SystemMessage(getattr(agent, "system_prompt", "") or "") if (getattr(agent, "system_prompt", None) and self._SystemMessage) else None,
+                self._SystemMessage(getattr(agent, "system_prompt", "") or "") if (
+                            getattr(agent, "system_prompt", None) and self._SystemMessage) else None,
                 self._HumanMessage(user_content) if self._HumanMessage else {"role": "user", "content": user_content},
             ]
         }
@@ -1611,7 +1671,9 @@ class LLMClient:
                         if isinstance(usage_payload, dict) and usage_payload:
                             return usage_payload
                     # object-shaped message
-                    usage_payload = getattr(msg, "usage_metadata", None) or getattr(msg, "usage", None) or getattr(msg, "response_metadata", None)
+                    usage_payload = getattr(msg, "usage_metadata", None) or getattr(msg, "usage", None) or getattr(msg,
+                                                                                                                   "response_metadata",
+                                                                                                                   None)
                     if isinstance(usage_payload, dict) and usage_payload:
                         return usage_payload
                 except Exception:
@@ -1732,9 +1794,11 @@ class LLMClient:
             msg_usage = _extract_usage_from_messages(messages)
             if isinstance(msg_usage, dict):
                 if input_tokens is None:
-                    input_tokens = msg_usage.get("input_tokens") or msg_usage.get("prompt_tokens") or msg_usage.get("prompt_token_count")
+                    input_tokens = msg_usage.get("input_tokens") or msg_usage.get("prompt_tokens") or msg_usage.get(
+                        "prompt_token_count")
                 if output_tokens is None:
-                    output_tokens = msg_usage.get("output_tokens") or msg_usage.get("completion_tokens") or msg_usage.get("completion_token_count")
+                    output_tokens = msg_usage.get("output_tokens") or msg_usage.get(
+                        "completion_tokens") or msg_usage.get("completion_token_count")
                 token_usage = msg_usage.get("token_usage")
                 if isinstance(token_usage, dict):
                     if input_tokens is None:
@@ -2055,7 +2119,9 @@ class LLMClient:
                 if events is not None and "instrumentation_events" not in out:
                     out["instrumentation_events"] = events
             else:
-                events_attr = getattr(response, "_multi_agent_dashboard_events", None) or getattr(response, "instrumentation_events", None)
+                events_attr = getattr(response, "_multi_agent_dashboard_events", None) or getattr(response,
+                                                                                                  "instrumentation_events",
+                                                                                                  None)
                 if events_attr is not None and "instrumentation_events" not in out:
                     out["instrumentation_events"] = events_attr
         except Exception:
