@@ -408,7 +408,7 @@ This isolation ensures:
    - Maintain mapping from tool name to LangChain tool instance and metadata.
    - **Note:** Native web search is not a regular tool but a provider capability.
 
-2. **Stop filtering `use_responses_api` flag**:
+2. ✅ **Stop filtering `use_responses_api` flag**:
    - Remove the line that strips `use_responses_api` from the kwargs in `_init_chat_model_with_litellm()` (`llm_client.py:147`).
    - Ensure the flag is passed to `convert_tools_for_litellm()`.
 

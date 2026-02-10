@@ -146,7 +146,7 @@ def _init_chat_model_with_litellm(model: str, model_provider: Optional[str] = No
 
     # Pass through other kwargs that ChatLiteLLM might accept
     # Filter out known unsupported keys
-    unsupported_keys = {"use_responses_api", "output_version", "profile", "model_class"}
+    unsupported_keys = {"output_version", "profile", "model_class"}
     for key, value in kwargs.items():
         if key not in unsupported_keys and key not in litellm_kwargs:
             litellm_kwargs[key] = value
