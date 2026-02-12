@@ -90,6 +90,10 @@ OPENAI_PRICING = {
         "input": 0.05,
         "output": 0.40,
     },
+    "gpt-5-search-api": {
+        "input": 1.25,
+        "output": 10.00,
+    },
     "gpt-5.1": {
         "input": 1.25,
         "output": 10.00,

@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Callable, Tuple
 from dataclasses import dataclass
 from multi_agent_dashboard.structured_schemas import resolve_schema_json
 from multi_agent_dashboard import litellm_config
+from multi_agent_dashboard.tool_integration.litellm_tool_adapter import convert_tools_for_litellm
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,12 @@ def _init_chat_model_with_litellm(model: str, model_provider: Optional[str] = No
 
     # Convert to LiteLLM model string
     litellm_model = get_litellm_model_string(provider_id, model)
+    
+    # Register the model with LiteLLM to prevent spam messages
+    from multi_agent_dashboard.litellm_config import register_model_with_litellm, normalize_model_and_provider
+    # Extract model name without provider prefix
+    _, model_name = normalize_model_and_provider(model or "", provider_id)
+    register_model_with_litellm(provider_id, model_name)
 
     # Get provider config from environment
     provider_config = get_provider_config(provider_id)
@@ -523,7 +530,7 @@ class LiteLLMClient:
             self,
             *,
             timeout: float = 600.0,
-            max_retries: int = 3,
+            max_retries: int = 0,
             backoff_base: float = 1.5,
             on_rate_limit: Optional[Callable[[int], None]] = None,
     ):
@@ -786,7 +793,7 @@ class LLMClient:
             self,
             *,
             timeout: float = 600.0,
-            max_retries: int = 3,
+            max_retries: int = 0,
             backoff_base: float = 1.5,
             on_rate_limit: Optional[Callable[[int], None]] = None,
     ):
@@ -844,11 +851,19 @@ class LLMClient:
         if not self._langchain_available or self._model_factory is None or self._create_agent is None:
             raise RuntimeError("LangChain agent creation is not available in this environment")
 
+        # LiteLLM wrapper limitation: ChatLiteLLM only calls litellm.completion() (Completions API)
+        if self._use_litellm and getattr(spec, "use_responses_api", False):
+            logger.warning(
+                "LiteLLM wrapper (ChatLiteLLM) only calls litellm.completion() (Completions API). "
+                "The use_responses_api=true flag will be passed to tool adapter but may not switch APIs. "
+                "For native provider integration with Responses API, set USE_LITELLM=false."
+            )
+
         model_instance = self._model_factory.get_model(
             spec.model,
             provider_id=getattr(spec, "provider_id", None),
             endpoint=getattr(spec, "endpoint", None),
-            use_responses_api=bool(getattr(spec, "use_responses_api", False)),
+            use_responses_api=getattr(spec, "use_responses_api", False),
             model_class=getattr(spec, "model_class", None),
             provider_features=getattr(spec, "provider_features", None),
             timeout=timeout or self._timeout,
@@ -1121,37 +1136,39 @@ class LLMClient:
                          id(response_format), response_format)
             logger.debug("create_agent_for_spec: effective_response_format id=%s value=%s, _use_litellm=%s",
                          id(effective_response_format), effective_response_format, self._use_litellm)
-            # Convert tools for LiteLLM path (minimal native web‑search integration)
-            if self._use_litellm and tools:
-                converted_tools = []
-                for tool in tools:
-                    if isinstance(tool, dict) and tool.get("type") == "web_search":
-                        # Check if model supports native web search
-                        model_name = getattr(spec, "model", "")
-                        model_str_without_prefix = model_name
-                        model_str_with_prefix = litellm_config.get_litellm_model_string(provider_id, model_name)
-
-                        if _litellm and hasattr(_litellm, "supports_web_search"):
-                            # Try without prefix first, then with prefix
-                            if _litellm.supports_web_search(model_str_without_prefix):
-                                logger.info(
-                                    f"Model {model_str_without_prefix} supports native web search; tool bound successfully.")
-                                converted_tools.append(tool)
-                            elif _litellm.supports_web_search(model_str_with_prefix):
-                                logger.info(
-                                    f"Model {model_str_with_prefix} supports native web search; tool bound successfully.")
-                                converted_tools.append(tool)
-                            else:
-                                logger.warning(
-                                    f"Model {model_str_without_prefix} (and {model_str_with_prefix}) does not support native web search; tool excluded.")
-                        else:
-                            # Assume support if detection unavailable
-                            logger.error("LiteLLM web search detection unavailable; assuming support.")
-                            converted_tools.append(tool)
-                    else:
-                        # Pass through other tools unchanged (will be handled in sub‑step 5)
-                        converted_tools.append(tool)
-                tools = converted_tools
+            # Convert tools for LiteLLM path using adapter
+            if self._use_litellm:
+                provider_id = (getattr(spec, "provider_id", None) or "openai").lower()
+                model = getattr(spec, "model", "")
+                use_responses_api = getattr(spec, "use_responses_api", False)
+                tool_configs = getattr(spec, "tools", {})
+                logger.debug("Converting tools for LiteLLM path; tools param=%s, spec.tools=%s", tools, tool_configs)
+                # Convert tool configs to LiteLLM format
+                litellm_tools = convert_tools_for_litellm(
+                    tool_configs, provider_id, model, use_responses_api
+                )
+                # Bind tools to model instance if applicable
+                if litellm_tools:
+                    if "tools" in litellm_tools:
+                        # Bind function tools
+                        model_instance = model_instance.bind_tools(litellm_tools["tools"])
+                        logger.info(f"Bound {len(litellm_tools['tools'])} function tool(s) to model")
+                        # Replace tools list with function tools (OpenAI format)
+                        tools = litellm_tools["tools"]
+                    elif "web_search_options" in litellm_tools:
+                        # Bind web search options (Completions API)
+                        model_instance = model_instance.bind(web_search_options=litellm_tools["web_search_options"])
+                        logger.info(f"Bound web search options to model")
+                        # Clear tools list since web_search_options is being used instead
+                        tools = []
+                else:
+                    # No tools applicable after conversion
+                    tools = []
+            else:
+                # Legacy path (USE_LITELLM=false): tools passed unchanged
+                # The tools list is expected to be in provider-specific format
+                # (e.g., web_search dict for OpenAI Responses API)
+                logger.debug("Legacy path: passing %d tool(s) unchanged", len(tools) if tools else 0)
             agent = self._create_agent(
                 model=model_instance,
                 tools=tools or [],

@@ -104,6 +104,7 @@ src/multi_agent_dashboard/
 ├── structured_schemas.py  # JSON schema resolution for structured output
 ├── runtime_hooks.py       # Runtime hooks for agent execution
 ├── utils.py               # Utility functions (safe_format, etc.)
+├── tool_integration/      # Tool registry and LiteLLM adapter for tool calling
 ├── ui/                    # Streamlit UI components
 │   ├── app.py             # Main Streamlit application
 │   ├── bootstrap.py       # UI initialization
@@ -152,6 +153,7 @@ docs/                      # Project documentation
 - Supported providers: `openai`, `deepseek`, `ollama`
 - Provider‑specific logic is encapsulated in `_build_structured_output_adapter` and `_compute_cost`
 - Structured output uses `with_structured_output(method="function_calling")` where available; the LiteLLM path (`USE_LITELLM=true`) normalizes JSON‑Schema formatting across all providers via LiteLLM’s `response_format` parameter
+- Tool calling integration uses LiteLLM tool adapter with dynamic API detection and conflict resolution for web search (see known limitations in PLAN.md Step 5)
 - Token accounting and pricing are preserved across all providers
 
 **Key provider‑aware functions:**
@@ -278,9 +280,13 @@ Color themes and emoji symbols are centralized in `config.UI_COLORS`. Avoid hard
 
 12. **Multimodal file handling** – When `USE_LITELLM=true`, file uploads are processed by `multimodal_handler.py`. Images are base64-encoded for vision-capable providers (OpenAI). Text files (txt, md, csv, json, html, xml) are decoded as UTF-8 text parts. PDFs are extracted as text if `pypdf` is installed, otherwise fall back to UTF-8 decoding. Binary files are decoded with replacement characters. If provider does not support vision, files are concatenated as plain text with headers. **Vision/tool support detection is model‑aware** (e.g., Ollama `llava` vs `llama3`) using `supports_feature` with model parameter.
 
+13. **LiteLLM spam prevention** – Unknown models trigger "Provider List" spam in LiteLLM detection calls. The system automatically registers unknown models to prevent spam in detection calls, but spam may still occur during `litellm.completion()` calls (LiteLLM library limitation).
+
+14. **LiteLLM tool calling limitations** – Tool calling integration uses LiteLLM tool adapter with dynamic API detection. See PLAN.md Step 5 Sub step 3 for known limitations (logging, API selection, provider-specific issues).
+
 ## LiteLLM Integration & Architectural Guidelines
 
-**Current Initiative**: Integrating LiteLLM as a universal translation layer to normalize provider‑specific handling (token counting, structured output, file uploads, tool calling). Token counting and structured output have been normalized for the `USE_LITELLM=true` path; file uploads integration is now available with multimodal fallback handling. Refer to `PLAN.md` for detailed rollout.
+**Current Initiative**: Integrating LiteLLM as a universal translation layer to normalize provider‑specific handling (token counting, structured output, file uploads, tool calling). Token counting and structured output have been normalized for the `USE_LITELLM=true` path; file uploads integration is now available with multimodal fallback handling; tool calling integration is implemented via LiteLLM tool adapter but has known limitations (see PLAN.md Step 5). Refer to `PLAN.md` for detailed rollout.
 
 **High‑Level Directives**:
 

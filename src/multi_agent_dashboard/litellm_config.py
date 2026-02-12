@@ -46,10 +46,17 @@ def get_litellm_model_string(provider_id: str, model_name: Optional[str] = None)
     Args:
         provider_id: Provider identifier (openai, ollama, deepseek)
         model_name: Specific model name (e.g., "gpt-4o", "llama3", "deepseek-reasoner")
+            May already contain a provider prefix (e.g., "openai/gpt-4o").
     
     Returns:
         LiteLLM-compatible model string.
     """
+    # Normalize provider and model (handles model_name that already contains slash)
+    provider_id, model_name = normalize_model_and_provider(
+        model_name or "", 
+        provider_id
+    )
+    
     provider_id = provider_id.lower() if provider_id else ""
     if provider_id not in PROVIDER_TO_LITELLM_PREFIX:
         raise ValueError(f"Unknown provider ID: {provider_id}. Supported: {list(PROVIDER_TO_LITELLM_PREFIX.keys())}")
@@ -234,6 +241,54 @@ SUPPORTED_FEATURES = {
 }
 
 
+def register_model_with_litellm(provider_id: str, model_name: str) -> None:
+    """
+    Register a model with LiteLLM's known model lists to prevent spam.
+    
+    When LiteLLM encounters an unknown model, it prints spam messages
+    ("Provider List: https://docs.litellm.ai/docs/providers").
+    Adding the model to LiteLLM's internal provider-specific sets prevents
+    this spam by making LiteLLM recognize the model as known.
+    
+    Args:
+        provider_id: Provider identifier (openai, deepseek, ollama)
+        model_name: Model name, optionally with provider prefix (e.g., "gpt-5-search-api" or "openai/gpt-5-search-api").
+            If a prefix is present, it overrides provider_id.
+    """
+    try:
+        import litellm
+        # Drop unsupported parameters to avoid errors with providers like GPT‑5
+        litellm.drop_params = True
+        
+        # Normalize model name (strip provider prefix if present)
+        detected_provider, normalized_model_name = normalize_model_and_provider(model_name, provider_id)
+        provider_id = detected_provider.lower()
+        
+        if provider_id == "openai":
+            # Add to OpenAI chat completion models set
+            litellm.open_ai_chat_completion_models.add(normalized_model_name)
+            # Also add with prefix for consistency
+            prefixed = f"openai/{normalized_model_name}"
+            litellm.open_ai_chat_completion_models.add(prefixed)
+        elif provider_id == "deepseek":
+            # Add to deepseek models set
+            litellm.deepseek_models.add(normalized_model_name)
+            prefixed = f"deepseek/{normalized_model_name}"
+            litellm.deepseek_models.add(prefixed)
+        elif provider_id == "ollama":
+            # ollama_models is a list, not a set
+            if normalized_model_name not in litellm.ollama_models:
+                litellm.ollama_models.append(normalized_model_name)
+            # Also add with prefix
+            prefixed = f"ollama/{normalized_model_name}"
+            if prefixed not in litellm.ollama_models:
+                litellm.ollama_models.append(prefixed)
+        else:
+            logger.warning(f"Unknown provider {provider_id} for model registration")
+    except Exception as e:
+        logger.debug(f"Failed to register model {model_name} with LiteLLM: {e}")
+
+
 def supports_feature(provider_id: str, feature: str, model: Optional[str] = None) -> bool:
     """
     Check if a provider (and optionally a specific model) supports a specific feature.
@@ -267,6 +322,9 @@ def supports_feature(provider_id: str, feature: str, model: Optional[str] = None
     # Try LiteLLM's dynamic detection first
     try:
         import litellm
+        # Drop unsupported parameters to avoid errors with providers like GPT‑5
+        litellm.drop_params = True
+
         
         # Determine target for detection: provider or provider/model
         detection_target = provider_id
@@ -274,6 +332,9 @@ def supports_feature(provider_id: str, feature: str, model: Optional[str] = None
             # Construct full LiteLLM model string for model-specific detection
             detection_target = get_litellm_model_string(provider_id, model)
             logger.debug(f"Using LiteLLM detection target: {detection_target}")
+            # Register the model with LiteLLM to prevent spam messages
+            _, model_name = normalize_model_and_provider(model or "", provider_id)
+            register_model_with_litellm(provider_id, model_name)
         
         # Map feature names to LiteLLM detection methods
         if feature == "json_mode":
@@ -323,7 +384,7 @@ def supports_feature(provider_id: str, feature: str, model: Optional[str] = None
     if supported:
         logger.warning(f"Feature {feature} for provider {provider_id} determined via static mapping (LiteLLM detection unavailable or inconclusive)")
     else:
-        logger.debug(f"Feature {feature} not supported by provider {provider_id} (static mapping)")
+        logger.warning(f"Feature {feature} not supported by provider {provider_id} (static mapping)")
     return supported
 
 

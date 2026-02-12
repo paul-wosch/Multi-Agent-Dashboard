@@ -302,52 +302,11 @@ This isolation ensures:
 2. **No INFO logging for successful tool binds** – DeepSeek/Ollama agents with tools work silently without user‑facing confirmation; only web‑search detection logs INFO.
 3. **LiteLLM doesn't switch between Completions/Responses APIs** – The `use_responses_api` flag is filtered out at `llm_client.py:147`, preventing proper API selection and web‑search configuration.
 
-**Detailed Root Cause Analysis:**
 
-**Overall Architectural Mismatch:** The existing tool configuration (`AgentSpec.tools`) is passed as a list of dictionaries with `type: "web_search"`. LiteLLM expects OpenAI‑compatible tool definitions with `type: "function"` and a JSON Schema `parameters` object. The `web_search` tool type is specific to OpenAI’s Responses API and cannot be translated by LiteLLM. Additionally, the integration relies on static provider‑feature mapping and outdated model references instead of LiteLLM’s dynamic detection methods.
-
-**Issue 1 – Web‑search detection fails for OpenAI agents:**
-- **Outdated model list**: Detection only checks `gpt‑4o‑search‑preview` (deprecated), missing current models like `gpt‑5.1`, `gpt‑5‑search‑api`.
-- **Wrong model‑string format**: `litellm.supports_web_search()` expects `provider/model` format but detection may pass raw model ID.
-- **No dynamic detection**: Hardcoded patterns instead of using `litellm.supports_web_search(model)` and `litellm.get_supported_openai_params(model)`.
-- **Code location**: `llm_client.py:1105‑1124`.
-
-**Issue 2 – No INFO logging for successful tool binds:**
-- **Tool binding occurs silently**: `ChatLiteLLM.bind_tools()` success not logged at INFO level.
-- **Only debug‑level logging**: Engine middleware logs debug messages, not user‑facing confirmation.
-- **Impact**: Users cannot see confirmation that tools are successfully bound for DeepSeek/Ollama agents.
-
-**Issue 3 – LiteLLM doesn't switch between Completions/Responses APIs:**
-- **Flag filtered out**: `use_responses_api` is removed from kwargs in `_init_chat_model_with_litellm()` (`llm_client.py:147`).
-- **No API translation**: LiteLLM has no explicit `use_responses_api` parameter; our flag doesn't map to LiteLLM concepts.
-- **Different abstraction**: LiteLLM automatically selects API based on model `mode` in catalog, but our flag should influence selection between `web_search_options` (Completions) and `tools=[{"type": "web_search"}]` (Responses).
-
-**Current OpenAI Model Landscape (2026) – Context for Implementation:**
-
-- **Frontier Models:** `gpt‑5.2` / `gpt‑5.2 pro`, `gpt‑5.1`, `gpt‑5` / `gpt‑5 mini` / `gpt‑5 nano` – all support web search via GA `web_search` tool (Responses API) or `web_search_options` (Completions API).
-- **GPT‑4 Series (Legacy, being deprecated):** `gpt‑4.1`, `gpt‑4o` – avoid hardcoding these; prefer current models.
-- **Specialized Search Models:** `gpt‑5‑search‑api` (dedicated search model, Completions API), `gpt‑4o‑search‑preview` (deprecated).
-- **Web Search Evolution:** Generally Available (GA) `web_search` tool (`{"type": "web_search"}`) replaces the preview version; supports domain filtering (allow‑lists up to 100 domains), user location, and `external_web_access` control.
 
 **Objective:** Create a provider‑agnostic tool‑calling system that works across all providers via LiteLLM while maintaining backward compatibility with the legacy (`USE_LITELLM=false`) path. Fix the regression where OpenAI agents with web search fail on the LiteLLM path, address the three architectural issues, and leverage dynamic feature detection for current and future models.
 
-**LiteLLM API Research Findings (from REPORT_LITELLM_INTEGRATION.md):**
-
-**Completions vs Responses APIs in LiteLLM:**
-- **`litellm.completion()` (Completions API)**: Standard chat completions; uses `web_search_options` parameter for web search. This is what `ChatLiteLLM` uses internally.
-- **`litellm.responses()` (Responses API)**: For extended reasoning models (o‑series, GPT‑4o with reasoning); uses `tools=[{"type": "web_search"}]` for web search. Automatically selected by LiteLLM based on model `mode` in catalog.
-- **Key Insight**: LiteLLM automatically selects the appropriate API based on model metadata. Our `use_responses_api` flag needs translation to LiteLLM parameters.
-
-**Feature Detection Methods:**
-- **`litellm.get_supported_openai_params(model)`**: Returns dynamic list of supported parameters per model (includes `web_search_options`, `tools`, `response_format`, etc.). Use to determine API compatibility and validate agent‑spec parameters.
-- **`litellm.supports_response_schema(model)`**: Checks if model supports JSON Schema response format.
-- **`litellm.supports_web_search(model)`**: Checks if model supports native web search capability. Expects `provider/model` format.
-- **`litellm.supports_feature(provider_id, feature, model)`**: (If available) Generic feature detection; fallback to static mapping if method unavailable.
-
-**Integration Guidance:**
-- Use `get_supported_openai_params()` to decide between `web_search_options` (Completions) and `tools=[{"type": "web_search"}]` (Responses).
-- Combine with `supports_web_search()` for native web‑search capability confirmation.
-- Filter out unsupported parameters using `drop_params=True` (already enabled globally) or explicit validation.
+**LiteLLM API Research Summary:** LiteLLM provides dynamic feature detection methods (`get_supported_openai_params()`, `supports_web_search()`, `supports_response_schema()`) to determine API compatibility and tool support per model. The library automatically selects between Completions and Responses APIs based on model metadata; our `use_responses_api` flag needs translation to LiteLLM parameters.
 
 **Immediate Actions (from Report):**
 
@@ -412,17 +371,19 @@ This isolation ensures:
    - Remove the line that strips `use_responses_api` from the kwargs in `_init_chat_model_with_litellm()` (`llm_client.py:147`).
    - Ensure the flag is passed to `convert_tools_for_litellm()`.
 
-3. **Create LiteLLM Tool Adapter** (`src/multi_agent_dashboard/tool_integration/litellm_tool_adapter.py`):
-   - Remove the existing web‑search detection logic at `llm_client.py:1105‑1124` (mixing detection and conversion) and replace it with a call to `convert_tools_for_litellm()`.
-   - Function `convert_tools_for_litellm(tool_configs, provider_id, model, use_responses_api)`: accepts existing `AgentSpec.tools` configuration.
-   - **Dynamic API selection**:
-     - Call `litellm.get_supported_openai_params(model)` to see if `"tools"` (Responses API) or `"web_search_options"` (Completions API) is supported.
-     - Use `litellm.supports_web_search(model)` to confirm native web‑search capability.
-     - Apply API‑switching logic based on `use_responses_api` flag and detected support.
-   - For `web_search`: Returns either `web_search_options` dict or `tools` list with `{"type": "web_search"}` (GA). Logs a warning and excludes if unsupported.
-   - For `web_search_ddg`: Converts to a standard function‑calling tool with `type: "function"` and JSON Schema parameters.
-   - Uses `litellm.supports_feature(provider_id, "tool_calling", model)` (or fallback) to detect general tool‑calling support; if unsupported, returns empty list (LiteLLM will fall back to description‑based prompting).
-   - Caches configurations per provider‑model‑flag combination.
+3. ✅ **Create LiteLLM Tool Adapter** (`src/multi_agent_dashboard/tool_integration/litellm_tool_adapter.py`):
+   - **Implemented**: `convert_tools_for_litellm()` function with dynamic API selection using `litellm.get_supported_openai_params()` and `litellm.supports_web_search()`. Web‑search detection conflict resolution, caching, and logging of unsupported tools (WARNING level).
+   - **Integrated**: Removed old web‑search detection logic from `llm_client.py`; adapter called from `LLMClient.create_agent_for_spec()` for the `USE_LITELLM=true` path.
+   - **Not implemented**: DuckDuckGo search tool (`web_search_ddg`) – placeholder conversion exists but tool implementation missing. Enhanced INFO logging for successful tool binds partially implemented (WARNING logs present, INFO logs missing).
+   - **Model registration**: Integrated spam‑prevention for detection calls (via `register_model_with_litellm`), but spam persists during `litellm.completion()` calls (LiteLLM library limitation).
+
+**KNOWN LIMITATIONS:**
+- **Responses API not used** due to langchain‑litellm wrapper limitations (considering custom wrapper).
+- **Logs show LiteLLM library debug spam** (especially for OpenAI in completion calls).
+- **Missing INFO logs for successful binds** across providers (WARNING logs present, INFO logs missing).
+- **DeepSeek uses cached web search results internally** (provider limitation).
+- **Ollama web search not triggered**; needs special handling (research: https://docs.ollama.com/capabilities/web-search).
+
 
 4. **Implement DuckDuckGo Search Tool** (`src/multi_agent_dashboard/tool_integration/duckduckgo_search.py`):
    - Create a LangChain `DuckDuckGoSearchRun` wrapper with optional `domain_filter` parameter.
