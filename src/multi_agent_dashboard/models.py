@@ -5,6 +5,7 @@ import json
 import logging
 from multi_agent_dashboard.utils import safe_format
 from multi_agent_dashboard.llm_client import LLMError
+from multi_agent_dashboard.tool_integration.provider_tool_adapter import convert_tools_for_provider
 
 logger = logging.getLogger(__name__)
 
@@ -297,25 +298,69 @@ class AgentRuntime:
         agent_obj_for_invoke = None
         langchain_tools = None
 
-        # Map configured tools to LangChain-compatible tool specs (OpenAI built-ins)
+        # Map configured tools to LangChain-compatible tool specs using provider adapter
         try:
-            if (getattr(self.spec, "provider_id", None) or "").lower() == "openai":
-                tools_cfg = self.spec.tools or {}
-                if tools_cfg.get("enabled"):
-                    enabled_tools = tools_cfg.get("tools") or []
-                    if "web_search" in enabled_tools:
-                        tool_spec: Dict[str, Any] = {"type": "web_search"}
-                        # Pass allowed_domains filters when available
-                        if isinstance(tc, dict):
-                            tools_arr = tc.get("tools")
-                            if isinstance(tools_arr, list):
-                                for t in tools_arr:
-                                    if isinstance(t, dict) and t.get("type") == "web_search":
-                                        filters = t.get("filters")
-                                        if filters:
-                                            tool_spec["filters"] = filters
-                        langchain_tools = [tool_spec]
+            tools_cfg = self.spec.tools or {}
+            provider_id = (getattr(self.spec, "provider_id", None) or "").lower()
+            model = getattr(self.spec, "model", "")
+            use_responses_api = getattr(self.spec, "use_responses_api", False)
+            provider_features = getattr(self.spec, "provider_features", None)
+            
+            # Convert using provider adapter (supports OpenAI, DeepSeek, Ollama)
+            converted = convert_tools_for_provider(
+                tools_cfg,
+                provider_id,
+                model,
+                use_responses_api,
+                provider_features,
+            )
+            
+            langchain_tools = None
+            if "tools" in converted:
+                langchain_tools = converted["tools"]
+            elif "web_search_options" in converted:
+                # Completions API style - cannot be passed as tools list
+                # Log warning and treat as no tools (binding must happen elsewhere)
+                logger.warning(
+                    f"Agent {self.spec.name}: web_search_options returned by adapter "
+                    f"but binding not yet implemented in non-LiteLLM path. "
+                    f"Tools will be disabled for this run."
+                )
+                langchain_tools = None
+            # else empty dict -> langchain_tools stays None
+            
+            # Merge allowed_domains filters from tc into tool specs
+            if langchain_tools and isinstance(tc, dict):
+                tools_arr = tc.get("tools")
+                if isinstance(tools_arr, list):
+                    for tc_tool in tools_arr:
+                        if isinstance(tc_tool, dict) and tc_tool.get("type") == "web_search":
+                            filters = tc_tool.get("filters")
+                            if filters:
+                                # Find matching web_search tool in langchain_tools
+                                for lt in langchain_tools:
+                                    if isinstance(lt, dict):
+                                        # Match by type "web_search" or function name "web_search"/"duckduckgo_search"
+                                        if lt.get("type") == "web_search":
+                                            lt["filters"] = filters
+                                            break
+                                        func = lt.get("function", {})
+                                        if isinstance(func, dict) and func.get("name") in ("web_search", "duckduckgo_search"):
+                                            # For function tools, set default domain_filter in schema
+                                            # and keep filters as extra metadata for compatibility
+                                            lt["filters"] = filters
+                                            # Set default domain_filter in parameters if present
+                                            allowed_domains = filters.get("allowed_domains")
+                                            if allowed_domains and isinstance(allowed_domains, list):
+                                                params = func.get("parameters", {})
+                                                if isinstance(params, dict):
+                                                    props = params.get("properties", {})
+                                                    if isinstance(props, dict) and "domain_filter" in props:
+                                                        # Set default value in schema
+                                                        props["domain_filter"]["default"] = allowed_domains
+                                            break
         except Exception:
+            logger.debug("Tool conversion failed for agent %s", self.spec.name, exc_info=True)
             langchain_tools = None
 
         # Enforce LangChain-only runtime: create_agent_for_spec + invoke_agent must be available.
