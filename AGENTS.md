@@ -10,7 +10,7 @@ The Multi-Agent Dashboard is a Streamlit-based Python application for building, 
 - **Persistent SQLite storage** with automatic migrations
 - **Rich observability** (cost, latency, logs, history)
 - **Tool calling** with per-agent controls
-- **Provider-agnostic LLM integration** (OpenAI, DeepSeek, Ollama) with LiteLLM translation layer for normalization
+- **Provider-agnostic LLM integration** (OpenAI, DeepSeek, Ollama) via provider-specific LangChain implementations with static capability mapping
 - **Structured output** with JSON schema validation
 
 The codebase follows a clean separation between UI (`src/multi_agent_dashboard/ui/`) and engine (`src/multi_agent_dashboard/`). Database access is layered with low-level infra (`db/infra/`), DAOs (`db/*.py`), and high-level services (`db/services.py`).
@@ -104,7 +104,7 @@ src/multi_agent_dashboard/
 ├── structured_schemas.py  # JSON schema resolution for structured output
 ├── runtime_hooks.py       # Runtime hooks for agent execution
 ├── utils.py               # Utility functions (safe_format, etc.)
-├── tool_integration/      # Tool registry and LiteLLM adapter for tool calling
+├── tool_integration/      # Tool registry and provider-specific tool adapter
 ├── ui/                    # Streamlit UI components
 │   ├── app.py             # Main Streamlit application
 │   ├── bootstrap.py       # UI initialization
@@ -149,15 +149,17 @@ docs/                      # Project documentation
 
 ### LLM Provider Integration
 
-- Provider‑agnostic client in `llm_client.py` with factory pattern; LiteLLM integration path (`USE_LITELLM=true`) uses `LiteLLMClient` for unified provider handling
+- Provider‑agnostic client in `llm_client.py` with factory pattern; uses provider‑specific LangChain implementations for OpenAI, DeepSeek, and Ollama
 - Supported providers: `openai`, `deepseek`, `ollama`
-- Provider‑specific logic is encapsulated in `_build_structured_output_adapter` and `_compute_cost`
-- Structured output uses `with_structured_output(method="function_calling")` where available; the LiteLLM path (`USE_LITELLM=true`) normalizes JSON‑Schema formatting across all providers via LiteLLM’s `response_format` parameter
-- Tool calling integration uses LiteLLM tool adapter with dynamic API detection and conflict resolution for web search (see known limitations in PLAN.md Step 5)
+- Provider‑specific logic is encapsulated in `_build_structured_output_adapter`, `_build_input_with_files`, and `_compute_cost`
+- Structured output uses provider‑specific methods: OpenAI JSON Schema, DeepSeek function‑calling/json‑mode, Ollama raw schema
+- Tool calling integration uses provider‑specific tool adapter with static capability mapping (see `provider_capabilities.py`)
+- File handling uses provider‑specific message building for multimodal inputs (images, PDFs, text)
 - Token accounting and pricing are preserved across all providers
 
 **Key provider‑aware functions:**
 - `LLMClient._build_structured_output_adapter()` – creates provider‑specific response format
+- `LLMClient._build_input_with_files()` – constructs provider‑specific message parts for file uploads
 - `engine._compute_cost()` – uses `OPENAI_PRICING`/`DEEPSEEK_PRICING` from config
 
 ### Database Access Pattern
@@ -237,7 +239,7 @@ A database is considered “fresh” if no user‑created tables exist or existi
 |----------|----------|-------------|
 | `OPENAI_API_KEY` | Yes | OpenAI API key |
 | `DEEPSEEK_API_KEY` | Optional | DeepSeek API key |
-| `OLLAMA_HOST` | Optional | Ollama server URL (maps to LiteLLM `base_url`) |
+| `OLLAMA_HOST` | Optional | Ollama server URL (for LangChain Ollama integration) |
 | `DB_FILE` | Optional | Override default database filename |
 | `LOG_LEVEL` | Optional | Logging level (INFO, DEBUG, etc.) |
 
@@ -276,47 +278,51 @@ Color themes and emoji symbols are centralized in `config.UI_COLORS`. Avoid hard
 
 10. **Provider features normalization** – Provider features (`provider_features`) are normalized to keys `tool_calling`, `structured_output`, `reasoning`, `image_inputs`, `max_input_tokens`. The engine also accepts variations (`tool_calls`, `toolcalling`, `toolCalling`, etc.) but stores them normalized.
 
-11. **LiteLLM parameter dropping** – Enable `litellm.drop_params = True` to log warnings about unsupported parameters (e.g., GPT‑5 temperature) instead of raising errors; use `litellm.supports_response_schema()` and `litellm.get_supported_openai_params()` for dynamic feature detection.
+11. **Provider capability mapping** – Provider capabilities (tool calling, structured output, vision, etc.) are defined statically in `provider_capabilities.py` for each provider/model combination as an advisory reference; agent configuration (`provider_features`) remains the primary source of truth.
 
-12. **Multimodal file handling** – When `USE_LITELLM=true`, file uploads are processed by `multimodal_handler.py`. Images are base64-encoded for vision-capable providers (OpenAI). Text files (txt, md, csv, json, html, xml) are decoded as UTF-8 text parts. PDFs are extracted as text if `pypdf` is installed, otherwise fall back to UTF-8 decoding. Binary files are decoded with replacement characters. If provider does not support vision, files are concatenated as plain text with headers. **Vision/tool support detection is model‑aware** (e.g., Ollama `llava` vs `llama3`) using `supports_feature` with model parameter.
+12. **Multimodal file handling** – File uploads are processed by provider‑specific message building in `LLMClient._build_input_with_files()`. Images are base64‑encoded for vision‑capable providers (OpenAI). Text files are decoded as UTF‑8 text parts. PDFs are extracted as text if `pypdf` is installed. If provider does not support vision, files are concatenated as plain text with headers. **Vision/tool support detection uses static capability mapping as advisory; actual feature binding respects agent configuration.**
 
-13. **LiteLLM spam prevention** – Unknown models trigger "Provider List" spam in LiteLLM detection calls. The system automatically registers unknown models to prevent spam in detection calls, but spam may still occur during `litellm.completion()` calls (LiteLLM library limitation).
+13. **Tool calling adapter** – Tool integration uses provider‑specific tool adapter (`provider_tool_adapter.py`) that respects exact tool configuration from `AgentSpec.tools`; static capability mapping is used only for warnings and UI defaults (no automatic conversions).
 
-14. **LiteLLM tool calling limitations** – Tool calling integration uses LiteLLM tool adapter with dynamic API detection. See PLAN.md Step 5 Sub step 3 for known limitations (logging, API selection, provider-specific issues).
+14. **Structured output methods** – Structured output uses provider‑specific methods: OpenAI JSON Schema, DeepSeek function‑calling/json‑mode, Ollama raw schema. The appropriate method is selected via provider detection; capability mapping provides advisory hints.
 
-## LiteLLM Integration & Architectural Guidelines
+## Provider-Specific LangChain Architecture
 
-**Current Initiative**: Integrating LiteLLM as a universal translation layer to normalize provider‑specific handling (token counting, structured output, file uploads, tool calling). Token counting and structured output have been normalized for the `USE_LITELLM=true` path; file uploads integration is now available with multimodal fallback handling; tool calling integration is implemented via LiteLLM tool adapter but has known limitations (see PLAN.md Step 5). Refer to `PLAN.md` for detailed rollout.
+**Current Initiative**: Removing LiteLLM dependency and migrating to provider‑specific LangChain implementations with **advisory** capability mapping. This simplifies the codebase, eliminates dynamic detection issues, and provides full control over supported providers (OpenAI, DeepSeek, Ollama). Refer to `PLAN.md` for detailed migration steps.
 
 **High‑Level Directives**:
 
-1. **Dual‑Path Architecture**:
-   - Maintain both `USE_LITELLM=true` (full LiteLLM) and `USE_LITELLM=false` (original provider‑specific implementations) until LiteLLM path is validated.
-   - The `use_litellm` flag defaults to `False` during development; switch to `True` after Phase 4 validation.
+1. **Advisory Capability Mapping**:
+   - Provider capabilities (tool calling, structured output, vision, etc.) are defined statically in `provider_capabilities.py` for each provider/model combination as an advisory reference.
+   - Use `get_capabilities(provider_id, model)` and `supports_feature(provider_id, feature, model)` for advisory detection (warnings, UI defaults).
+   - Agent configuration (`provider_features`) remains the primary source of truth; static mapping does not override user choices.
 
-2. **Isolation Guardrail**:
-   - **Prefer new modules/functions/classes** for the `langchain‑litellm` path over modifications/conditionals inside existing structures.
-   - Keep new and old logic as separated and uncoupled as possible.
-   - Examples: Add `LiteLLMClient` class instead of modifying `LLMClient` with branches; create `litellm_config.py` instead of extending `config.py`.
-   - **File upload integration**: New file handling logic must be isolated in dedicated modules; legacy path (`USE_LITELLM=false`) must remain unchanged. See PLAN.md Step 4 for full constraints (dynamic capability detection, non‑persistent storage, etc.).
+2. **Provider‑Specific Implementations**:
+   - Use LangChain’s native provider libraries (`langchain‑openai`, `langchain‑deepseek`, `langchain‑ollama`) directly.
+   - Implement provider‑specific adapters for tool calling (`provider_tool_adapter.py`), structured output (`_build_structured_output_adapter`), and file handling (`_build_input_with_files`).
+   - Maintain existing working implementations for OpenAI and extend them to DeepSeek and Ollama.
 
-3. **Graceful Parameter Handling**:
-   - Enable `litellm.drop_params = True` globally to log warnings about dropping unsupported parameters (e.g., GPT‑5 temperature) instead of raising errors.
-   - Use `litellm.supports_response_schema()` and `litellm.get_supported_openai_params()` for feature detection.
-   - **Environment variable strategy**: Set all provider API keys in `os.environ` for consistent LiteLLM compatibility, avoiding provider‑specific exceptions.
-   - **Leverage built‑in fallbacks**: Use LiteLLM’s provider detection and automatic fallback mechanisms instead of custom logic where possible.
+3. **Unified Interface**:
+   - Maintain provider‑agnostic client interface in `llm_client.py` with factory pattern.
+   - Internal implementations are provider‑specific but expose a consistent API to the engine and UI.
+   - No `USE_LITELLM` flag or dual‑path architecture; all code paths use provider‑specific LangChain implementations.
 
-4. **Latest Dependencies**:
-   - Install `langchain‑litellm` from GitHub main (includes PR 62 fixes for JSON Schema support, `tool_choice="any"` mapping, and proper `tool_calls` population).
-   - Keep existing provider‑specific packages (`langchain‑openai`, `langchain‑ollama`, `langchain‑deepseek`) for dual‑path operation.
+4. **Advisory Capability Detection**:
+   - Feature detection uses static mapping for advisory purposes (warnings, UI defaults); actual feature binding respects agent configuration.
+   - Model‑specific capabilities (e.g., Ollama `llava` vs `llama3`) are explicitly defined in the capability map for advisory guidance.
+   - Any dynamic capability detection must be based on provider APIs, not heuristics or hardcoded model names.
+   - Never implement prompt‑based tool‑calling emulation; tool invocation via prompts remains the user's responsibility via manual agent prompt configuration.
 
-5. **Validation & Rollout**:
-   - Each rollout phase maintains dual‑path functionality.
-   - **Dual‑path validation**: Both paths must remain independently testable and functional until explicit removal of old adapters.
-   - Removal of old adapters (Phase 5) is optional and can be deferred if continued dual‑path operation is preferred.
-   - All existing tests must pass without regressions in both `USE_LITELLM` modes.
+5. **Adding New Providers**:
+   - To add a new provider, define its capabilities in `provider_capabilities.py` and implement provider‑specific adapters for tools, structured output, and file handling.
+   - No LiteLLM dependency; new providers integrate directly with LangChain’s native libraries.
 
-**Key Benefit**: Once validated, adding a new provider requires only adding its model string to the LiteLLM mapping—no code changes in `llm_client.py`, `engine.py`, or the UI.
+6. **Modular Design Approach**:
+   - Prefer a highly modularized approach over nested branches. Split existing code affected by the refactor into separate helper functions, modules, and packages.
+   - Avoid deep nesting of provider‑specific branches; create focused modules (e.g., `tool_integration/provider_tool_adapter.py`, `multimodal_handler.py`).
+   - Keep modules focused on single responsibility and preserve existing interfaces while refactoring internals.
+
+**Key Benefit**: Adding a new provider requires defining capabilities and implementing provider‑specific adapters—no LiteLLM dependency, full control over provider integration.
 
 ## Further Reading
 
