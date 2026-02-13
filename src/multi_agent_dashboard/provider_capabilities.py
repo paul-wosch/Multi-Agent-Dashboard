@@ -28,6 +28,7 @@ PROVIDER_DEFAULT_CAPABILITIES: Dict[str, Dict[str, bool]] = {
         "function_calling": True,
         "vision": True,
         "tools": True,
+        "native_web_search": True,
     },
     "deepseek": {
         "structured_output": True,
@@ -40,6 +41,7 @@ PROVIDER_DEFAULT_CAPABILITIES: Dict[str, Dict[str, bool]] = {
         "function_calling": True,
         "vision": False,
         "tools": True,
+        "native_web_search": False,
     },
     "ollama": {
         "structured_output": True,
@@ -52,6 +54,7 @@ PROVIDER_DEFAULT_CAPABILITIES: Dict[str, Dict[str, bool]] = {
         "function_calling": False,
         "vision": False,
         "tools": False,
+        "native_web_search": False,
     },
 }
 
@@ -88,12 +91,14 @@ MODEL_CAPABILITIES: Dict[str, Dict[str, Dict[str, bool]]] = {
             "tool_calling": False,   # o1 does not support tool calling
             "structured_output": False,  # o1 does not support JSON Schema
             "max_input_tokens": 128000,
+            "native_web_search": False,
         },
         "o1-mini": {
             "reasoning": True,
             "tool_calling": False,
             "structured_output": False,
             "max_input_tokens": 128000,
+            "native_web_search": False,
         },
     },
     "deepseek": {
