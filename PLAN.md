@@ -52,7 +52,7 @@ Refer to the detailed strategy in [`docs/implementation‑strategies/drop_litell
 
 Each phase builds on the previous one; the non‑LiteLLM path (`USE_LITELLM=false`) must remain fully functional throughout.
 
-### Phase 1 – Create Capability Mapping & Tool Adapter
+### ✅ Phase 1 – Create Capability Mapping & Tool Adapter
 
 **Objective:** Establish an advisory capability mapping system and a new provider‑specific tool adapter that respects agent configuration as primary source of truth.
 
