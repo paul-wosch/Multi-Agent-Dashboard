@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Callable, Tuple
 from dataclasses import dataclass
 from multi_agent_dashboard.structured_schemas import resolve_schema_json
 from multi_agent_dashboard import litellm_config
-from multi_agent_dashboard.tool_integration.litellm_tool_adapter import convert_tools_for_litellm
+from multi_agent_dashboard.tool_integration.provider_tool_adapter import convert_tools_for_provider
 
 logger = logging.getLogger(__name__)
 
@@ -1143,21 +1143,22 @@ class LLMClient:
                 use_responses_api = getattr(spec, "use_responses_api", False)
                 tool_configs = getattr(spec, "tools", {})
                 logger.debug("Converting tools for LiteLLM path; tools param=%s, spec.tools=%s", tools, tool_configs)
-                # Convert tool configs to LiteLLM format
-                litellm_tools = convert_tools_for_litellm(
-                    tool_configs, provider_id, model, use_responses_api
+                # Convert tool configs to provider-specific format
+                provider_features = getattr(spec, "provider_features", None)
+                converted_tools = convert_tools_for_provider(
+                    tool_configs, provider_id, model, use_responses_api, provider_features
                 )
                 # Bind tools to model instance if applicable
-                if litellm_tools:
-                    if "tools" in litellm_tools:
+                if converted_tools:
+                    if "tools" in converted_tools:
                         # Bind function tools
-                        model_instance = model_instance.bind_tools(litellm_tools["tools"])
-                        logger.info(f"Bound {len(litellm_tools['tools'])} function tool(s) to model")
+                        model_instance = model_instance.bind_tools(converted_tools["tools"])
+                        logger.info(f"Bound {len(converted_tools['tools'])} function tool(s) to model")
                         # Replace tools list with function tools (OpenAI format)
-                        tools = litellm_tools["tools"]
-                    elif "web_search_options" in litellm_tools:
+                        tools = converted_tools["tools"]
+                    elif "web_search_options" in converted_tools:
                         # Bind web search options (Completions API)
-                        model_instance = model_instance.bind(web_search_options=litellm_tools["web_search_options"])
+                        model_instance = model_instance.bind(web_search_options=converted_tools["web_search_options"])
                         logger.info(f"Bound web search options to model")
                         # Clear tools list since web_search_options is being used instead
                         tools = []

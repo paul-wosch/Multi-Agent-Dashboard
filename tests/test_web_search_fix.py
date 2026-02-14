@@ -74,8 +74,8 @@ def test_llm_client_override():
                 mock_factory.get_model.return_value = MagicMock()
                 MockFactory.return_value = mock_factory
                 
-                # Mock convert_tools_for_litellm to capture arguments
-                with patch('src.multi_agent_dashboard.llm_client.convert_tools_for_litellm') as mock_convert:
+                # Mock convert_tools_for_provider to capture arguments
+                with patch('src.multi_agent_dashboard.llm_client.convert_tools_for_provider') as mock_convert:
                     mock_convert.return_value = {}
                     
                     # Create a mock spec with use_responses_api=True and tools enabled
@@ -102,13 +102,13 @@ def test_llm_client_override():
                     # Call create_agent_for_spec with tools to trigger conversion
                     agent = client.create_agent_for_spec(MockSpec(), tools=[dummy_tool])
                     
-                    # Verify that convert_tools_for_litellm was called with use_responses_api=True
+                    # Verify that convert_tools_for_provider was called with use_responses_api=True
                     # (no longer overridden for LiteLLM path)
                     mock_convert.assert_called_once()
                     call_args = mock_convert.call_args
                     # The fourth argument is use_responses_api
                     call_use_responses_api = call_args[0][3]
-                    print(f"convert_tools_for_litellm called with use_responses_api={call_use_responses_api} (LiteLLM path)")
+                    print(f"convert_tools_for_provider called with use_responses_api={call_use_responses_api} (LiteLLM path)")
                     assert call_use_responses_api == True, f"Expected use_responses_api=True for LiteLLM path (no override), got {call_use_responses_api}"
                     
                     # Reset mock and test with LiteLLM disabled
@@ -118,7 +118,7 @@ def test_llm_client_override():
                     
                     agent = client.create_agent_for_spec(MockSpec(), tools=[dummy_tool])
                     # For non-LiteLLM path, conversion should NOT be called
-                    assert mock_convert.call_count == 0, f"convert_tools_for_litellm should not be called for non-LiteLLM path, but was called {mock_convert.call_count} times"
+                    assert mock_convert.call_count == 0, f"convert_tools_for_provider should not be called for non-LiteLLM path, but was called {mock_convert.call_count} times"
                     # Verify that use_responses_api flag was passed to model factory in the SECOND call (after LiteLLM disabled)
                     assert mock_factory.get_model.call_count >= 2, f"Expected at least 2 calls to get_model, got {mock_factory.get_model.call_count}"
                     second_call_args = mock_factory.get_model.call_args_list[1]
