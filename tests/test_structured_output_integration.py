@@ -95,8 +95,8 @@ def test_llm_client_init_with_litellm_flag_true():
                     assert client._init_chat_model.__name__ == "_init_chat_model_with_litellm"
 
 
-def test_structured_output_adapter_unified_format():
-    """Verify _build_structured_output_adapter returns unified LiteLLM JSON Schema format regardless of provider."""
+def test_structured_output_adapter_provider_specific():
+    """Verify _build_structured_output_adapter returns provider-specific formats."""
     with patch.object(config, 'USE_LITELLM', True):
         client = LLMClient()
         schema = {
@@ -115,24 +115,22 @@ def test_structured_output_adapter_unified_format():
         result = client._build_structured_output_adapter(spec, None)
         assert result["type"] == "json_schema"
         assert result["json_schema"]["schema"] == schema
-        # strict should NOT be present for OpenAI (OpenAI rejects the parameter)
         assert "strict" not in result["json_schema"]
         
         # Test with Ollama provider
         spec.provider_id = "ollama"
         result2 = client._build_structured_output_adapter(spec, None)
-        assert result2["type"] == "json_schema"
-        assert result2["json_schema"]["schema"] == schema
-        # strict should be True for non-OpenAI providers
-        assert result2["json_schema"]["strict"] is True
+        # Ollama returns raw schema dict
+        assert result2 == schema
         
         # Test with DeepSeek provider
         spec.provider_id = "deepseek"
         result3 = client._build_structured_output_adapter(spec, None)
-        assert result3["type"] == "json_schema"
-        assert result3["json_schema"]["schema"] == schema
-        # strict should be True for non-OpenAI providers
-        assert result3["json_schema"]["strict"] is True
+        # DeepSeek returns function-calling wrapper
+        assert "name" in result3
+        assert "description" in result3
+        assert "parameters" in result3
+        assert result3["parameters"] == schema
 
 
 def test_create_agent_for_spec_passes_response_format_with_litellm_false():
@@ -183,7 +181,7 @@ def test_create_agent_for_spec_passes_response_format_with_litellm_true():
                 mock_model = Mock()
                 client._model_factory.get_model = Mock(return_value=mock_model)
                 
-                # Mock with_structured_output to return same model (workaround path)
+                # Mock with_structured_output to return same model (workaround path removed, but keep mock)
                 mock_model.with_structured_output = Mock(return_value=mock_model)
                 # Mock _wrap_structured_output_model to return same model
                 client._wrap_structured_output_model = Mock(return_value=mock_model)
@@ -202,16 +200,19 @@ def test_create_agent_for_spec_passes_response_format_with_litellm_true():
                 
                 # Verify get_model called with correct arguments
                 client._model_factory.get_model.assert_called_once()
-                # Verify with_structured_output was called (workaround applied)
-                mock_model.with_structured_output.assert_called_once()
-                # Verify _wrap_structured_output_model was called
-                client._wrap_structured_output_model.assert_called_once_with(mock_model)
-                # Verify _create_agent called with response_format=None (cleared by workaround)
+                # Verify with_structured_output was NOT called (workaround removed)
+                mock_model.with_structured_output.assert_not_called()
+                # Verify _wrap_structured_output_model was NOT called (workaround removed)
+                client._wrap_structured_output_model.assert_not_called()
+                # Verify _create_agent called with provider-specific response_format
                 client._create_agent.assert_called_once()
                 call_kwargs = client._create_agent.call_args.kwargs
                 assert "response_format" in call_kwargs
                 response_format = call_kwargs["response_format"]
-                assert response_format is None
+                # Expect OpenAI JSON Schema format
+                assert response_format["type"] == "json_schema"
+                assert response_format["json_schema"]["schema"] == schema
+                assert response_format["json_schema"]["name"] == "test"
 
 
 def test_structured_output_with_explicit_response_format():

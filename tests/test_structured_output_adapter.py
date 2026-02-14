@@ -43,7 +43,7 @@ def test_build_structured_output_adapter_with_explicit_response_format():
 
 
 def test_build_structured_output_adapter_with_schema_dict():
-    """When schema_json is a dict, returns LiteLLM JSON Schema format."""
+    """When schema_json is a dict, returns raw schema for Ollama provider."""
     client = LLMClient()
     schema = {
         "type": "object",
@@ -58,16 +58,14 @@ def test_build_structured_output_adapter_with_schema_dict():
     )
     result = client._build_structured_output_adapter(spec, None)
     assert result is not None
-    assert result["type"] == "json_schema"
-    assert "json_schema" in result
-    json_schema = result["json_schema"]
-    assert json_schema["name"] == "test_schema"
-    assert json_schema["schema"] == schema
-    assert json_schema["strict"] is True
+    # Ollama returns raw schema dict
+    assert result == schema
+    # No wrapper
+    assert "json_schema" not in result
 
 
 def test_build_structured_output_adapter_with_schema_string():
-    """schema_json as JSON string is parsed into dict."""
+    """schema_json as JSON string is parsed into dict; Ollama returns raw schema."""
     client = LLMClient()
     schema_str = '{"type": "object", "properties": {"count": {"type": "integer"}}}'
     spec = MockSpec(
@@ -78,15 +76,15 @@ def test_build_structured_output_adapter_with_schema_string():
     )
     result = client._build_structured_output_adapter(spec, None)
     assert result is not None
-    assert result["type"] == "json_schema"
-    json_schema = result["json_schema"]
-    assert json_schema["name"] == "count_schema"
-    assert json_schema["schema"] == {"type": "object", "properties": {"count": {"type": "integer"}}}
-    assert json_schema["strict"] is True
+    # Ollama returns parsed schema dict
+    expected = {"type": "object", "properties": {"count": {"type": "integer"}}}
+    assert result == expected
+    # No wrapper
+    assert "json_schema" not in result
 
 
 def test_build_structured_output_adapter_with_schema_name_only():
-    """When schema_json is None but schema_name references a registered schema."""
+    """When schema_json is None but schema_name references a registered schema; Ollama returns raw schema."""
     from multi_agent_dashboard.structured_schemas import register_schema, get_schema
     # Clean up registry before test
     from multi_agent_dashboard.structured_schemas import SCHEMA_REGISTRY
@@ -104,11 +102,10 @@ def test_build_structured_output_adapter_with_schema_name_only():
     )
     result = client._build_structured_output_adapter(spec, None)
     assert result is not None
-    assert result["type"] == "json_schema"
-    json_schema = result["json_schema"]
-    assert json_schema["name"] == "my_schema"
-    assert json_schema["schema"] == schema
-    assert json_schema["strict"] is True
+    # Ollama returns raw schema dict (name ignored)
+    assert result == schema
+    # No wrapper
+    assert "json_schema" not in result
 
 
 def test_build_structured_output_adapter_no_schema_returns_none():
