@@ -276,7 +276,7 @@ class MultiAgentEngine:
         if input_tokens is None and output_tokens is None:
             return 0.0, 0.0, 0.0
 
-        # Parse LiteLLM-style model string (provider/model)
+        # Parse provider/model string format
         model_for_pricing = model
         if "/" in model:
             # Split only on first slash

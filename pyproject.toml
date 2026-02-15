@@ -17,10 +17,8 @@ dependencies = [
     "langchain==1.2.7",
     "langchain-community==0.4.1",
     "langchain-deepseek==1.0.1",
-    "langchain-litellm@git+https://github.com/Akshay-Dongare/langchain-litellm.git", # langchain-litellm-0.4.0.post1.dev0+ad733f1
     "langchain-ollama==1.0.1",
     "langchain-openai==1.1.7",
-    "litellm==1.81.9",
     "openai==2.9.0",
     "python-dotenv==1.2.1",
     "pypdf==6.6.2",

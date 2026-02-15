@@ -90,7 +90,7 @@ Each phase builds on the previous one; the non‑LiteLLM path (`USE_LITELLM=fals
 | 3.4 | Update `llm_client.py` file‑processing logic to use the updated handler (both in `create_agent_for_spec` and `invoke_agent`). | File uploads work in the LangChain‑only path. |
 | 3.5 | Test file uploads with each provider (text, PDF, image). | Manual validation passes. |
 
-### Phase 4 – Delete Remaining LiteLLM Components
+### ✅ Phase 4 – Delete Remaining LiteLLM Components
 
 **Objective:** Remove all LiteLLM‑specific code, including the configuration, client wrapper, and the `USE_LITELLM` flag.
 
