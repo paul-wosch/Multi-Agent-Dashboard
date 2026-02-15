@@ -1,11 +1,8 @@
 """
-Unit tests for the unified structured output adapter (Step 3 of LiteLLM integration).
+Unit tests for the structured output adapter.
 """
 import pytest
 from unittest.mock import Mock, patch
-from multi_agent_dashboard import config
-# Force LiteLLM path for these tests (they test unified LiteLLM JSON Schema format)
-config.USE_LITELLM = True
 from multi_agent_dashboard.llm_client import LLMClient
 
 
@@ -118,43 +115,42 @@ def test_build_structured_output_adapter_no_schema_returns_none():
 
 def test_create_agent_for_spec_passes_response_format():
     """Test that create_agent_for_spec passes response_format to _create_agent."""
-    # Temporarily disable LiteLLM for this test to ensure response_format is passed
-    with patch('multi_agent_dashboard.config.USE_LITELLM', False):
-        client = LLMClient()
-        # Enable LangChain path
-        client._langchain_available = True
-        client._create_agent = Mock()
-        client._model_factory = Mock()
-        mock_model = Mock()
-        client._model_factory.get_model = Mock(return_value=mock_model)
-        
-        schema = {"type": "object", "properties": {"answer": {"type": "string"}}}
-        spec = MockSpec(
-            structured_output_enabled=True,
-            schema_json=schema,
-            schema_name="test",
-            model="gpt-4o",
-            provider_id="openai"
-        )
-        
-        # Call create_agent_for_spec
-        agent = client.create_agent_for_spec(spec, response_format=None)
-        
-        # Verify get_model called with correct arguments
-        client._model_factory.get_model.assert_called_once()
-        # Verify _create_agent called with response_format
-        client._create_agent.assert_called_once()
-        call_kwargs = client._create_agent.call_args.kwargs
-        assert "response_format" in call_kwargs
-        response_format = call_kwargs["response_format"]
-        assert response_format is not None
-        assert response_format["type"] == "json_schema"
-        assert response_format["json_schema"]["schema"] == schema
-        # Ensure other parameters passed
-        assert call_kwargs["model"] == mock_model
-        assert call_kwargs["system_prompt"] is None
-        assert len(call_kwargs["middleware"]) == 1  # Instrumentation middleware
-        assert call_kwargs["tools"] == []
+    # Ensure response_format is passed
+    client = LLMClient()
+    # Enable LangChain path
+    client._langchain_available = True
+    client._create_agent = Mock()
+    client._model_factory = Mock()
+    mock_model = Mock()
+    client._model_factory.get_model = Mock(return_value=mock_model)
+    
+    schema = {"type": "object", "properties": {"answer": {"type": "string"}}}
+    spec = MockSpec(
+        structured_output_enabled=True,
+        schema_json=schema,
+        schema_name="test",
+        model="gpt-4o",
+        provider_id="openai"
+    )
+    
+    # Call create_agent_for_spec
+    agent = client.create_agent_for_spec(spec, response_format=None)
+    
+    # Verify get_model called with correct arguments
+    client._model_factory.get_model.assert_called_once()
+    # Verify _create_agent called with response_format
+    client._create_agent.assert_called_once()
+    call_kwargs = client._create_agent.call_args.kwargs
+    assert "response_format" in call_kwargs
+    response_format = call_kwargs["response_format"]
+    assert response_format is not None
+    assert response_format["type"] == "json_schema"
+    assert response_format["json_schema"]["schema"] == schema
+    # Ensure other parameters passed
+    assert call_kwargs["model"] == mock_model
+    assert call_kwargs["system_prompt"] is None
+    assert len(call_kwargs["middleware"]) == 1  # Instrumentation middleware
+    assert call_kwargs["tools"] == []
 
 
 def test_create_agent_for_spec_with_explicit_response_format():
