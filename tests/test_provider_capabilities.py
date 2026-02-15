@@ -134,6 +134,49 @@ def test_supports_feature_unknown_feature():
     assert supports_feature("openai", "unknown_feature") is False
 
 
+def test_get_capabilities_model_case_insensitive():
+    """Test get_capabilities lowercases model names."""
+    caps1 = get_capabilities("openai", "GPT-4O")
+    caps2 = get_capabilities("openai", "gpt-4o")
+    assert caps1 == caps2
+    # Should have vision capability (true for gpt-4o)
+    assert caps1["vision"] is True
+
+
+def test_supports_feature_model_case_insensitive():
+    """Test supports_feature lowercases model names."""
+    assert supports_feature("openai", "vision", model="GPT-4O") is True
+    assert supports_feature("openai", "vision", model="gpt-4o") is True
+
+
+def test_get_capabilities_empty_provider():
+    """Test get_capabilities with empty provider string returns empty dict."""
+    caps = get_capabilities("")
+    assert caps == {}
+
+
+def test_get_capabilities_empty_model():
+    """Test get_capabilities with empty model string uses provider defaults."""
+    caps = get_capabilities("openai", "")
+    expected = PROVIDER_DEFAULT_CAPABILITIES["openai"]
+    assert caps == expected
+
+
+def test_get_capabilities_returns_copy():
+    """Test that get_capabilities returns a mutable copy, not the original dict."""
+    caps = get_capabilities("openai")
+    caps["custom_key"] = True
+    # Original should not be affected
+    assert "custom_key" not in PROVIDER_DEFAULT_CAPABILITIES["openai"]
+
+
+def test_supports_feature_int_capability():
+    """Test supports_feature returns int value for max_input_tokens."""
+    result = supports_feature("openai", "max_input_tokens")
+    assert isinstance(result, int)
+    assert result > 0
+
+
 def test_module_exports():
     """Ensure expected symbols are exported."""
     import multi_agent_dashboard.provider_capabilities as pc
