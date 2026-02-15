@@ -78,7 +78,7 @@ Each phase builds on the previous one; the non‑LiteLLM path (`USE_LITELLM=fals
 
 **Known limitation:** With the current design structured output and tool calling cannot be used together.
 
-### Phase 3 – Update Multimodal File Handling
+### ✅ Phase 3 – Update Multimodal File Handling
 
 **Objective:** Adapt `multimodal_handler.py` to construct provider‑specific LangChain messages (instead of relying on LiteLLM’s encoding).
 

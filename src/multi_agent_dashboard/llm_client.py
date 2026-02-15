@@ -1389,32 +1389,31 @@ class LLMClient:
 
         if files:
             files_processed = False
-            if self._use_litellm:
-                # Lazy import to avoid overhead for legacy path
-                try:
-                    from multi_agent_dashboard.multimodal_handler import prepare_multimodal_content
-                except ImportError:
-                    logger.warning("multimodal_handler not available, falling back to text concatenation")
-                    prepare_multimodal_content = None
+            # Try to use multimodal handler regardless of LiteLLM flag
+            try:
+                from multi_agent_dashboard.multimodal_handler import prepare_multimodal_content
+            except ImportError:
+                logger.warning("multimodal_handler not available, falling back to text concatenation")
+                prepare_multimodal_content = None
 
-                if prepare_multimodal_content:
-                    provider_id = getattr(agent, "_provider_id", None)
-                    model = getattr(agent, "_model", None)
-                    provider_features = getattr(agent, "_provider_features", None)
-                    content, processed_files = prepare_multimodal_content(
-                        provider_id=provider_id,
-                        model=model,
-                        files=files,
-                        profile=provider_features,
-                        prompt=combined_prompt,
-                    )
-                    if isinstance(content, list):
-                        multimodal_content_parts = content
-                        combined_prompt = ""  # not used
-                    else:
-                        combined_prompt = content  # string
-                    files_processed = True
-                # If prepare_multimodal_content is None, fall through to legacy concatenation
+            if prepare_multimodal_content:
+                provider_id = getattr(agent, "_provider_id", None)
+                model = getattr(agent, "_model", None)
+                provider_features = getattr(agent, "_provider_features", None)
+                content, processed_files = prepare_multimodal_content(
+                    provider_id=provider_id,
+                    model=model,
+                    files=files,
+                    profile=provider_features,
+                    prompt=combined_prompt,
+                )
+                if isinstance(content, list):
+                    multimodal_content_parts = content
+                    combined_prompt = ""  # not used
+                else:
+                    combined_prompt = content  # string
+                files_processed = True
+            # If prepare_multimodal_content is None, fall through to legacy concatenation
 
             if not files_processed:
                 # Legacy concatenation (original logic)
