@@ -288,7 +288,7 @@ Color themes and emoji symbols are centralized in `config.UI_COLORS`. Avoid hard
 
 ## Provider-Specific LangChain Architecture
 
-**Current Initiative**: Removing LiteLLM dependency and migrating to provider‑specific LangChain implementations with **advisory** capability mapping. This simplifies the codebase, eliminates dynamic detection issues, and provides full control over supported providers (OpenAI, DeepSeek, Ollama). Refer to `PLAN.md` for detailed migration steps.
+**Architecture**: The codebase has removed the LiteLLM dependency and migrated to provider‑specific LangChain implementations with **advisory** capability mapping. This simplifies the codebase, eliminates dynamic detection issues, and provides full control over supported providers (OpenAI, DeepSeek, Ollama). Refer to `PLAN.md` for historical migration details.
 
 **High‑Level Directives**:
 
