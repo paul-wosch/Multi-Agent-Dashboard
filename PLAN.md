@@ -64,7 +64,7 @@ Each phase builds on the previous one; the non‑LiteLLM path (`USE_LITELLM=fals
 | 1.4 | Smoke‑test each provider with the new adapter (existing features: structured output, file attachments, web search) to ensure no regressions. | Passing manual tests for OpenAI, DeepSeek, Ollama. |
 | 1.5 | Add unit tests for `provider_capabilities.py` and `provider_tool_adapter.py`. | Test file `tests/test_provider_capabilities.py`. |
 
-### Phase 2 – Remove LiteLLM Tool‑Conversion & Structured‑Output Branches
+### ✅ Phase 2 – Remove LiteLLM Tool‑Conversion & Structured‑Output Branches
 
 **Objective:** Delete the LiteLLM‑specific tool adapter and structured‑output workaround, wiring the new adapter into the main agent‑creation flow.
 
@@ -75,6 +75,8 @@ Each phase builds on the previous one; the non‑LiteLLM path (`USE_LITELLM=fals
 | 2.3 | Remove the LiteLLM branch in `_build_structured_output_adapter` (lines 879‑996), keeping only the provider‑specific branches. | Clean `_build_structured_output_adapter`. |
 | 2.4 | Ensure `response_format` flows correctly for all providers (OpenAI JSON Schema, DeepSeek function‑calling/json‑mode, Ollama raw schema). | No regression in structured‑output tests. |
 | 2.5 | Verify that `AgentRuntime.run` and `create_agent_for_spec` work together seamlessly (tools + structured output). **Ensure `_extract_tool_info_from_messages` continues to extract tool calls correctly.** | End‑to‑end test passes. |
+
+**Known limitation:** With the current design structured output and tool calling cannot be used together.
 
 ### Phase 3 – Update Multimodal File Handling
 

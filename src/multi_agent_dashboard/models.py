@@ -321,10 +321,9 @@ class AgentRuntime:
             elif "web_search_options" in converted:
                 # Completions API style - cannot be passed as tools list
                 # Log warning and treat as no tools (binding must happen elsewhere)
-                logger.warning(
-                    f"Agent {self.spec.name}: web_search_options returned by adapter "
-                    f"but binding not yet implemented in non-LiteLLM path. "
-                    f"Tools will be disabled for this run."
+                logger.debug(
+                    f"Agent {self.spec.name}: web_search_options returned by adapter; "
+                    f"binding will be handled by LLMClient."
                 )
                 langchain_tools = None
             # else empty dict -> langchain_tools stays None

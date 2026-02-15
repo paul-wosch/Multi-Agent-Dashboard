@@ -1017,40 +1017,34 @@ class LLMClient:
                          id(response_format), response_format)
             logger.debug("create_agent_for_spec: effective_response_format id=%s value=%s, _use_litellm=%s",
                          id(effective_response_format), effective_response_format, self._use_litellm)
-            # Convert tools for LiteLLM path using adapter
-            if self._use_litellm:
-                provider_id = (getattr(spec, "provider_id", None) or "openai").lower()
-                model = getattr(spec, "model", "")
-                use_responses_api = getattr(spec, "use_responses_api", False)
-                tool_configs = getattr(spec, "tools", {})
-                logger.debug("Converting tools for LiteLLM path; tools param=%s, spec.tools=%s", tools, tool_configs)
-                # Convert tool configs to provider-specific format
-                provider_features = getattr(spec, "provider_features", None)
-                converted_tools = convert_tools_for_provider(
-                    tool_configs, provider_id, model, use_responses_api, provider_features
-                )
-                # Bind tools to model instance if applicable
-                if converted_tools:
-                    if "tools" in converted_tools:
-                        # Bind function tools
-                        model_instance = model_instance.bind_tools(converted_tools["tools"])
-                        logger.info(f"Bound {len(converted_tools['tools'])} function tool(s) to model")
-                        # Replace tools list with function tools (OpenAI format)
-                        tools = converted_tools["tools"]
-                    elif "web_search_options" in converted_tools:
-                        # Bind web search options (Completions API)
-                        model_instance = model_instance.bind(web_search_options=converted_tools["web_search_options"])
-                        logger.info(f"Bound web search options to model")
-                        # Clear tools list since web_search_options is being used instead
-                        tools = []
-                else:
-                    # No tools applicable after conversion
+            # Convert tool configs to provider-specific format and bind to model
+            provider_id = (getattr(spec, "provider_id", None) or "openai").lower()
+            model = getattr(spec, "model", "")
+            use_responses_api = getattr(spec, "use_responses_api", False)
+            tool_configs = getattr(spec, "tools", {})
+            logger.debug("Converting tools for provider; tools param=%s, spec.tools=%s", tools, tool_configs)
+            # Convert tool configs to provider-specific format
+            provider_features = getattr(spec, "provider_features", None)
+            converted_tools = convert_tools_for_provider(
+                tool_configs, provider_id, model, use_responses_api, provider_features
+            )
+            # Bind tools to model instance if applicable
+            if converted_tools:
+                if "tools" in converted_tools:
+                    # Bind function tools
+                    model_instance = model_instance.bind_tools(converted_tools["tools"])
+                    logger.info(f"Bound {len(converted_tools['tools'])} function tool(s) to model")
+                    # Replace tools list with function tools (OpenAI format)
+                    tools = converted_tools["tools"]
+                elif "web_search_options" in converted_tools:
+                    # Bind web search options (Completions API)
+                    model_instance = model_instance.bind(web_search_options=converted_tools["web_search_options"])
+                    logger.info(f"Bound web search options to model")
+                    # Clear tools list since web_search_options is being used instead
                     tools = []
             else:
-                # Legacy path (USE_LITELLM=false): tools passed unchanged
-                # The tools list is expected to be in provider-specific format
-                # (e.g., web_search dict for OpenAI Responses API)
-                logger.debug("Legacy path: passing %d tool(s) unchanged", len(tools) if tools else 0)
+                # No tools applicable after conversion
+                tools = []
             agent = self._create_agent(
                 model=model_instance,
                 tools=tools or [],
