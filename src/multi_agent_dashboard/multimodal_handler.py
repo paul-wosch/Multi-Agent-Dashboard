@@ -13,7 +13,7 @@ import mimetypes
 from functools import lru_cache
 from typing import Dict, List, Any, Optional, Tuple, Union
 
-from multi_agent_dashboard import litellm_config
+from multi_agent_dashboard import provider_capabilities
 
 # Optional PDF extraction library
 try:
@@ -59,7 +59,7 @@ def provider_supports_vision(provider_id: str, model: str) -> bool:
     Cached check whether a provider/model supports vision (image inputs).
     """
     logger.debug(f"Checking vision support for provider={provider_id}, model={model}")
-    result = litellm_config.supports_feature(provider_id, "vision", model)
+    result = provider_capabilities.supports_feature(provider_id, "vision", model)
     logger.info(f"Vision support for provider={provider_id}, model={model}: {result}")
     return result
 
@@ -70,9 +70,49 @@ def provider_supports_tools(provider_id: str, model: str) -> bool:
     Cached check whether a provider/model supports tool attachments.
     """
     logger.debug(f"Checking tool support for provider={provider_id}, model={model}")
-    result = litellm_config.supports_feature(provider_id, "tools", model)
+    result = provider_capabilities.supports_feature(provider_id, "tools", model)
     logger.info(f"Tool support for provider={provider_id}, model={model}: {result}")
     return result
+
+
+def build_message_parts_for_provider(
+    files: List[Dict[str, Any]],
+    provider_id: str,
+    model: str,
+    profile: Optional[Dict[str, Any]] = None,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """
+    Build LangChain-compatible message parts from files for a given provider.
+
+    Args:
+        files: List of file dicts with keys "filename", "content" (bytes), "mime_type"
+        provider_id: Provider identifier (openai, ollama, deepseek)
+        model: Model name (e.g., "gpt-4o", "llama3")
+        profile: Optional provider features dict (e.g., {"image_inputs": True})
+
+    Returns:
+        tuple (content_parts, processed_files):
+        - content_parts: List of content parts in OpenAI-style format
+          ({"type": "text", "text": ...} or {"type": "image_url", "image_url": {...}})
+        - processed_files: List of files that have been processed as attachments
+          (base64 encoded). Empty list if fallback to text concatenation.
+    """
+    # Delegate to prepare_multimodal_content with empty prompt
+    content, processed_files = prepare_multimodal_content(
+        provider_id=provider_id,
+        model=model,
+        files=files,
+        profile=profile,
+        prompt="",
+    )
+    # Ensure content is a list (if no files, content is empty string)
+    if isinstance(content, str):
+        # If empty string, return empty list; otherwise wrap as text part
+        if content:
+            return [{"type": "text", "text": content}], processed_files
+        else:
+            return [], processed_files
+    return content, processed_files
 
 
 def prepare_multimodal_content(
@@ -254,6 +294,7 @@ def get_supported_mime_types(provider_id: str, model: str) -> List[str]:
 # Export public interface
 __all__ = [
     "prepare_multimodal_content",
+    "build_message_parts_for_provider",
     "provider_supports_vision",
     "provider_supports_tools",
     "get_supported_mime_types",
