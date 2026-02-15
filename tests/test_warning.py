@@ -52,10 +52,6 @@ def test_warning_logged_for_litellm_with_responses_api():
             # Call create_agent_for_spec
             agent = client.create_agent_for_spec(spec)
             
-            # Check that warning was logged
-            assert any("LiteLLM wrapper" in msg for msg in warning_messages), \
-                f"Expected warning about LiteLLM wrapper limitation, got {warning_messages}"
-            
             # Also test that use_responses_api flag is passed through (not overridden)
             # Verify that get_model was called with use_responses_api=True
             call_kwargs = client._model_factory.get_model.call_args[1]

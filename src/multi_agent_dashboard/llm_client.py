@@ -851,13 +851,7 @@ class LLMClient:
         if not self._langchain_available or self._model_factory is None or self._create_agent is None:
             raise RuntimeError("LangChain agent creation is not available in this environment")
 
-        # LiteLLM wrapper limitation: ChatLiteLLM only calls litellm.completion() (Completions API)
-        if self._use_litellm and getattr(spec, "use_responses_api", False):
-            logger.warning(
-                "LiteLLM wrapper (ChatLiteLLM) only calls litellm.completion() (Completions API). "
-                "The use_responses_api=true flag will be passed to tool adapter but may not switch APIs. "
-                "For native provider integration with Responses API, set USE_LITELLM=false."
-            )
+
 
         model_instance = self._model_factory.get_model(
             spec.model,
@@ -875,50 +869,48 @@ class LLMClient:
         provider_id = (getattr(spec, "provider_id", None) or "openai").lower()
         logger.debug("Before workaround: provider_id=%s, response_format=%s", provider_id, response_format)
 
-        logger.info("After workaround block: provider_id=%s, response_format id=%s value=%s, _use_litellm=%s",
-                    provider_id, id(response_format), response_format, self._use_litellm)
-        # Provider-specific structured output wrapping (only when not using LiteLLM)
-        if not self._use_litellm:
-            if response_format is not None and provider_id == "ollama":
-                try:
-                    structured = getattr(model_instance, "with_structured_output", None)
-                    if callable(structured):
-                        # Prefer include_raw=True so we can preserve token/usage metadata from the raw AIMessage.
+
+        # Provider-specific structured output wrapping
+        if response_format is not None and provider_id == "ollama":
+            try:
+                structured = getattr(model_instance, "with_structured_output", None)
+                if callable(structured):
+                    # Prefer include_raw=True so we can preserve token/usage metadata from the raw AIMessage.
+                    try:
+                        model_instance = structured(response_format, method="json_schema", include_raw=True)
+                    except TypeError:
+                        model_instance = structured(response_format, method="json_schema")
+
+                    # Wrap structured output dicts into AIMessage so LangChain agents
+                    # do not attempt to coerce dicts into messages and fail.
+                    model_instance = self._wrap_structured_output_model(model_instance)
+            except Exception:
+                logger.debug("with_structured_output failed for ollama; falling back to prompt-only", exc_info=True)
+
+        if response_format is not None and provider_id == "deepseek":
+            try:
+                structured = getattr(model_instance, "with_structured_output", None)
+                if callable(structured):
+                    # DeepSeek supports function_calling on chat model; reasoner often rejects tool_choice.
+                    model_name = getattr(spec, "model", "") or ""
+                    prefer_json_mode = "reasoner" in model_name.lower()
+                    methods = ["json_mode", "function_calling"] if prefer_json_mode else ["function_calling",
+                                                                                          "json_mode"]
+                    last_err = None
+                    for m in methods:
                         try:
-                            model_instance = structured(response_format, method="json_schema", include_raw=True)
-                        except TypeError:
-                            model_instance = structured(response_format, method="json_schema")
-
-                        # Wrap structured output dicts into AIMessage so LangChain agents
-                        # do not attempt to coerce dicts into messages and fail.
-                        model_instance = self._wrap_structured_output_model(model_instance)
-                except Exception:
-                    logger.debug("with_structured_output failed for ollama; falling back to prompt-only", exc_info=True)
-
-            if response_format is not None and provider_id == "deepseek":
-                try:
-                    structured = getattr(model_instance, "with_structured_output", None)
-                    if callable(structured):
-                        # DeepSeek supports function_calling on chat model; reasoner often rejects tool_choice.
-                        model_name = getattr(spec, "model", "") or ""
-                        prefer_json_mode = "reasoner" in model_name.lower()
-                        methods = ["json_mode", "function_calling"] if prefer_json_mode else ["function_calling",
-                                                                                              "json_mode"]
-                        last_err = None
-                        for m in methods:
-                            try:
-                                model_instance = structured(response_format, method=m, include_raw=True)
-                                last_err = None
-                                break
-                            except Exception as e_method:
-                                last_err = e_method
-                                continue
-                        if last_err:
-                            raise last_err
-                        model_instance = self._wrap_structured_output_model(model_instance)
-                except Exception:
-                    logger.debug("with_structured_output failed for deepseek; falling back to prompt-only",
-                                 exc_info=True)
+                            model_instance = structured(response_format, method=m, include_raw=True)
+                            last_err = None
+                            break
+                        except Exception as e_method:
+                            last_err = e_method
+                            continue
+                    if last_err:
+                        raise last_err
+                    model_instance = self._wrap_structured_output_model(model_instance)
+            except Exception:
+                logger.debug("with_structured_output failed for deepseek; falling back to prompt-only",
+                             exc_info=True)
 
         # Normalize middleware list and instantiate classes when provided.
         middleware_list: List[Any] = []
@@ -1007,16 +999,11 @@ class LLMClient:
                 logger.exception("Failed to instantiate instrumentation middleware: %s", e)
 
         try:
-            # Determine effective response_format: pass only for OpenAI when not using LiteLLM,
-            # otherwise pass the adapter (LiteLLM handles it, OpenAI uses JSON Schema directly).
-            if self._use_litellm:
-                effective_response_format = response_format
-            else:
-                effective_response_format = response_format if provider_id == "openai" else None
+            # Determine effective response_format: pass only for OpenAI (JSON Schema), others use adapter.
+            effective_response_format = response_format if provider_id == "openai" else None
             logger.debug("create_agent_for_spec: provider_id=%s, response_format id=%s value=%s", provider_id,
                          id(response_format), response_format)
-            logger.debug("create_agent_for_spec: effective_response_format id=%s value=%s, _use_litellm=%s",
-                         id(effective_response_format), effective_response_format, self._use_litellm)
+
             # Convert tool configs to provider-specific format and bind to model
             provider_id = (getattr(spec, "provider_id", None) or "openai").lower()
             model = getattr(spec, "model", "")
@@ -1355,7 +1342,7 @@ class LLMClient:
         raw_provider = getattr(spec, "provider_id", None)
         logger.info("_build_structured_output_adapter: raw provider_id=%s", raw_provider)
         provider_id = (raw_provider or "openai").lower()
-        logger.info("_build_structured_output_adapter: provider_id=%s, _use_litellm=%s", provider_id, self._use_litellm)
+
         # Provider-specific formats for USE_LITELLM=false (original logic)
         if provider_id == "openai":
             result = {
