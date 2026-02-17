@@ -240,14 +240,27 @@ def extract_web_search_allowed_domains_from_tools_cfg(
     for tcfg in tools_low:
         if not isinstance(tcfg, dict):
             continue
-        if tcfg.get("type") != "web_search":
-            continue
-        filters = tcfg.get("filters") or {}
-        if isinstance(filters, dict) and "allowed_domains" in filters:
-            allowed = filters["allowed_domains"]
-            if isinstance(allowed, list):
-                return [str(d) for d in allowed]
-            return [str(allowed)]
+        
+        # Check for native web_search tool
+        if tcfg.get("type") == "web_search":
+            filters = tcfg.get("filters") or {}
+            if isinstance(filters, dict) and "allowed_domains" in filters:
+                allowed = filters["allowed_domains"]
+                if isinstance(allowed, list):
+                    return [str(d) for d in allowed]
+                return [str(allowed)]
+        
+        # Check for DuckDuckGo search tool (function-calling)
+        if tcfg.get("type") == "function":
+            func = tcfg.get("function")
+            if isinstance(func, dict) and func.get("name") in ("duckduckgo_search", "web_search_ddg"):
+                filters = tcfg.get("filters") or {}
+                if isinstance(filters, dict) and "allowed_domains" in filters:
+                    allowed = filters["allowed_domains"]
+                    if isinstance(allowed, list):
+                        return [str(d) for d in allowed]
+                    return [str(allowed)]
+    
     return None
 
 

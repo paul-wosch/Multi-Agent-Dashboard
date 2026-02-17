@@ -224,14 +224,6 @@ def render_run_sidebar() -> Tuple[
             "(one domain per line). Leave empty to allow any domain."
         )
 
-        # Provider-aware hint: make it clear this is provider-specific and normalized
-        st.sidebar.caption(
-            "Provider note: domain filters are a provider-specific feature. For example, OpenAI's Responses API "
-            "supports `filters.allowed_domains` on the web_search tool; other providers (e.g., Ollama) may accept different "
-            "parameters or apply filtering at the tool layer. The dashboard normalizes observed tool calls via LangChain's "
-            "content_blocks so such filters are displayed consistently here and recorded in the run export."
-        )
-
         for agent_name in selected_steps:
             if not agent_uses_web_search(agent_name):
                 continue

@@ -398,32 +398,6 @@ def render_agent_editor():
             max_chars=8,
         )
 
-        # Contextual provider capability hint (short)
-        st.markdown("### Provider capability hints")
-        prov_feats_preview = state.get("provider_features") or {}
-        # Determine a friendly summary
-        def _friendly_caps_summary(pf: dict) -> str:
-            parts = []
-            if pf.get("structured_output"):
-                parts.append("structured output")
-            if pf.get("tool_calling"):
-                parts.append("tool calling")
-            if pf.get("reasoning"):
-                parts.append("reasoning")
-            if not parts:
-                return "No explicit capability hints provided. Edit provider features or use the Advanced tab to set them."
-            return "Detected: " + ", ".join(parts) + "."
-
-        st.caption(_friendly_caps_summary(prov_feats_preview))
-
-        # Link to LangChain content_blocks docs for more info
-        st.markdown(
-            """
-            Providers that expose structured outputs and tool calls usually surface them via LangChain's standardized content blocks (`content_blocks`),
-            which the engine uses to detect tool calls, reasoning traces, and structured responses. See the LangChain standard message content docs in the Advanced tab for details.
-            """
-        )
-
     # ----- Prompt tab -----
     with prompt_tab:
         system_prompt_val = st.text_area(
@@ -607,9 +581,6 @@ def render_agent_editor():
 
     # ----- Advanced tab -----
     with adv_tab:
-        st.markdown("### Provider features (optional)")
-        st.caption("Provide a small JSON blob that hints at provider capabilities (e.g. {\"structured_output\": true, \"tool_calling\": true}). You can also toggle common capability flags below.")
-
         # Parse current provider_features JSON into pf_val for use in the UI
         pf_default = json.dumps(state.get("provider_features") or {}, indent=2)
         # Use a unique session key so editing multiple agents in the same session doesn't collide badly
@@ -617,50 +588,21 @@ def render_agent_editor():
         if pf_session_key not in st.session_state:
             st.session_state[pf_session_key] = pf_default
 
-        pf_text = st.text_area("Provider Features (JSON)", value=st.session_state[pf_session_key], height=120, key=pf_session_key)
-        try:
-            pf_val = json.loads(pf_text) if pf_text and pf_text.strip() else {}
-        except Exception:
-            pf_val = {}
-            st.warning("Provider features JSON invalid; saving will store an empty object.")
+        # Provider Features (JSON)
+        pf_val = {}
+        # Capability toggles currently not used (consider dynamic capability detection)
+        default_structured = True
+        default_tool_calling = True
+        default_reasoning = True
 
-        # Capability toggles: prefill from provider_features if present, else provider defaults
-        # Default heuristics (conservative):
-        default_structured = bool(pf_val.get("structured_output")) if "structured_output" in pf_val else (provider_choice == "openai")
-        default_tool_calling = bool(pf_val.get("tool_calling")) if "tool_calling" in pf_val else (provider_choice in ("openai", "ollama"))
-        default_reasoning = bool(pf_val.get("reasoning")) if "reasoning" in pf_val else True  # default to True for backward compatibility
+        structured_checked = default_structured
+        tool_calling_checked = default_tool_calling
+        reasoning_checked  = default_reasoning
 
-        col_s, col_t, col_r = st.columns(3)
-        with col_s:
-            structured_checkbox_key = f"agent_editor_pf_structured_{state.get('name','__unknown')}"
-            structured_checked = st.checkbox(
-                "Structured output (content_blocks)",
-                value=st.session_state.get(structured_checkbox_key, default_structured),
-                help="Whether the provider can produce structured outputs via LangChain content_blocks (e.g., for schema'd responses).",
-                key=structured_checkbox_key,
-            )
-        with col_t:
-            tool_calling_checkbox_key = f"agent_editor_pf_tool_calling_{state.get('name','__unknown')}"
-            tool_calling_checked = st.checkbox(
-                "Tool calling",
-                value=st.session_state.get(tool_calling_checkbox_key, default_tool_calling),
-                help="Provider supports server-side tool calls or function/tool invocation exposed through content blocks.",
-                key=tool_calling_checkbox_key,
-            )
-        with col_r:
-            reasoning_checkbox_key = f"agent_editor_pf_reasoning_{state.get('name','__unknown')}"
-            reasoning_checked = st.checkbox(
-                "Reasoning traces",
-                value=st.session_state.get(reasoning_checkbox_key, default_reasoning),
-                help="Provider emits structured reasoning / chain-of-thought blocks exposed through content_blocks.",
-                key=reasoning_checkbox_key,
-            )
-
-        st.markdown("---")
-
-        # Compute the effective provider_feats used to gate UI controls
         provider_feats = dict(pf_val or {})
-        # Merge the checkbox preferences (checkboxes are authoritative in the UI; they will be persisted into provider_features on Save)
+
+        # Merge the checkbox preferences
+        # Checkboxes are authoritative in the UI; they will be persisted into provider_features on Save
         provider_feats["structured_output"] = bool(structured_checked)
         provider_feats["tool_calling"] = bool(tool_calling_checked)
         provider_feats["reasoning"] = bool(reasoning_checked)
@@ -700,32 +642,6 @@ def render_agent_editor():
         state["schema_name"] = schema_name_val or ""
         state["schema_json"] = schema_json_val or ""
         state["temperature"] = float(temperature_val)
-
-        st.markdown("#### Capability summary")
-        caps = []
-        if provider_feats.get("structured_output"):
-            caps.append("structured output")
-        if provider_feats.get("tool_calling"):
-            caps.append("tool calling")
-        if provider_feats.get("reasoning"):
-            caps.append("reasoning traces")
-        if caps:
-            st.markdown(f"- Detected / selected capabilities: **{', '.join(caps)}**")
-        else:
-            st.markdown("- No capabilities selected.")
-
-        # Small contextual help about content_blocks and where to learn more.
-        st.info(
-            "LangChain standardized message content ('content_blocks') normalizes text, reasoning, tool calls and multimodal outputs across providers. "
-            "When providers expose content_blocks, the dashboard can more reliably detect structured outputs and tool invocations."
-        )
-        st.caption(
-            "Learn more: LangChain standard message content and Messages docs (content_blocks)."
-        )
-        st.markdown(
-            "• LangChain blog: [Standard message content](https://www.blog.langchain.com/standard-message-content/?utm_source=openai).  \n"
-            "• LangChain docs: [Messages / content_blocks](https://docs.langchain.com/oss/python/langchain/messages?utm_source=openai)."
-        )
 
         # --- Ollama endpoint health check indicator ---
         # Only show when provider_choice indicates local Ollama and some endpoint info is present

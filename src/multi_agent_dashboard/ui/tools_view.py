@@ -17,6 +17,7 @@ def _extract_allowed_domains_from_tool_entry(
     """
     Normalize extraction of allowed_domains from a tool usage entry.
     Handles both live (action dict) and historic (args_json) forms.
+    Supports web_search (filters.allowed_domains) and web_search_ddg (domain_filter).
     """
     domains: List[str] = []
 
@@ -26,20 +27,30 @@ def _extract_allowed_domains_from_tool_entry(
             return domains
     else:
         args = parse_json_field(entry.get("args_json"), {})
+        # For web_search, args contains {"action": {...}}; for web_search_ddg, args is the tool call directly
         action = args.get("action") if isinstance(args, dict) else None
+        if not isinstance(action, dict):
+            # If no action key, treat args as the action (for function-calling tools)
+            action = args if isinstance(args, dict) else {}
         if not isinstance(action, dict):
             return domains
 
+    # Extract from filters.allowed_domains (web_search)
     filters = action.get("filters") or {}
-    if not isinstance(filters, dict):
-        return domains
-
-    allowed = filters.get("allowed_domains")
-    if isinstance(allowed, list):
-        domains.extend(str(d) for d in allowed)
-    elif allowed:
-        domains.append(str(allowed))
-
+    if isinstance(filters, dict):
+        allowed = filters.get("allowed_domains")
+        if isinstance(allowed, list):
+            domains.extend(str(d) for d in allowed)
+        elif allowed:
+            domains.append(str(allowed))
+    
+    # Extract from domain_filter parameter (web_search_ddg)
+    domain_filter = action.get("domain_filter")
+    if isinstance(domain_filter, list):
+        domains.extend(str(d) for d in domain_filter)
+    elif domain_filter:
+        domains.append(str(domain_filter))
+    
     return domains
 
 
@@ -168,20 +179,10 @@ def render_agent_config_section(
             st.subheader("Advanced configuration")
             # Tools summary
             st.markdown(
-                f"**Tool calling enabled:** {'Yes' if cfg.tools_enabled else 'No'}"
+                f"**Tool calling enabled:** `{'Yes' if cfg.tools_enabled else 'No'}`"
             )
             st.markdown(
-                f"**Tools:** {', '.join(cfg.tools) if cfg.tools else '–'}"
-            )
-
-            # A provider-aware note (keeps UI provider-neutral)
-            st.caption(
-                "Note: tool parameters such as domain filters are provider-specific. "
-                "The dashboard normalizes observed tool calls and filters into a provider-agnostic "
-                "view (LangChain content_blocks) so you can inspect them consistently. "
-                "OpenAI's Responses API exposes domain filtering on the web_search tool as "
-                "`filters.allowed_domains`; other providers (e.g., local Ollama instances) "
-                "may accept different parameters or enforce filtering differently."
+                f"**Tools:** `{', '.join(cfg.tools) if cfg.tools else '–'}`"
             )
 
             if "web_search" in cfg.tools:
@@ -193,27 +194,32 @@ def render_agent_config_section(
                         "**Allowed domains for `web_search`:** not restricted (any domain)"
                     )
 
-                st.markdown(
-                    "Provider note: some providers (for example OpenAI Responses) accept an explicit "
-                    "`filters.allowed_domains` parameter which restricts search results to the listed domains. "
-                    "Other providers may surface similar filters via different parameter names or via the local tool layer. "
-                    "The dashboard records and displays the effective allow-list here for auditing and export."
-                )
+            if "web_search_ddg" in cfg.tools:
+                if cfg.web_search_allowed_domains:
+                    st.markdown("**Allowed domains for `web_search_ddg`:**")
+                    st.code("\n".join(cfg.web_search_allowed_domains))
+                else:
+                    st.markdown(
+                        "**Allowed domains for `web_search_ddg`:** not restricted (any domain)"
+                    )
+
 
             st.markdown(
-                f"**Reasoning effort:** {cfg.reasoning_effort}"
+                f"**Reasoning effort:** `{cfg.reasoning_effort}`"
             )
             st.markdown(
-                f"**Reasoning summary:** {cfg.reasoning_summary}"
+                f"**Reasoning summary:** `{cfg.reasoning_summary}`"
             )
 
             # Provider features (derived or explicit)
             if cfg.provider_features:
-                st.markdown("**Provider features (derived / snapshot):**")
-                try:
-                    st.json(cfg.provider_features)
-                except Exception:
-                    st.markdown(str(cfg.provider_features))
+                # Temporarily disabled: Enable when dynamic capability detection is implemented
+                if not True:
+                    st.markdown("**Provider features (derived / snapshot):** ")
+                    try:
+                        st.json(cfg.provider_features)
+                    except Exception:
+                        st.markdown(str(cfg.provider_features))
 
             # Show content_blocks when present (historic or live)
             cb = cfg.raw_extra_config if hasattr(cfg, "raw_extra_config") else None
@@ -304,15 +310,23 @@ def render_agent_config_section(
                             if allowed_domains:
                                 st.markdown("  - Allowed domains for this call:")
                                 st.code("\n".join(allowed_domains))
-                                st.caption(
-                                    "Note: enforcement and exact parameter names for domain filters are provider-specific. "
-                                    "The dashboard normalizes the tool call details and displays allowed domains when present."
-                                )
                         st.json(action, expanded=False)
                 else:
                     args = parse_json_field(u.get("args_json"), {})
                     if args:
                         if tool_type == "web_search":
+                            allowed_domains = _extract_allowed_domains_from_tool_entry(
+                                u, is_historic=True
+                            )
+                            if allowed_domains:
+                                st.markdown("  - Allowed domains for this call:")
+                                st.code("\n".join(allowed_domains))
+                                st.caption(
+                                    "Historic note: stored tool call args are displayed as-is; provider enforcement may differ."
+                                )
+                        st.json(args, expanded=False)
+                    if args:
+                        if tool_type == "web_search_ddg":
                             allowed_domains = _extract_allowed_domains_from_tool_entry(
                                 u, is_historic=True
                             )
@@ -343,7 +357,7 @@ def render_agent_config_section(
         for e in entries:
             ttype = e.get("tool_type") or "unknown"
             counts[ttype] = counts.get(ttype, 0) + 1
-            if ttype == "web_search":
+            if ttype in ("web_search", "web_search_ddg"):
                 has_web_search = True
 
         row: Dict[str, Any] = {
@@ -354,7 +368,7 @@ def render_agent_config_section(
         if has_web_search:
             domains: set = set()
             for e in entries:
-                if e.get("tool_type") != "web_search":
+                if e.get("tool_type") not in ("web_search", "web_search_ddg"):
                     continue
                 for d in _extract_allowed_domains_from_tool_entry(
                     e, is_historic=is_historic
@@ -363,14 +377,14 @@ def render_agent_config_section(
 
             if domains:
                 # We found allowed domains directly on the tool calls
-                row["Allowed Domains (web_search)"] = ", ".join(sorted(domains))
+                row["Allowed Domains (web search)"] = ", ".join(sorted(domains))
             else:
                 # fall back to configured per-agent allowed domains
                 cfg_domains = configured_domains_by_agent.get(agent_name) or []
                 if cfg_domains:
-                    row["Allowed Domains (web_search)"] = ", ".join(cfg_domains)
+                    row["Allowed Domains (web search)"] = ", ".join(cfg_domains)
                 else:
-                    row["Allowed Domains (web_search)"] = "–"
+                    row["Allowed Domains (web search)"] = "–"
 
         rows_overview.append(row)
 
