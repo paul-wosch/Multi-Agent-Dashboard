@@ -1,26 +1,32 @@
 """
-DuckDuckGo Search Tool for Multi-Agent Dashboard.
+Patched LangChain DuckDuckGo search utilities.
 
-Provides a LangChain BaseTool wrapper for DuckDuckGoSearchRun with optional domain filtering.
-Registered as "web_search_ddg" in the tool registry.
+This file contains modified copies of two components
+from LangChain Community:
+
+1. `langchain_community/utilities/duckduckgo_search.py`
+   – the source of `DuckDuckGoSearchAPIWrapper`
+2  `langchain_community/tools/ddg_search/tool.py`
+   – the source of `DuckDuckGoSearchRun` and `DuckDuckGoSearchResults`
+
+Modifications:
+- `DuckDuckGoSearchAPIWrapper` and `DuckDuckGoSearchResults`
+  have been patched to accept a `backend` argument.
+- `DuckDuckGoSearchRun` is included for completeness
+  but does not expose the `backend` parameter.
+
+The custom `DuckDuckGoSearchTool` in `duckduckgo_tool.py`
+uses `DuckDuckGoSearchResults` and adds domain filtering
+and registry registration.
 """
-# ---------------------------------------------------------------------
-# Customized LangChain Duckduckgo API wrapper
-# - accepts backend argument
-# - default: "duckduckgo"; only used for text search)
-#
-# Source code copied from original library:
-# .venv/lib/python3.14/site-packages/langchain_community/utilities/duckduckgo_search.py
-#
-# """Util that calls DuckDuckGo Search.
-#
-# No setup required. Free.
-# https://pypi.org/project/duckduckgo-search/
-# """
-# ---------------------------------------------------------------------
-from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, model_validator
+import json
+import warnings
+from typing import Any, Dict, List, Optional, Literal, Type, Union
+
+from langchain_core.callbacks import CallbackManagerForToolRun
+from langchain_core.tools import BaseTool
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class DuckDuckGoSearchAPIWrapper(BaseModel):
@@ -192,25 +198,6 @@ class DuckDuckGoSearchAPIWrapper(BaseModel):
         return results
 
 
-# ---------------------------------------------------------------------
-# Customized LangChain Duckduckgo tool
-# Source code copied from original library:
-# .venv/lib/python3.14/site-packages/langchain_community/utilities/duckduckgo_search.py
-#
-# """Tool for the DuckDuckGo search API."""
-# ---------------------------------------------------------------------
-import json
-import warnings
-from typing import Any, List, Literal, Optional, Type, Union
-
-from langchain_core.callbacks import CallbackManagerForToolRun
-from langchain_core.tools import BaseTool
-from pydantic import BaseModel, Field
-
-# Import disabled to force use of patched Duckduckgo API wrapper
-# from langchain_community.utilities.duckduckgo_search import DuckDuckGoSearchAPIWrapper
-
-
 class DDGInput(BaseModel):
     """Input for the DuckDuckGo search tool."""
 
@@ -333,133 +320,3 @@ class DuckDuckGoSearchResults(BaseTool):
                 f"Invalid output_format: {self.output_format}. "
                 "Needs to be one of 'string', 'json', 'list'."
             )
-
-# ---------------------------------------------------------------------
-# Duckduckgo custom tool integration
-# ---------------------------------------------------------------------
-
-import logging
-from typing import Any, Dict, Optional, Type
-
-logger = logging.getLogger(__name__)
-
-# Try to import LangChain BaseTool (optional)
-try:
-    from langchain.tools import BaseTool
-    _LANGCHAIN_TOOLS_AVAILABLE = True
-except ImportError:
-    # Fallback for environments without LangChain
-    class BaseTool:  # type: ignore
-        pass
-    _LANGCHAIN_TOOLS_AVAILABLE = False
-
-# Try to import DuckDuckGoSearchRun from langchain_community
-try:
-    # Import disabled to force use of patched Duckduckgo tool classes
-    # from langchain_community.tools import DuckDuckGoSearchRun, DuckDuckGoSearchResults
-    _DUCKDUCKGO_AVAILABLE = True
-except ImportError:
-    DuckDuckGoSearchRun = None      # type: ignore
-    DuckDuckGoSearchResults = None  # type: ignore
-    _DUCKDUCKGO_AVAILABLE = False
-
-from .registry import register_tool
-
-
-# JSON Schema matching the adapter's expected format
-# This must match the schema in provider_tool_adapter.py:_convert_web_search_ddg_tool()
-TOOL_SCHEMA: Dict[str, Any] = {
-    "name": "duckduckgo_search",
-    "description": "Search the web using DuckDuckGo. Returns relevant web pages with snippets.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "Search query",
-            },
-            "domain_filter": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Optional list of domains to restrict results to",
-            },
-        },
-        "required": ["query"],
-        "additionalProperties": False,
-    },
-}
-
-
-if _LANGCHAIN_TOOLS_AVAILABLE and _DUCKDUCKGO_AVAILABLE:
-    @register_tool(
-        name="web_search_ddg",
-        description="Search the web using DuckDuckGo. Returns relevant web pages with snippets.",
-        schema=TOOL_SCHEMA,
-        tags=["search", "web", "duckduckgo"],
-    )
-    class DuckDuckGoSearchTool(BaseTool):
-        """DuckDuckGo Search Tool with optional domain filtering."""
-        
-        name: str = "duckduckgo_search"
-        description: str = "Search the web using DuckDuckGo. Returns relevant web pages with snippets."
-        args_schema: Type = None  # Will use JSON schema from registration
-        
-        def __init__(self, **kwargs):
-            super().__init__(**kwargs)
-            self._search_tool = DuckDuckGoSearchResults(output_format="list", backend="duckduckgo")
-        
-        def _run(
-            self,
-            query: str,
-            domain_filter: Optional[list] = None,
-            **kwargs: Any,
-        ) -> str:
-            """
-            Execute DuckDuckGo search.
-            
-            Args:
-                query: Search query
-                domain_filter: Optional list of domains to restrict results to
-                **kwargs: Additional arguments
-            
-            Returns:
-                Search results as text
-            """
-
-            # Use instance attribute if set (from UI domain filters), else fallback to parameter
-            effective_filter = getattr(self, '_domain_filter', None) or domain_filter
-            if effective_filter:
-                logger.info(f"DuckDuckGo search filter: {effective_filter}")
-                # Normalize domain filter with multiple domains for query
-                domain_clauses = [f"site:{domain}" for domain in effective_filter]
-                domain_clauses = [f"OR {clause}" if i > 0 else clause for i, clause in enumerate(domain_clauses)]
-                # Inject domain filter to query
-                domain_filter_string = " ".join(domain_clauses)
-                query = f"{query} {domain_filter_string}"
-                logger.info(f"DuckDuckGo search query: {query}")
-
-            try:
-                result = self._search_tool.invoke(query)
-                return str(result)
-            except Exception as e:
-                logger.error(f"DuckDuckGo search failed: {e}")
-                return f"Error performing DuckDuckGo search: {str(e)}"
-        
-        async def _arun(self, *args, **kwargs):
-            """Async version (not implemented)."""
-            raise NotImplementedError("Async DuckDuckGo search not supported")
-        
-else:
-    # Create a dummy class for environments without required dependencies
-    class DuckDuckGoSearchTool:
-        """Dummy class when dependencies are not available."""
-        
-        def __init__(self, **kwargs):
-            raise ImportError(
-                "DuckDuckGoSearchTool requires langchain.tools and langchain_community.tools. "
-                "Install with: pip install langchain langchain-community"
-            )
-
-
-# Export for easy import
-__all__ = ["DuckDuckGoSearchTool", "TOOL_SCHEMA"]

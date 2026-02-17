@@ -10,7 +10,7 @@ from multi_agent_dashboard.tool_integration.provider_tool_adapter import convert
 from multi_agent_dashboard.tool_integration.registry import get_registry
 # Conditional import for DuckDuckGoSearchTool (may not be available if LangChain missing)
 try:
-    from multi_agent_dashboard.tool_integration.duckduckgo_search import DuckDuckGoSearchTool
+    from multi_agent_dashboard.tool_integration.search import DuckDuckGoSearchTool
     _DUCKDUCKGO_TOOL_AVAILABLE = True
 except ImportError:
     DuckDuckGoSearchTool = None

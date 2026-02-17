@@ -8,7 +8,7 @@ from .registry import ToolRegistry, register_tool, get_registry, register_tool_i
 
 # Import tool implementations to trigger registration
 try:
-    from . import duckduckgo_search
+    from . import search
 except ImportError:
     # Tools may not be available if dependencies are missing
     pass
