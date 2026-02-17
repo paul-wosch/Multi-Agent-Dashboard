@@ -165,6 +165,19 @@ def _convert_tools_for_provider_cached(
                 continue
             tools_list.extend(result.get("tools", []))
 
+        elif tool_name == "web_fetch":
+            result = _convert_web_fetch_tool(
+                provider_id,
+                model,
+                advisory_tool_calling,
+            )
+            if result is None:
+                logger.warning(
+                    f"Tool 'web_fetch' is not supported for {provider_id}/{model}; excluded."
+                )
+                continue
+            tools_list.extend(result.get("tools", []))
+
         else:
             logger.warning(f"Unknown tool '{tool_name}'; excluded.")
             continue
@@ -287,6 +300,49 @@ def _convert_web_search_ddg_tool(
                 },
             },
             "required": ["query"],
+            "additionalProperties": False,
+        },
+    }
+
+    # Build the function tool dict (OpenAI tool format)
+    tool_obj = {
+        "type": "function",
+        "function": function_schema,
+    }
+
+    return {"tools": [tool_obj]}
+
+
+def _convert_web_fetch_tool(
+    provider_id: str,
+    model: str,
+    advisory_tool_calling: bool,
+) -> Optional[Dict[str, Any]]:
+    """
+    Convert a web fetch tool to a function-calling tool.
+
+    Returns {"tools": [function_tool_dict]} or None if tool calling unsupported.
+    """
+    if not advisory_tool_calling:
+        logger.warning(
+            f"Provider {provider_id} likely does not support tool calling. "
+            f"Web fetch may fail."
+        )
+        # Still attempt to bind; let runtime error surface.
+
+    # JSON Schema for the web fetch function
+    function_schema: Dict[str, Any] = {
+        "name": "web_fetch",
+        "description": "Fetch the content of a webpage and convert it to markdown.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "URL of the webpage to fetch",
+                },
+            },
+            "required": ["url"],
             "additionalProperties": False,
         },
     }

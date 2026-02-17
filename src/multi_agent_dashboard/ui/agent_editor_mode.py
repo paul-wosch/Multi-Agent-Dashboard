@@ -796,7 +796,7 @@ def render_agent_editor():
             disabled=not tools_supported,
         )
 
-        available_tools = ["web_search", "web_search_ddg"]
+        available_tools = ["web_search", "web_search_ddg", "web_fetch"]
         selected_tools: List[str] = []
         if tools_enabled:
             selected_tools = st.multiselect(
@@ -805,7 +805,7 @@ def render_agent_editor():
                 default=[
                     t for t in selected_tools_default if t in available_tools
                 ],
-                help="web_search (OpenAI native) or web_search_ddg (DuckDuckGo via function calling)",
+                help="web_search (OpenAI native), web_search_ddg (DuckDuckGo via function calling), or web_fetch (fetch webpage content)",
             )
 
         st.markdown("### Reasoning")

@@ -632,6 +632,13 @@ class AgentRuntime:
                 if allowed_domains:
                     tool_obj["filters"] = {"allowed_domains": allowed_domains}
                 tools_array.append(tool_obj)
+            elif tool_name == "web_fetch":
+                tool_obj: Dict[str, Any] = {
+                    "type": "function",
+                    "function": {"name": "web_fetch"}
+                }
+                # web_fetch does not use domain filters
+                tools_array.append(tool_obj)
             # Other tools could be added here later
 
         if not tools_array:

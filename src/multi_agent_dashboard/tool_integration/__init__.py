@@ -13,6 +13,13 @@ except ImportError:
     # Tools may not be available if dependencies are missing
     pass
 
+# Import web fetch tool
+try:
+    from . import web_fetch_tool
+except ImportError:
+    # Tool may not be available if dependencies are missing
+    pass
+
 __all__ = [
     "ToolRegistry",
     "register_tool",
