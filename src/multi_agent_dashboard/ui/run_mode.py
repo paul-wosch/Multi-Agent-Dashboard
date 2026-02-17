@@ -208,7 +208,7 @@ def render_run_sidebar() -> Tuple[
         if not tools_cfg.get("enabled"):
             return False
         tools = tools_cfg.get("tools") or []
-        return "web_search" in tools
+        return any(tool.startswith("web_search") for tool in tools)
 
     any_web_search = any(agent_uses_web_search(a) for a in selected_steps)
 

@@ -291,6 +291,8 @@ class AgentRuntime:
         # -------------------------
         tc = self._build_tools_config(state)
         rc = self._build_reasoning_config()
+        # Extract allowed domains for tool instance configuration (runtime-only)
+        allowed_domains = self._get_allowed_domains(state)
         logger.debug("Agent %s tools_config=%r reasoning_config=%r", self.spec.name, tc, rc)
 
         response = None
@@ -333,7 +335,7 @@ class AgentRuntime:
                 tools_arr = tc.get("tools")
                 if isinstance(tools_arr, list):
                     for tc_tool in tools_arr:
-                        if isinstance(tc_tool, dict) and tc_tool.get("type") == "web_search":
+                        if isinstance(tc_tool, dict) and (tc_tool.get("type") == "web_search" or (tc_tool.get("type") == "function" and tc_tool.get("function", {}).get("name") == "duckduckgo_search")):
                             filters = tc_tool.get("filters")
                             if filters:
                                 # Find matching web_search tool in langchain_tools
@@ -355,8 +357,14 @@ class AgentRuntime:
                                                 if isinstance(params, dict):
                                                     props = params.get("properties", {})
                                                     if isinstance(props, dict) and "domain_filter" in props:
-                                                        # Set default value in schema
+                                                        # Set default value in schema (optional, will be hidden)
                                                         props["domain_filter"]["default"] = allowed_domains
+                                                        # Hide domain_filter from LLM by removing the property
+                                                        del props["domain_filter"]
+                                                        # Also remove from required list if present
+                                                        required = params.get("required")
+                                                        if isinstance(required, list) and "domain_filter" in required:
+                                                            required.remove("domain_filter")
                                             break
         except Exception:
             logger.debug("Tool conversion failed for agent %s", self.spec.name, exc_info=True)
@@ -575,6 +583,25 @@ class AgentRuntime:
 
         return response.text
 
+    def _get_allowed_domains(self, state: Dict[str, Any]) -> Optional[List[str]]:
+        """
+        Extract allowed domains for this agent from state.
+        Returns list of domains or None if no restrictions.
+        """
+        # 1) Per-agent domains, if provided
+        per_agent = state.get("allowed_domains_by_agent")
+        if isinstance(per_agent, dict):
+            maybe = per_agent.get(self.spec.name)
+            if isinstance(maybe, list) and maybe:
+                return maybe
+
+        # 2) Global domains as fallback
+        global_domains = state.get("allowed_domains")
+        if isinstance(global_domains, list) and global_domains:
+            return global_domains
+
+        return None
+
     def _build_tools_config(self, state: Dict[str, Any]) -> Dict[str, Any] | None:
         """
         Build tools/tool_choice/include args for OpenAI Responses API
@@ -589,30 +616,23 @@ class AgentRuntime:
 
         enabled_tools = tools_cfg.get("tools") or []
         tools_array: List[Dict[str, Any]] = []
+        allowed_domains = self._get_allowed_domains(state)
 
-        # Here we only support web_search for now, but structure supports more later
-        if "web_search" in enabled_tools:
-            tool_obj: Dict[str, Any] = {"type": "web_search"}
-
-            # 1) Per-agent domains, if provided
-            allowed_domains = None
-            per_agent = state.get("allowed_domains_by_agent")
-            if isinstance(per_agent, dict):
-                maybe = per_agent.get(self.spec.name)
-                if isinstance(maybe, list) and maybe:
-                    allowed_domains = maybe
-
-            # 2) Global domains as fallback
-            if allowed_domains is None:
-                global_domains = state.get("allowed_domains")
-                if isinstance(global_domains, list) and global_domains:
-                    allowed_domains = global_domains
-
-            if allowed_domains:
-                tool_obj["filters"] = {"allowed_domains": allowed_domains}
-
-            # Keep default: external_web_access = True unless we want an option later
-            tools_array.append(tool_obj)
+        for tool_name in enabled_tools:
+            if tool_name == "web_search":
+                tool_obj: Dict[str, Any] = {"type": "web_search"}
+                if allowed_domains:
+                    tool_obj["filters"] = {"allowed_domains": allowed_domains}
+                tools_array.append(tool_obj)
+            elif tool_name == "web_search_ddg":
+                tool_obj: Dict[str, Any] = {
+                    "type": "function",
+                    "function": {"name": "duckduckgo_search"}
+                }
+                if allowed_domains:
+                    tool_obj["filters"] = {"allowed_domains": allowed_domains}
+                tools_array.append(tool_obj)
+            # Other tools could be added here later
 
         if not tools_array:
             return None

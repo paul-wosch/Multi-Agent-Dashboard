@@ -7,6 +7,14 @@ from typing import Any, Dict, List, Optional, Callable, Tuple
 from dataclasses import dataclass
 from multi_agent_dashboard.structured_schemas import resolve_schema_json
 from multi_agent_dashboard.tool_integration.provider_tool_adapter import convert_tools_for_provider
+from multi_agent_dashboard.tool_integration.registry import get_registry
+# Conditional import for DuckDuckGoSearchTool (may not be available if LangChain missing)
+try:
+    from multi_agent_dashboard.tool_integration.duckduckgo_search import DuckDuckGoSearchTool
+    _DUCKDUCKGO_TOOL_AVAILABLE = True
+except ImportError:
+    DuckDuckGoSearchTool = None
+    _DUCKDUCKGO_TOOL_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -620,6 +628,7 @@ class LLMClient:
             model = getattr(spec, "model", "")
             use_responses_api = getattr(spec, "use_responses_api", False)
             tool_configs = getattr(spec, "tools", {})
+            enabled_tools = tool_configs.get("tools", []) if tool_configs.get("enabled", False) else []
             logger.debug("Converting tools for provider; tools param=%s, spec.tools=%s", tools, tool_configs)
             # Convert tool configs to provider-specific format
             provider_features = getattr(spec, "provider_features", None)
@@ -632,8 +641,44 @@ class LLMClient:
                     # Bind function tools
                     model_instance = model_instance.bind_tools(converted_tools["tools"])
                     logger.info(f"Bound {len(converted_tools['tools'])} function tool(s) to model")
-                    # Replace tools list with function tools (OpenAI format)
-                    tools = converted_tools["tools"]
+                    # Retrieve tool instances from registry for create_agent
+                    tool_instances = []
+                    # Build mapping from tool name to filters from converted tool specs
+                    tool_filters = {}
+                    for tool_dict in converted_tools["tools"]:
+                        if isinstance(tool_dict, dict):
+                            tool_type = tool_dict.get("type")
+                            if tool_type == "web_search":
+                                # Native web_search tool
+                                filters = tool_dict.get("filters")
+                                if filters:
+                                    tool_filters["web_search"] = filters.get("allowed_domains")
+                            elif tool_type == "function":
+                                func = tool_dict.get("function", {})
+                                func_name = func.get("name")
+                                if func_name == "duckduckgo_search":
+                                    filters = tool_dict.get("filters")
+                                    if filters:
+                                        tool_filters["web_search_ddg"] = filters.get("allowed_domains")
+                                elif func_name == "web_search":
+                                    # Generic web search function tool for non-OpenAI providers
+                                    filters = tool_dict.get("filters")
+                                    if filters:
+                                        tool_filters["web_search"] = filters.get("allowed_domains")
+                    for tool_name in enabled_tools:
+                        tool_instance = get_registry().get_tool(tool_name)
+                        if tool_instance is not None:
+                            # Apply domain filters to DuckDuckGoSearchTool instance (hidden from LLM)
+                            allowed_domains = tool_filters.get(tool_name)
+                            if allowed_domains and _DUCKDUCKGO_TOOL_AVAILABLE and isinstance(tool_instance, DuckDuckGoSearchTool):
+                                tool_instance._domain_filter = allowed_domains
+                                logger.debug(f"Set domain filter on DuckDuckGoSearchTool: {allowed_domains}")
+                            tool_instances.append(tool_instance)
+                        else:
+                            # Tool not in registry (e.g., native web_search); skip
+                            logger.debug(f"Tool '{tool_name}' not found in registry; assuming native tool")
+                    # Replace tools list with tool instances
+                    tools = tool_instances
                 elif "web_search_options" in converted_tools:
                     # Bind web search options (Completions API)
                     model_instance = model_instance.bind(web_search_options=converted_tools["web_search_options"])
