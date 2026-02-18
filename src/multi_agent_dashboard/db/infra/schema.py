@@ -173,6 +173,7 @@ SCHEMA = {
                 {
                     "column": "agent_name",
                     "references": "agents(agent_name)",
+                    "on_update": "CASCADE",
                 },
             ],
         },
