@@ -13,6 +13,7 @@ import os
 import sqlite3
 import re
 import copy
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Tuple, Optional
 
 from multi_agent_dashboard.db.infra.schema import SCHEMA
@@ -27,6 +28,8 @@ from multi_agent_dashboard.db.infra.backup_utils import (
 
 from multi_agent_dashboard.db.infra.cli_utils import print_user_message
 from multi_agent_dashboard.db.infra.sql_utils import quote_ident, quote_column_list
+import sys
+print("DEBUG: script loading", file=sys.stderr)
 
 # -----------------------
 # Minimal SQL tokenizer helpers (robust enough for identifier detection)
@@ -109,6 +112,31 @@ def _get_table_def_from_schema(table: str) -> tuple[Dict[str, str], Dict[str, An
         return table_def["columns"], table_def.get("constraints", {})
     # legacy style
     return table_def, {}
+
+def _record_migration_applied(conn: sqlite3.Connection, migration_id: str) -> None:
+    """
+    Ensure migrations table exists and record the given migration ID as applied.
+    If the migration is already recorded, does nothing (INSERT OR IGNORE).
+    """
+    print(f"[DEBUG] Recording migration {migration_id} as applied", file=sys.stderr)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS migrations (
+            id TEXT PRIMARY KEY,
+            applied_at TEXT NOT NULL
+        )
+    """)
+    conn.execute(
+        "INSERT OR IGNORE INTO migrations (id, applied_at) VALUES (?, ?)",
+        (migration_id, datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+    # Verify migration was recorded
+    cursor = conn.execute("SELECT 1 FROM migrations WHERE id = ?", (migration_id,))
+    row = cursor.fetchone()
+    if row:
+        print(f"[DEBUG] Successfully recorded migration {migration_id} in migrations table", file=sys.stderr)
+    else:
+        print(f"[DEBUG] WARNING: Migration {migration_id} not found in migrations table after insertion attempt", file=sys.stderr)
 
 
 def _scan_migrations_for_rebuilds(migrations_dir: str) -> Tuple[List[str], Dict[str, Dict[str, Any]], Dict[str, List[str]]]:
@@ -264,6 +292,8 @@ def rebuild_tables_batch(conn: sqlite3.Connection, rebuild_map: Dict[str, Dict[s
                 clause = f"FOREIGN KEY({quote_column_list(fk['column'])}) REFERENCES {fk['references']}"
                 if fk.get("on_delete"):
                     clause += f" ON DELETE {fk['on_delete']}"
+                if fk.get("on_update"):
+                    clause += f" ON UPDATE {fk['on_update']}"
                 col_defs.append(clause)
 
             conn.execute(f"DROP TABLE IF EXISTS {quote_ident(tmp)}")
@@ -320,6 +350,8 @@ def rebuild_tables_batch(conn: sqlite3.Connection, rebuild_map: Dict[str, Dict[s
 
 def main():
     import argparse
+    import sys
+    print("DEBUG: sqlite_rebuild started", file=sys.stderr)
 
     parser = argparse.ArgumentParser(
         description="Rebuild SQLite tables using MIGRATION-META rebuild_defs"
@@ -436,6 +468,20 @@ def main():
                 if not args.quiet:
                     print("Beginning batch rebuild...")
                 rebuild_tables_batch(conn, {t: rebuild_defs[t] for t in tables}, force=args.force)
+                # Record each contributing migration as applied
+                unique_files = set(file_map.keys())
+                for fname in sorted(unique_files):
+                    path = os.path.join(migrations_dir, fname)
+                    try:
+                        with open(path, "r", encoding="utf-8") as f:
+                            text = f.read()
+                        meta = parse_migration_meta(text, fname=path)
+                        if meta and "id" in meta:
+                            _record_migration_applied(conn, meta["id"])
+                        else:
+                            print_user_message(f"Warning: migration file {fname} has no valid MIGRATION-META with id, skipping", verbose=args.verbose, quiet=args.quiet)
+                    except Exception as e:
+                        print_user_message(f"Warning: could not parse migration meta from {fname}: {e}", verbose=args.verbose, quiet=args.quiet)
                 if not args.quiet:
                     print("Successfully completed batch rebuild.")
             except Exception as e:
@@ -525,6 +571,8 @@ def main():
         try:
             try:
                 rebuild_tables_batch(conn, rebuild_map, force=args.force)
+                # Record migration as applied
+                _record_migration_applied(conn, meta["id"])
             except Exception as e:
                 try:
                     conn.rollback()
@@ -606,3 +654,6 @@ def main():
     print_user_message(f"Successfully rebuilt table '{table}' in {db_path}", verbose=args.verbose, quiet=args.quiet)
     if not args.quiet:
         print("Backup remains at:", backup_path)
+
+if __name__ == "__main__":
+    main()
