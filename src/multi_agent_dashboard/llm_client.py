@@ -636,11 +636,50 @@ class LLMClient:
                 tool_configs, provider_id, model, use_responses_api, provider_features
             )
             # Bind tools to model instance if applicable
+            # Check if we should attempt unified binding for OpenAI with both structured output and tools
+            unified_binding_applied = False
+            if (provider_id == "openai" and response_format is not None and
+                converted_tools and "tools" in converted_tools):
+                try:
+                    # Extract JSON schema from OpenAI response_format wrapper
+                    schema = None
+                    schema_name = None
+                    if isinstance(response_format, dict) and response_format.get("type") == "json_schema":
+                        json_schema_obj = response_format.get("json_schema", {})
+                        schema = json_schema_obj.get("schema")
+                        schema_name = json_schema_obj.get("name")
+                    if schema is None:
+                        schema = response_format  # fallback
+                    # Ensure the schema dict has title and description for LangChain's with_structured_output
+                    if isinstance(schema, dict):
+                        # Create a copy to avoid modifying the original
+                        schema = schema.copy()
+                        if "title" not in schema:
+                            schema["title"] = schema_name or getattr(spec, "schema_name", None) or "schema"
+                        if "description" not in schema:
+                            schema["description"] = "Structured output schema"
+                    # Apply unified binding with strict=True (as per example.py)
+                    unified_model = model_instance.with_structured_output(
+                        schema,
+                        method="json_schema",
+                        include_raw=True,
+                        tools=converted_tools["tools"],
+                        strict=True,
+                    )
+                    model_instance = self._wrap_structured_output_model(unified_model)
+                    unified_binding_applied = True
+                    effective_response_format = None
+                    logger.info("Applied unified tools+structured_output binding for OpenAI")
+                except Exception as e:
+                    logger.warning("Unified binding failed, falling back to sequential: %s", e)
+                    # Continue with sequential binding
+            
             if converted_tools:
                 if "tools" in converted_tools:
-                    # Bind function tools
-                    model_instance = model_instance.bind_tools(converted_tools["tools"])
-                    logger.info(f"Bound {len(converted_tools['tools'])} function tool(s) to model")
+                    # Bind function tools only if unified binding wasn't applied
+                    if not unified_binding_applied:
+                        model_instance = model_instance.bind_tools(converted_tools["tools"])
+                        logger.info(f"Bound {len(converted_tools['tools'])} function tool(s) to model")
                     # Retrieve tool instances from registry for create_agent
                     tool_instances = []
                     # Build mapping from tool name to filters from converted tool specs
@@ -828,6 +867,11 @@ class LLMClient:
             if isinstance(result, dict) and ("raw" in result and "parsed" in result):
                 raw_msg = result.get("raw")
                 parsed_part = result.get("parsed")
+
+            # If there is no parsed structured output but we have a raw message (e.g., tool call),
+            # return the raw message directly—it is already an AIMessage or compatible object.
+            if parsed_part is None and raw_msg is not None:
+                return raw_msg
 
             payload = _normalize_payload(parsed_part if parsed_part is not None else result)
             if payload is None:
