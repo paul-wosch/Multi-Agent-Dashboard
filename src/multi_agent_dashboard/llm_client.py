@@ -313,6 +313,9 @@ class ChatModelFactory:
             # Some providers expect 'base_url' or 'base_url' like param; init_chat_model passes kwargs to concrete impl
             init_kwargs["base_url"] = endpoint
             # Some integrations (openai) call this 'base_url' or 'api_base' - provider integration will accept 'base_url'
+            # DeepSeek integration expects 'api_base' parameter
+            if provider_norm == "deepseek":
+                init_kwargs["api_base"] = endpoint
         # Propagate timeout to underlying LangChain model integrations:
         # Use 'request_timeout' (preferred alias used by ChatOpenAI) and set 'timeout' as fallback,
         # so providers reading either name will receive the configured numeric timeout value.
