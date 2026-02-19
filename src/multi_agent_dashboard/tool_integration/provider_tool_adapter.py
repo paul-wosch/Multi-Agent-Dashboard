@@ -157,6 +157,7 @@ def _convert_tools_for_provider_cached(
                 provider_id,
                 model,
                 advisory_tool_calling,
+                use_responses_api,
             )
             if result is None:
                 logger.warning(
@@ -170,6 +171,7 @@ def _convert_tools_for_provider_cached(
                 provider_id,
                 model,
                 advisory_tool_calling,
+                use_responses_api,
             )
             if result is None:
                 logger.warning(
@@ -189,6 +191,7 @@ def _convert_tools_for_provider_cached(
         return {"web_search_options": web_search_options}
     elif tools_list:
         logger.info(f"Using tools list with {len(tools_list)} tool(s)")
+        logger.info(f"Tools list: {tools_list}")
         return {"tools": tools_list}
     else:
         logger.debug("No tools applicable after conversion")
@@ -241,6 +244,7 @@ def _convert_web_search_tool(
         function_schema: Dict[str, Any] = {
             "name": "web_search",
             "description": "Search the web for current information. Returns relevant web pages with snippets.",
+            "strict": True,
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -258,10 +262,12 @@ def _convert_web_search_tool(
                 "additionalProperties": False,
             },
         }
+
         tool_obj = {
             "type": "function",
             "function": function_schema,
         }
+        logger.info(f"Generated tool object: {tool_obj}")
         return {"tools": [tool_obj]}
 
 
@@ -269,6 +275,7 @@ def _convert_web_search_ddg_tool(
     provider_id: str,
     model: str,
     advisory_tool_calling: bool,
+    use_responses_api: bool,
 ) -> Optional[Dict[str, Any]]:
     """
     Convert a DuckDuckGo web search tool to a function-calling tool.
@@ -286,6 +293,7 @@ def _convert_web_search_ddg_tool(
     function_schema: Dict[str, Any] = {
         "name": "duckduckgo_search",
         "description": "Search the web using DuckDuckGo. Returns relevant web pages with snippets.",
+        "strict": True,
         "parameters": {
             "type": "object",
             "properties": {
@@ -304,12 +312,13 @@ def _convert_web_search_ddg_tool(
         },
     }
 
+
     # Build the function tool dict (OpenAI tool format)
     tool_obj = {
         "type": "function",
         "function": function_schema,
     }
-
+    logger.info(f"Generated tool object: {tool_obj}")
     return {"tools": [tool_obj]}
 
 
@@ -317,6 +326,7 @@ def _convert_web_fetch_tool(
     provider_id: str,
     model: str,
     advisory_tool_calling: bool,
+    use_responses_api: bool,
 ) -> Optional[Dict[str, Any]]:
     """
     Convert a web fetch tool to a function-calling tool.
@@ -334,6 +344,7 @@ def _convert_web_fetch_tool(
     function_schema: Dict[str, Any] = {
         "name": "web_fetch",
         "description": "Fetch the content of a webpage and convert it to markdown.",
+        "strict": True,
         "parameters": {
             "type": "object",
             "properties": {
@@ -347,12 +358,13 @@ def _convert_web_fetch_tool(
         },
     }
 
+
     # Build the function tool dict (OpenAI tool format)
     tool_obj = {
         "type": "function",
         "function": function_schema,
     }
-
+    logger.info(f"Generated tool object: {tool_obj}")
     return {"tools": [tool_obj]}
 
 

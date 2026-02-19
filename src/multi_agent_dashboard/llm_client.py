@@ -636,10 +636,9 @@ class LLMClient:
                 tool_configs, provider_id, model, use_responses_api, provider_features
             )
             # Bind tools to model instance if applicable
-            # Check if we should attempt unified binding for OpenAI with both structured output and tools
+            # Check if we should attempt unified binding with both structured output and tools
             unified_binding_applied = False
-            if (provider_id == "openai" and response_format is not None and
-                converted_tools and "tools" in converted_tools):
+            if response_format is not None and converted_tools and "tools" in converted_tools:
                 try:
                     # Extract JSON schema from OpenAI response_format wrapper
                     schema = None
@@ -658,7 +657,7 @@ class LLMClient:
                             schema["title"] = schema_name or getattr(spec, "schema_name", None) or "schema"
                         if "description" not in schema:
                             schema["description"] = "Structured output schema"
-                    # Apply unified binding with strict=True (as per example.py)
+                    # Apply unified binding with strict=True
                     unified_model = model_instance.with_structured_output(
                         schema,
                         method="json_schema",
