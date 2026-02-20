@@ -624,10 +624,10 @@ class LLMClient:
                     else:
                         # Ollama and other providers: plain schema dict
                         schema = response_format
-                    
+
                     if schema is None:
                         schema = response_format  # ultimate fallback
-                    
+
                     # Ensure the schema dict has title and description for LangChain's with_structured_output
                     if isinstance(schema, dict):
                         # Create a copy to avoid modifying the original
@@ -636,14 +636,13 @@ class LLMClient:
                             schema["title"] = schema_name or getattr(spec, "schema_name", None) or "schema"
                         if "description" not in schema:
                             schema["description"] = "Structured output schema"
-                    
-                    # Apply unified binding with strict=True
+
+                    # Apply unified binding
                     unified_model = model_instance.with_structured_output(
                         schema,
                         method=structured_output_method,
                         include_raw=True,
                         tools=converted_tools["tools"],
-                        strict=True,
                     )
                     model_instance = self._wrap_structured_output_model(unified_model)
                     unified_binding_applied = True
@@ -652,7 +651,7 @@ class LLMClient:
                 except Exception as e:
                     logger.warning("Unified binding failed, falling back to sequential: %s", e)
                     # Continue with sequential binding
-            
+
             if converted_tools:
                 if "tools" in converted_tools:
                     # Bind function tools only if unified binding wasn't applied
@@ -706,7 +705,7 @@ class LLMClient:
             else:
                 # No tools applicable after conversion
                 tools = []
-            
+
             # Provider-specific structured output binding (if unified binding not applied)
             if not unified_binding_applied and response_format is not None:
                 try:
@@ -730,10 +729,10 @@ class LLMClient:
                     else:
                         # Ollama and other providers: plain schema dict
                         schema = response_format
-                    
+
                     if schema is None:
                         schema = response_format  # ultimate fallback
-                    
+
                     # Ensure the schema dict has title and description for LangChain's with_structured_output
                     if isinstance(schema, dict):
                         # Create a copy to avoid modifying the original
@@ -742,7 +741,7 @@ class LLMClient:
                             schema["title"] = schema_name or getattr(spec, "schema_name", None) or "schema"
                         if "description" not in schema:
                             schema["description"] = "Structured output schema"
-                    
+
                     # Apply provider-specific structured output binding (no tools)
                     structured_model = model_instance.with_structured_output(
                         schema,
