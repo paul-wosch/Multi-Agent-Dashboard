@@ -492,47 +492,7 @@ class LLMClient:
         logger.debug("Before workaround: provider_id=%s, response_format=%s", provider_id, response_format)
 
 
-        # Provider-specific structured output wrapping
-        if response_format is not None and provider_id == "ollama":
-            try:
-                structured = getattr(model_instance, "with_structured_output", None)
-                if callable(structured):
-                    # Prefer include_raw=True so we can preserve token/usage metadata from the raw AIMessage.
-                    try:
-                        model_instance = structured(response_format, method="json_schema", include_raw=True)
-                    except TypeError:
-                        model_instance = structured(response_format, method="json_schema")
 
-                    # Wrap structured output dicts into AIMessage so LangChain agents
-                    # do not attempt to coerce dicts into messages and fail.
-                    model_instance = self._wrap_structured_output_model(model_instance)
-            except Exception:
-                logger.debug("with_structured_output failed for ollama; falling back to prompt-only", exc_info=True)
-
-        if response_format is not None and provider_id == "deepseek":
-            try:
-                structured = getattr(model_instance, "with_structured_output", None)
-                if callable(structured):
-                    # DeepSeek supports function_calling on chat model; reasoner often rejects tool_choice.
-                    model_name = getattr(spec, "model", "") or ""
-                    prefer_json_mode = "reasoner" in model_name.lower()
-                    methods = ["json_mode", "function_calling"] if prefer_json_mode else ["function_calling",
-                                                                                          "json_mode"]
-                    last_err = None
-                    for m in methods:
-                        try:
-                            model_instance = structured(response_format, method=m, include_raw=True)
-                            last_err = None
-                            break
-                        except Exception as e_method:
-                            last_err = e_method
-                            continue
-                    if last_err:
-                        raise last_err
-                    model_instance = self._wrap_structured_output_model(model_instance)
-            except Exception:
-                logger.debug("with_structured_output failed for deepseek; falling back to prompt-only",
-                             exc_info=True)
 
         # Normalize middleware list and instantiate classes when provided.
         middleware_list: List[Any] = []
@@ -643,15 +603,31 @@ class LLMClient:
             unified_binding_applied = False
             if response_format is not None and converted_tools and "tools" in converted_tools:
                 try:
-                    # Extract JSON schema from OpenAI response_format wrapper
+                    # Determine provider-specific structured output method
+                    structured_output_method = self._get_structured_output_method(provider_id, model)
+                    # Extract schema from provider-specific response_format wrapper
                     schema = None
                     schema_name = None
-                    if isinstance(response_format, dict) and response_format.get("type") == "json_schema":
-                        json_schema_obj = response_format.get("json_schema", {})
-                        schema = json_schema_obj.get("schema")
-                        schema_name = json_schema_obj.get("name")
+                    if provider_id == "openai":
+                        if isinstance(response_format, dict) and response_format.get("type") == "json_schema":
+                            json_schema_obj = response_format.get("json_schema", {})
+                            schema = json_schema_obj.get("schema")
+                            schema_name = json_schema_obj.get("name")
+                    elif provider_id == "deepseek":
+                        # DeepSeek uses function-calling format; schema may be in "parameters"
+                        if isinstance(response_format, dict):
+                            if "parameters" in response_format:
+                                schema = response_format["parameters"]
+                                schema_name = response_format.get("name")
+                            else:
+                                schema = response_format
+                    else:
+                        # Ollama and other providers: plain schema dict
+                        schema = response_format
+                    
                     if schema is None:
-                        schema = response_format  # fallback
+                        schema = response_format  # ultimate fallback
+                    
                     # Ensure the schema dict has title and description for LangChain's with_structured_output
                     if isinstance(schema, dict):
                         # Create a copy to avoid modifying the original
@@ -660,10 +636,11 @@ class LLMClient:
                             schema["title"] = schema_name or getattr(spec, "schema_name", None) or "schema"
                         if "description" not in schema:
                             schema["description"] = "Structured output schema"
+                    
                     # Apply unified binding with strict=True
                     unified_model = model_instance.with_structured_output(
                         schema,
-                        method="json_schema",
+                        method=structured_output_method,
                         include_raw=True,
                         tools=converted_tools["tools"],
                         strict=True,
@@ -671,7 +648,7 @@ class LLMClient:
                     model_instance = self._wrap_structured_output_model(unified_model)
                     unified_binding_applied = True
                     effective_response_format = None
-                    logger.info("Applied unified tools+structured_output binding for OpenAI")
+                    logger.info(f"Applied unified tools+structured_output binding for {provider_id}")
                 except Exception as e:
                     logger.warning("Unified binding failed, falling back to sequential: %s", e)
                     # Continue with sequential binding
@@ -729,6 +706,56 @@ class LLMClient:
             else:
                 # No tools applicable after conversion
                 tools = []
+            
+            # Provider-specific structured output binding (if unified binding not applied)
+            if not unified_binding_applied and response_format is not None:
+                try:
+                    structured_output_method = self._get_structured_output_method(provider_id, model)
+                    # Extract schema from provider-specific response_format wrapper
+                    schema = None
+                    schema_name = None
+                    if provider_id == "openai":
+                        if isinstance(response_format, dict) and response_format.get("type") == "json_schema":
+                            json_schema_obj = response_format.get("json_schema", {})
+                            schema = json_schema_obj.get("schema")
+                            schema_name = json_schema_obj.get("name")
+                    elif provider_id == "deepseek":
+                        # DeepSeek uses function-calling format; schema may be in "parameters"
+                        if isinstance(response_format, dict):
+                            if "parameters" in response_format:
+                                schema = response_format["parameters"]
+                                schema_name = response_format.get("name")
+                            else:
+                                schema = response_format
+                    else:
+                        # Ollama and other providers: plain schema dict
+                        schema = response_format
+                    
+                    if schema is None:
+                        schema = response_format  # ultimate fallback
+                    
+                    # Ensure the schema dict has title and description for LangChain's with_structured_output
+                    if isinstance(schema, dict):
+                        # Create a copy to avoid modifying the original
+                        schema = schema.copy()
+                        if "title" not in schema:
+                            schema["title"] = schema_name or getattr(spec, "schema_name", None) or "schema"
+                        if "description" not in schema:
+                            schema["description"] = "Structured output schema"
+                    
+                    # Apply provider-specific structured output binding (no tools)
+                    structured_model = model_instance.with_structured_output(
+                        schema,
+                        method=structured_output_method,
+                        include_raw=True,
+                        strict=True,
+                    )
+                    model_instance = self._wrap_structured_output_model(structured_model)
+                    effective_response_format = None
+                    logger.info(f"Applied provider-specific structured output binding for {provider_id}")
+                except Exception as e:
+                    logger.warning("Provider-specific structured output binding failed: %s", e)
+                    # Keep effective_response_format as is (may be passed to agent)
             agent = self._create_agent(
                 model=model_instance,
                 tools=tools or [],
@@ -1013,6 +1040,19 @@ class LLMClient:
                 return getattr(self._inner, name)
 
         return _StructuredOutputMessageAdapter(model_instance)
+
+    def _get_structured_output_method(self, provider_id: str, model_name: str) -> str:
+        """Return the appropriate method for with_structured_output for given provider."""
+        provider_id = provider_id.lower()
+        if provider_id == "ollama":
+            return "json_schema"
+        if provider_id == "deepseek":
+            # Reasoner models often reject tool_choice; prefer json_mode
+            if "reasoner" in model_name.lower():
+                return "json_mode"
+            return "function_calling"
+        # Default for OpenAI and other providers
+        return "json_schema"
 
     def _build_structured_output_adapter(self, spec, response_format: Optional[Any]) -> Optional[Any]:
         """
