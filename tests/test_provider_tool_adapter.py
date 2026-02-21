@@ -223,7 +223,7 @@ def test_convert_web_search_tool_non_openai_without_tool_calling():
 
 def test_convert_web_search_ddg_tool_with_tool_calling():
     """Test internal _convert_web_search_ddg_tool."""
-    result = _convert_web_search_ddg_tool("openai", "gpt-4o", True)
+    result = _convert_web_search_ddg_tool("openai", "gpt-4o", True, False)
     assert result is not None
     assert "tools" in result
     tool = result["tools"][0]
@@ -234,7 +234,7 @@ def test_convert_web_search_ddg_tool_with_tool_calling():
 def test_convert_web_search_ddg_tool_without_tool_calling():
     """Test internal _convert_web_search_ddg_tool when advisory tool calling false."""
     with patch.object(logging.getLogger("multi_agent_dashboard.tool_integration.provider_tool_adapter"), "warning") as mock_warning:
-        result = _convert_web_search_ddg_tool("ollama", "phi", False)
+        result = _convert_web_search_ddg_tool("ollama", "phi", False, False)
         assert result is not None
         # Warning about tool calling unsupported
         mock_warning.assert_called_once()

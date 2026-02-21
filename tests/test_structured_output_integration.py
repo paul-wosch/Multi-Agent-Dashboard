@@ -85,8 +85,12 @@ def test_create_agent_for_spec_passes_response_format_provider_specific():
         provider_id="openai"
     )
     
-    # Call create_agent_for_spec
-    agent = client.create_agent_for_spec(spec, response_format=None)
+    # Patch binding to return original response_format (simulate binding failure)
+    with patch('multi_agent_dashboard.llm_client.structured_output.StructuredOutputBinder.bind_structured_output') as mock_bind:
+        # Make bind_structured_output return original response_format (simulating failure)
+        mock_bind.side_effect = lambda spec, model_instance, response_format, provider_id, model, tools=None, strict=True: (model_instance, response_format)
+        # Call create_agent_for_spec
+        agent = client.create_agent_for_spec(spec, response_format=None)
     
     # Verify get_model called with correct arguments
     client._model_factory.get_model.assert_called_once()
@@ -112,7 +116,11 @@ def test_structured_output_with_explicit_response_format():
     explicit_format = {"type": "json_object"}
     spec = MockSpec(structured_output_enabled=True)  # schema present but ignored
     
-    agent = client.create_agent_for_spec(spec, response_format=explicit_format)
+    # Patch binding to return original response_format (simulate binding failure)
+    with patch('multi_agent_dashboard.llm_client.structured_output.StructuredOutputBinder.bind_structured_output') as mock_bind:
+        # Make bind_structured_output return original response_format (simulating failure)
+        mock_bind.side_effect = lambda spec, model_instance, response_format, provider_id, model, tools=None, strict=True: (model_instance, response_format)
+        agent = client.create_agent_for_spec(spec, response_format=explicit_format)
     
     client._create_agent.assert_called_once()
     call_kwargs = client._create_agent.call_args.kwargs

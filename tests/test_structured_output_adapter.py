@@ -134,7 +134,21 @@ def test_create_agent_for_spec_passes_response_format():
     )
     
     # Call create_agent_for_spec
-    agent = client.create_agent_for_spec(spec, response_format=None)
+    expected_response_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "test",
+            "schema": schema,
+        },
+    }
+    mock_build = Mock(return_value=expected_response_format)
+    # Patch binding to return original response_format (simulate binding failure)
+    with patch.object(client, '_build_structured_output_adapter', mock_build), \
+         patch('multi_agent_dashboard.llm_client.structured_output.StructuredOutputBinder.bind_structured_output') as mock_bind:
+        # Make bind_structured_output return original response_format (simulating failure)
+        mock_bind.return_value = (mock_model, expected_response_format)
+        agent = client.create_agent_for_spec(spec, response_format=None)
+    mock_build.assert_called_once_with(spec, None)
     
     # Verify get_model called with correct arguments
     client._model_factory.get_model.assert_called_once()
@@ -165,7 +179,11 @@ def test_create_agent_for_spec_with_explicit_response_format():
     explicit_format = {"type": "json_object"}
     spec = MockSpec(structured_output_enabled=False)  # schema not used
     
-    agent = client.create_agent_for_spec(spec, response_format=explicit_format)
+    with patch.object(client, '_build_structured_output_adapter', return_value=explicit_format), \
+         patch('multi_agent_dashboard.llm_client.structured_output.StructuredOutputBinder.bind_structured_output') as mock_bind:
+        # Make bind_structured_output return original response_format (simulating failure)
+        mock_bind.return_value = (mock_model, explicit_format)
+        agent = client.create_agent_for_spec(spec, response_format=explicit_format)
     
     client._create_agent.assert_called_once()
     call_kwargs = client._create_agent.call_args.kwargs
