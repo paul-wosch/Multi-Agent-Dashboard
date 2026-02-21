@@ -99,7 +99,7 @@ src/multi_agent_dashboard/
 ├── __init__.py
 ├── config.py              # Global constants, environment variables, pricing
 ├── engine.py              # Core multi-agent orchestration engine
-├── llm_client.py          # LLM provider integration (OpenAI, DeepSeek, Ollama)
+├── llm_client/            # Modular LLM provider integration subpackage
 ├── models.py              # Data classes (AgentSpec, AgentRuntime, etc.)
 ├── structured_schemas.py  # JSON schema resolution for structured output
 ├── runtime_hooks.py       # Runtime hooks for agent execution
@@ -149,7 +149,8 @@ docs/                      # Project documentation
 
 ### LLM Provider Integration
 
-- Provider‑agnostic client in `llm_client.py` with factory pattern; uses provider‑specific LangChain implementations for OpenAI, DeepSeek, and Ollama
+- Provider‑agnostic client in `llm_client/` subpackage with factory pattern; uses provider‑specific LangChain implementations for OpenAI, DeepSeek, and Ollama
+- Modular subpackage with separate modules for instrumentation, tool binding, structured output, response normalization, and provider adapters
 - Supported providers: `openai`, `deepseek`, `ollama`
 - Provider‑specific logic is encapsulated in `_build_structured_output_adapter`, `_build_input_with_files`, and `_compute_cost`
 - Structured output uses provider‑specific methods: OpenAI JSON Schema, DeepSeek function‑calling/json‑mode, Ollama raw schema
@@ -198,7 +199,7 @@ agents = dao.list_all()
 - Tests are located in `tests/` and use plain pytest functions (no fixtures).
 - Mock LLM clients to avoid API calls.
 - Focus on engine behavior, schema validation, and instrumentation.
-- Unit tests are optional for new features (see `PLAN.md`); smoke/manual validation is acceptable early in the cycle.
+- Unit tests are optional for new features; smoke/manual validation is acceptable early in the cycle.
 
 **Example test pattern:**
 
@@ -288,7 +289,7 @@ Color themes and emoji symbols are centralized in `config.UI_COLORS`. Avoid hard
 
 ## Provider-Specific LangChain Architecture
 
-**Architecture**: The codebase has removed the LiteLLM dependency and migrated to provider‑specific LangChain implementations with **advisory** capability mapping. This simplifies the codebase, eliminates dynamic detection issues, and provides full control over supported providers (OpenAI, DeepSeek, Ollama). Refer to `PLAN.md` for historical migration details.
+**Architecture**: The codebase uses provider‑specific LangChain implementations with **advisory** capability mapping. This simplifies the codebase, eliminates dynamic detection issues, and provides full control over supported providers (OpenAI, DeepSeek, Ollama).
 
 **High‑Level Directives**:
 
@@ -303,9 +304,9 @@ Color themes and emoji symbols are centralized in `config.UI_COLORS`. Avoid hard
    - Maintain existing working implementations for OpenAI and extend them to DeepSeek and Ollama.
 
 3. **Unified Interface**:
-   - Maintain provider‑agnostic client interface in `llm_client.py` with factory pattern.
+   - Maintain provider‑agnostic client interface in `llm_client/` subpackage with factory pattern.
    - Internal implementations are provider‑specific but expose a consistent API to the engine and UI.
-   - No `USE_LITELLM` flag or dual‑path architecture; all code paths use provider‑specific LangChain implementations.
+   - All code paths use provider‑specific LangChain implementations.
 
 4. **Advisory Capability Detection**:
    - Feature detection uses static mapping for advisory purposes (warnings, UI defaults); actual feature binding respects agent configuration.
@@ -315,14 +316,14 @@ Color themes and emoji symbols are centralized in `config.UI_COLORS`. Avoid hard
 
 5. **Adding New Providers**:
    - To add a new provider, define its capabilities in `provider_capabilities.py` and implement provider‑specific adapters for tools, structured output, and file handling.
-   - No LiteLLM dependency; new providers integrate directly with LangChain’s native libraries.
+   - New providers integrate directly with LangChain’s native libraries.
 
 6. **Modular Design Approach**:
    - Prefer a highly modularized approach over nested branches. Split existing code affected by the refactor into separate helper functions, modules, and packages.
    - Avoid deep nesting of provider‑specific branches; create focused modules (e.g., `tool_integration/provider_tool_adapter.py`, `multimodal_handler.py`).
    - Keep modules focused on single responsibility and preserve existing interfaces while refactoring internals.
 
-**Key Benefit**: Adding a new provider requires defining capabilities and implementing provider‑specific adapters—no LiteLLM dependency, full control over provider integration.
+**Key Benefit**: Adding a new provider requires defining capabilities and implementing provider‑specific adapters, providing full control over provider integration.
 
 ## Further Reading
 
