@@ -308,55 +308,16 @@ class ToolBinder:
         unified_binding_applied = False
         effective_response_format = response_format  # start with original
         if response_format is not None and converted_tools and "tools" in converted_tools:
-            try:
-                # Determine provider-specific structured output method
-                structured_output_method = self._client._get_structured_output_method(provider_id, model)
-                # Extract schema from provider-specific response_format wrapper
-                schema = None
-                schema_name = None
-                if provider_id == "openai":
-                    if isinstance(response_format, dict) and response_format.get("type") == "json_schema":
-                        json_schema_obj = response_format.get("json_schema", {})
-                        schema = json_schema_obj.get("schema")
-                        schema_name = json_schema_obj.get("name")
-                elif provider_id == "deepseek":
-                    # DeepSeek uses function-calling format; schema may be in "parameters"
-                    if isinstance(response_format, dict):
-                        if "parameters" in response_format:
-                            schema = response_format["parameters"]
-                            schema_name = response_format.get("name")
-                        else:
-                            schema = response_format
-                else:
-                    # Ollama and other providers: plain schema dict
-                    schema = response_format
-
-                if schema is None:
-                    schema = response_format  # ultimate fallback
-
-                # Ensure the schema dict has title and description for LangChain's with_structured_output
-                if isinstance(schema, dict):
-                    # Create a copy to avoid modifying the original
-                    schema = schema.copy()
-                    if "title" not in schema:
-                        schema["title"] = schema_name or getattr(spec, "schema_name", None) or "schema"
-                    if "description" not in schema:
-                        schema["description"] = "Structured output schema"
-
-                # Apply unified binding
-                unified_model = model_instance.with_structured_output(
-                    schema,
-                    method=structured_output_method,
-                    include_raw=True,
-                    tools=converted_tools["tools"],
-                )
-                model_instance = self._client._wrap_structured_output_model(unified_model)
+            structured_binder = StructuredOutputBinder(self._client)
+            model_instance, effective_response_format = structured_binder.bind_structured_output(
+                spec, model_instance, response_format, provider_id, model,
+                tools=converted_tools["tools"], strict=False
+            )
+            if effective_response_format is None:
                 unified_binding_applied = True
-                effective_response_format = None
                 logger.info(f"Applied unified tools+structured_output binding for {provider_id}")
-            except Exception as e:
-                logger.warning("Unified binding failed, falling back to sequential: %s", e)
-                # Continue with sequential binding
+            else:
+                logger.warning("Unified binding failed, falling back to sequential")
 
         if converted_tools:
             if "tools" in converted_tools:
@@ -413,6 +374,91 @@ class ToolBinder:
             tools_list = []
 
         return model_instance, tools_list, unified_binding_applied, effective_response_format
+
+class StructuredOutputBinder:
+    """
+    Handles provider-specific schema extraction and structured output binding.
+    """
+
+    def __init__(self, client):
+        self._client = client
+
+    def extract_schema(self, response_format, provider_id, spec):
+        """
+        Extract schema from provider-specific response_format wrapper.
+        Returns (schema, schema_name).
+        """
+        schema = None
+        schema_name = None
+        if provider_id == "openai":
+            if isinstance(response_format, dict) and response_format.get("type") == "json_schema":
+                json_schema_obj = response_format.get("json_schema", {})
+                schema = json_schema_obj.get("schema")
+                schema_name = json_schema_obj.get("name")
+        elif provider_id == "deepseek":
+            # DeepSeek uses function-calling format; schema may be in "parameters"
+            if isinstance(response_format, dict):
+                if "parameters" in response_format:
+                    schema = response_format["parameters"]
+                    schema_name = response_format.get("name")
+                else:
+                    schema = response_format
+        else:
+            # Ollama and other providers: plain schema dict
+            schema = response_format
+
+        if schema is None:
+            schema = response_format  # ultimate fallback
+
+        # Ensure the schema dict has title and description for LangChain's with_structured_output
+        if isinstance(schema, dict):
+            # Create a copy to avoid modifying the original
+            schema = schema.copy()
+            if "title" not in schema:
+                schema["title"] = schema_name or getattr(spec, "schema_name", None) or "schema"
+            if "description" not in schema:
+                schema["description"] = "Structured output schema"
+
+        return schema, schema_name
+
+    def bind_structured_output(self, spec, model_instance, response_format, provider_id, model, tools=None, strict=True):
+        """
+        Bind structured output to model instance, optionally with tools (unified binding).
+        Returns (model_instance, effective_response_format).
+        """
+        try:
+            structured_output_method = self._client._get_structured_output_method(provider_id, model)
+            schema, schema_name = self.extract_schema(response_format, provider_id, spec)
+            
+            # Apply binding
+            if tools is not None:
+                # Unified binding with tools
+                unified_model = model_instance.with_structured_output(
+                    schema,
+                    method=structured_output_method,
+                    include_raw=True,
+                    tools=tools,
+                )
+                model_instance = self._client._wrap_structured_output_model(unified_model)
+                effective_response_format = None
+                logger.info(f"Applied unified tools+structured_output binding for {provider_id}")
+            else:
+                # Structured output only
+                structured_model = model_instance.with_structured_output(
+                    schema,
+                    method=structured_output_method,
+                    include_raw=True,
+                    strict=strict,
+                )
+                model_instance = self._client._wrap_structured_output_model(structured_model)
+                effective_response_format = None
+                logger.info(f"Applied provider-specific structured output binding for {provider_id}")
+            return model_instance, effective_response_format
+        except Exception as e:
+            logger.warning(f"Structured output binding failed: {e}")
+            # Return unchanged model and original response_format
+            return model_instance, response_format
+
 
 # =========================
 # Public data structures
@@ -754,53 +800,11 @@ class LLMClient:
 
             # Provider-specific structured output binding (if unified binding not applied)
             if not unified_binding_applied and response_format is not None:
-                try:
-                    structured_output_method = self._get_structured_output_method(provider_id, model)
-                    # Extract schema from provider-specific response_format wrapper
-                    schema = None
-                    schema_name = None
-                    if provider_id == "openai":
-                        if isinstance(response_format, dict) and response_format.get("type") == "json_schema":
-                            json_schema_obj = response_format.get("json_schema", {})
-                            schema = json_schema_obj.get("schema")
-                            schema_name = json_schema_obj.get("name")
-                    elif provider_id == "deepseek":
-                        # DeepSeek uses function-calling format; schema may be in "parameters"
-                        if isinstance(response_format, dict):
-                            if "parameters" in response_format:
-                                schema = response_format["parameters"]
-                                schema_name = response_format.get("name")
-                            else:
-                                schema = response_format
-                    else:
-                        # Ollama and other providers: plain schema dict
-                        schema = response_format
-
-                    if schema is None:
-                        schema = response_format  # ultimate fallback
-
-                    # Ensure the schema dict has title and description for LangChain's with_structured_output
-                    if isinstance(schema, dict):
-                        # Create a copy to avoid modifying the original
-                        schema = schema.copy()
-                        if "title" not in schema:
-                            schema["title"] = schema_name or getattr(spec, "schema_name", None) or "schema"
-                        if "description" not in schema:
-                            schema["description"] = "Structured output schema"
-
-                    # Apply provider-specific structured output binding (no tools)
-                    structured_model = model_instance.with_structured_output(
-                        schema,
-                        method=structured_output_method,
-                        include_raw=True,
-                        strict=True,
-                    )
-                    model_instance = self._wrap_structured_output_model(structured_model)
-                    effective_response_format = None
-                    logger.info(f"Applied provider-specific structured output binding for {provider_id}")
-                except Exception as e:
-                    logger.warning("Provider-specific structured output binding failed: %s", e)
-                    # Keep effective_response_format as is (may be passed to agent)
+                structured_binder = StructuredOutputBinder(self)
+                model_instance, effective_response_format = structured_binder.bind_structured_output(
+                    spec, model_instance, response_format, provider_id, spec.model,
+                    tools=None, strict=True
+                )
             agent = self._create_agent(
                 model=model_instance,
                 tools=tools or [],
