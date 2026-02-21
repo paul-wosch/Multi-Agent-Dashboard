@@ -1163,18 +1163,10 @@ class LLMClient:
         logger.info("Returning %s response_format: %s", provider_id, result)
         return result
 
-    def invoke_agent(
-            self,
-            agent,
-            prompt: str,
-            *,
-            files: Optional[List[Dict[str, Any]]] = None,
-            response_format: Optional[Dict[str, Any]] = None,
-            stream: bool = False,
-            context: Optional[Dict[str, Any]] = None,
-    ) -> TextResponse:
+    def _prepare_request(self, agent, prompt: str, *, files=None, context=None):
         """
-        Invoke a LangChain agent and normalize its response into TextResponse.
+        Build input with files, apply multimodal handling.
+        Returns the state dict for agent.invoke.
         """
         if not self._langchain_available:
             raise RuntimeError("LangChain invoke_agent not available")
@@ -1241,7 +1233,14 @@ class LLMClient:
         }
         # Clean None if we didn't build a SystemMessage instance
         state["messages"] = [m for m in state["messages"] if m is not None]
-
+        
+        return state
+    
+    def _execute_with_retry(self, agent, state, context=None):
+        """
+        Execute agent.invoke with retry/backoff logic.
+        Returns (result, latency).
+        """
         start_ts = time.perf_counter()
         # agent.invoke may accept context parameter in v1 Agents API
         try:
@@ -1255,7 +1254,14 @@ class LLMClient:
 
         end_ts = time.perf_counter()
         latency = end_ts - start_ts
-
+        
+        return result, latency
+    
+    def _process_response(self, result, latency, agent):
+        """
+        Process raw response: cost computation, normalization.
+        Returns TextResponse.
+        """
         raw_dict = self._to_dict(result)
 
         # Ensure instrumentation events propagate structured response/content blocks.
@@ -1683,15 +1689,23 @@ class LLMClient:
             output_tokens=output_tokens,
             latency=latency,
         )
-
-    # -------------------------
-    # Public API
-    # -------------------------
-
-    # -------------------------
-    # Response normalization
-    # -------------------------
-
+    
+    def invoke_agent(
+            self,
+            agent,
+            prompt: str,
+            *,
+            files: Optional[List[Dict[str, Any]]] = None,
+            response_format: Optional[Dict[str, Any]] = None,
+            stream: bool = False,
+            context: Optional[Dict[str, Any]] = None,
+    ) -> TextResponse:
+        """
+        Invoke a LangChain agent and normalize its response into TextResponse.
+        """
+        state = self._prepare_request(agent, prompt, files=files, context=context)
+        result, latency = self._execute_with_retry(agent, state, context=context)
+        return self._process_response(result, latency, agent)
     def _to_dict(self, response: Any) -> Dict[str, Any]:
         """
         Convert SDK/LangChain response into a serializable dict (best-effort),
