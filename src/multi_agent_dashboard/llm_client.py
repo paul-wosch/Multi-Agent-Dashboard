@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from multi_agent_dashboard.structured_schemas import resolve_schema_json
 from multi_agent_dashboard.tool_integration.provider_tool_adapter import convert_tools_for_provider
 from multi_agent_dashboard.tool_integration.registry import get_registry
+from multi_agent_dashboard.provider_adapters import get_adapter
 # Conditional import for DuckDuckGoSearchTool (may not be available if LangChain missing)
 try:
     from multi_agent_dashboard.tool_integration.search import DuckDuckGoSearchTool
@@ -388,25 +389,9 @@ class StructuredOutputBinder:
         Extract schema from provider-specific response_format wrapper.
         Returns (schema, schema_name).
         """
-        schema = None
-        schema_name = None
-        if provider_id == "openai":
-            if isinstance(response_format, dict) and response_format.get("type") == "json_schema":
-                json_schema_obj = response_format.get("json_schema", {})
-                schema = json_schema_obj.get("schema")
-                schema_name = json_schema_obj.get("name")
-        elif provider_id == "deepseek":
-            # DeepSeek uses function-calling format; schema may be in "parameters"
-            if isinstance(response_format, dict):
-                if "parameters" in response_format:
-                    schema = response_format["parameters"]
-                    schema_name = response_format.get("name")
-                else:
-                    schema = response_format
-        else:
-            # Ollama and other providers: plain schema dict
-            schema = response_format
-
+        adapter = get_adapter(provider_id)
+        schema, schema_name = adapter.extract_schema(response_format, spec)
+        
         if schema is None:
             schema = response_format  # ultimate fallback
 
@@ -427,7 +412,8 @@ class StructuredOutputBinder:
         Returns (model_instance, effective_response_format).
         """
         try:
-            structured_output_method = self._client._get_structured_output_method(provider_id, model)
+            adapter = get_adapter(provider_id)
+            structured_output_method = adapter.get_structured_output_method(model)
             schema, schema_name = self.extract_schema(response_format, provider_id, spec)
             
             # Apply binding
@@ -1092,16 +1078,8 @@ class LLMClient:
 
     def _get_structured_output_method(self, provider_id: str, model_name: str) -> str:
         """Return the appropriate method for with_structured_output for given provider."""
-        provider_id = provider_id.lower()
-        if provider_id == "ollama":
-            return "json_schema"
-        if provider_id == "deepseek":
-            # Reasoner models often reject tool_choice; prefer json_mode
-            if "reasoner" in model_name.lower():
-                return "json_mode"
-            return "function_calling"
-        # Default for OpenAI and other providers
-        return "json_schema"
+        adapter = get_adapter(provider_id)
+        return adapter.get_structured_output_method(model_name)
 
     def _build_structured_output_adapter(self, spec, response_format: Optional[Any]) -> Optional[Any]:
         """
@@ -1132,29 +1110,12 @@ class LLMClient:
         raw_provider = getattr(spec, "provider_id", None)
         logger.info("_build_structured_output_adapter: raw provider_id=%s", raw_provider)
         provider_id = (raw_provider or "openai").lower()
-
-        if provider_id == "openai":
-            result = {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": getattr(spec, "schema_name", None) or "schema",
-                    "schema": schema,
-                },
-            }
-            logger.info("Returning OpenAI response_format (no strict): %s", result)
-            return result
-        if provider_id == "ollama":
-            return schema
-        if provider_id == "deepseek":
-            # DeepSeek uses function-calling; wrap plain JSON schema as a tool definition.
-            if isinstance(schema, dict) and "parameters" not in schema:
-                return {
-                    "name": getattr(spec, "schema_name", None) or "schema",
-                    "description": "Structured output schema",
-                    "parameters": schema,
-                }
-            return schema
-        return None
+        schema_name = getattr(spec, "schema_name", None)
+        
+        adapter = get_adapter(provider_id)
+        result = adapter.wrap_schema(schema, schema_name)
+        logger.info("Returning %s response_format: %s", provider_id, result)
+        return result
 
     def invoke_agent(
             self,
