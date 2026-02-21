@@ -170,6 +170,111 @@ _INSTRUMENTATION_MIDDLEWARE = _DashboardInstrumentationMiddleware
 INSTRUMENTATION_MIDDLEWARE = _INSTRUMENTATION_MIDDLEWARE
 
 
+class InstrumentationManager:
+    """
+    Handles instrumentation middleware detection, instantiation, and attachment.
+    """
+    
+    @staticmethod
+    def _middleware_includes_instrumentation(mw_list: List[Any]) -> bool:
+        """Check if instrumentation middleware is already present in the list."""
+        if INSTRUMENTATION_MIDDLEWARE is None:
+            return False
+        for item in mw_list:
+            try:
+                # Direct instance of the instrumentation middleware
+                if isinstance(item, INSTRUMENTATION_MIDDLEWARE):
+                    return True
+            except Exception:
+                # isinstance might fail if types incompatible; continue defensively
+                pass
+            try:
+                # If the item is the class itself
+                if item is INSTRUMENTATION_MIDDLEWARE:
+                    return True
+            except Exception:
+                pass
+            try:
+                # If the item is a subclass (class object provided)
+                if isinstance(item, type) and issubclass(item, INSTRUMENTATION_MIDDLEWARE):
+                    return True
+            except Exception:
+                pass
+        return False
+    
+    @staticmethod
+    def prepare(middleware: Optional[List[Any]], spec) -> Tuple[List[Any], bool, Optional[str]]:
+        """
+        Normalize middleware list and attach instrumentation middleware if needed.
+        
+        Returns:
+            tuple: (middleware_list, instrumentation_attached, instrumentation_attach_error)
+        """
+        logger = logging.getLogger(__name__)
+        
+        # Normalize middleware list and instantiate classes when provided.
+        middleware_list: List[Any] = []
+        for mw in (middleware or []):
+            try:
+                # If a class was passed instead of an instance, try to instantiate.
+                if isinstance(mw, type):
+                    try:
+                        mw_inst = mw()
+                        middleware_list.append(mw_inst)
+                    except Exception:
+                        # Could not instantiate - append the class unchanged (some libs accept classes)
+                        middleware_list.append(mw)
+                else:
+                    middleware_list.append(mw)
+            except Exception:
+                middleware_list.append(mw)
+        
+        # Detect whether instrumentation middleware already present
+        instrumentation_present = False
+        try:
+            instrumentation_present = InstrumentationManager._middleware_includes_instrumentation(middleware_list)
+        except Exception:
+            instrumentation_present = False
+        
+        instrumentation_attached = instrumentation_present
+        instrumentation_attach_error: Optional[str] = None
+        
+        # Try to attach instrumentation middleware safely; if instantiation fails, log and continue without it.
+        if not instrumentation_present and INSTRUMENTATION_MIDDLEWARE is not None:
+            try:
+                mw_instance = None
+                try:
+                    mw_instance = INSTRUMENTATION_MIDDLEWARE()
+                    # Ensure instrumentation is the final element in the middleware list
+                    middleware_list.append(mw_instance)
+                    instrumentation_attached = True
+                except Exception as inst_exc:
+                    # As a fallback, some integrations accept middleware classes instead of instances.
+                    try:
+                        middleware_list.append(INSTRUMENTATION_MIDDLEWARE)
+                        instrumentation_attached = True
+                        instrumentation_attach_error = f"instantiation_failed:{inst_exc}"
+                        logger.debug(
+                            "Instrumentation middleware could not be instantiated; appended class instead for agent=%s. instantiation error=%s",
+                            getattr(spec, "name", "<unnamed>"),
+                            inst_exc,
+                            exc_info=True,
+                        )
+                    except Exception as append_exc:
+                        instrumentation_attach_error = f"instantiation_failed:{inst_exc}; append_failed:{append_exc}"
+                        logger.warning(
+                            "Instrumentation middleware exists but could not be instantiated or appended for agent=%s",
+                            getattr(spec, "name", "<unnamed>"),
+                        )
+                        logger.debug("Instrumentation instantiation/append error: %s / %s", inst_exc, append_exc,
+                                     exc_info=True)
+            except Exception as e:
+                instrumentation_attach_error = str(e)
+                logger.exception("Failed to instantiate instrumentation middleware: %s", e)
+        
+        return middleware_list, instrumentation_attached, instrumentation_attach_error
+
+
 # =========================
 # Public data structures
 # =========================
@@ -494,91 +599,7 @@ class LLMClient:
 
 
 
-        # Normalize middleware list and instantiate classes when provided.
-        middleware_list: List[Any] = []
-        for mw in (middleware or []):
-            try:
-                # If a class was passed instead of an instance, try to instantiate.
-                if isinstance(mw, type):
-                    try:
-                        mw_inst = mw()
-                        middleware_list.append(mw_inst)
-                    except Exception:
-                        # Could not instantiate - append the class unchanged (some libs accept classes)
-                        middleware_list.append(mw)
-                else:
-                    middleware_list.append(mw)
-            except Exception:
-                middleware_list.append(mw)
-
-        # Robust detection helper: accept instances, classes, or subclasses
-        def _middleware_includes_instrumentation(mw_list: List[Any]) -> bool:
-            if INSTRUMENTATION_MIDDLEWARE is None:
-                return False
-            for item in mw_list:
-                try:
-                    # Direct instance of the instrumentation middleware
-                    if isinstance(item, INSTRUMENTATION_MIDDLEWARE):
-                        return True
-                except Exception:
-                    # isinstance might fail if types incompatible; continue defensively
-                    pass
-                try:
-                    # If the item is the class itself
-                    if item is INSTRUMENTATION_MIDDLEWARE:
-                        return True
-                except Exception:
-                    pass
-                try:
-                    # If the item is a subclass (class object provided)
-                    if isinstance(item, type) and issubclass(item, INSTRUMENTATION_MIDDLEWARE):
-                        return True
-                except Exception:
-                    pass
-            return False
-
-        # Detect whether instrumentation middleware already present
-        instrumentation_present = False
-        try:
-            instrumentation_present = _middleware_includes_instrumentation(middleware_list)
-        except Exception:
-            instrumentation_present = False
-
-        instrumentation_attached = instrumentation_present
-        instrumentation_attach_error: Optional[str] = None
-
-        # Try to attach instrumentation middleware safely; if instantiation fails, log and continue without it.
-        if not instrumentation_present and INSTRUMENTATION_MIDDLEWARE is not None:
-            try:
-                mw_instance = None
-                try:
-                    mw_instance = INSTRUMENTATION_MIDDLEWARE()
-                    # Ensure instrumentation is the final element in the middleware list
-                    middleware_list.append(mw_instance)
-                    instrumentation_attached = True
-                except Exception as inst_exc:
-                    # As a fallback, some integrations accept middleware classes instead of instances.
-                    try:
-                        middleware_list.append(INSTRUMENTATION_MIDDLEWARE)
-                        instrumentation_attached = True
-                        instrumentation_attach_error = f"instantiation_failed:{inst_exc}"
-                        logger.debug(
-                            "Instrumentation middleware could not be instantiated; appended class instead for agent=%s. instantiation error=%s",
-                            getattr(spec, "name", "<unnamed>"),
-                            inst_exc,
-                            exc_info=True,
-                        )
-                    except Exception as append_exc:
-                        instrumentation_attach_error = f"instantiation_failed:{inst_exc}; append_failed:{append_exc}"
-                        logger.warning(
-                            "Instrumentation middleware exists but could not be instantiated or appended for agent=%s",
-                            getattr(spec, "name", "<unnamed>"),
-                        )
-                        logger.debug("Instrumentation instantiation/append error: %s / %s", inst_exc, append_exc,
-                                     exc_info=True)
-            except Exception as e:
-                instrumentation_attach_error = str(e)
-                logger.exception("Failed to instantiate instrumentation middleware: %s", e)
+        middleware_list, instrumentation_attached, instrumentation_attach_error = InstrumentationManager.prepare(middleware, spec)
 
         try:
             # Determine effective response_format: pass only for OpenAI (JSON Schema), others use adapter.
