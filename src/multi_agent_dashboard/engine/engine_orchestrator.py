@@ -26,89 +26,14 @@ from .utils import (
     _collect_content_blocks,
     _structured_from_instrumentation,
     _normalize_content_blocks,
+    _compute_cost,
+    _extract_provider_features_from_profile,
 )
 
+from .agent_executor import AgentExecutor
+from .types import PipelineState
 
-def _extract_provider_features_from_profile(profile: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Convert a LangChain model 'profile' into a compact provider_features mapping.
 
-    This is intentionally conservative: only expose a few well-known capability hints
-    used by the UI (structured_output, tool_calling, reasoning, image_inputs, max_input_tokens).
-    """
-
-    features: Dict[str, Any] = {}
-
-    if not isinstance(profile, dict):
-        return features
-
-    # Normalize profile keys to handle camelCase, snake_case, and lower-case variants.
-    def _normalize_key(k: str) -> str:
-        # Convert camelCase / PascalCase to snake_case
-        s = re.sub(r'(?<!^)(?=[A-Z])', '_', str(k)).lower()
-        s = s.replace('-', '_')
-        return s
-
-    normalized: Dict[str, Any] = {}
-    for k, v in profile.items():
-        try:
-            normalized[str(k)] = v
-        except Exception:
-            normalized[k] = v
-        try:
-            normalized[str(k).lower()] = v
-        except Exception:
-            pass
-        try:
-            nk = _normalize_key(str(k))
-            normalized[nk] = v
-        except Exception:
-            pass
-
-    # Structured output related hints
-    if normalized.get("structured_output") or normalized.get("structuredoutput") or normalized.get("reasoning_output") or normalized.get("structured"):
-        features["structured_output"] = True
-
-    # Tool calling hints
-    if normalized.get("tool_calling") or normalized.get("toolcalling") or normalized.get("tool_calls") or normalized.get("toolcalls") or normalized.get("tool_call"):
-        features["tool_calling"] = True
-
-    # Reasoning hints
-    if normalized.get("reasoning") or normalized.get("reasoning_output") or normalized.get("reasoningoutput") or normalized.get("supports_reasoning"):
-        features["reasoning"] = True
-
-    # Image / multimodal hints
-    if "image_inputs" in normalized or "imageinputs" in normalized:
-        try:
-            features["image_inputs"] = bool(normalized.get("image_inputs") or normalized.get("imageinputs"))
-        except Exception:
-            features["image_inputs"] = True
-
-    # Max input tokens (context window) — try variants
-    max_tokens_candidates = [
-        normalized.get("max_input_tokens"),
-        normalized.get("maxinputtokens"),
-        normalized.get("max_input_token"),
-        normalized.get("max_input"),
-        normalized.get("maxInputTokens"),
-    ]
-    for candidate in max_tokens_candidates:
-        if candidate is not None:
-            try:
-                features["max_input_tokens"] = int(candidate)
-            except Exception:
-                features["max_input_tokens"] = candidate
-            break
-
-    # If nothing obvious matched, expose a shallow copy for auditing
-    if not features and profile:
-        # Keep only a small subset to avoid clobbering DB with huge dicts
-        keys_to_copy = ["tool_calling", "structured_output", "reasoning", "image_inputs", "max_input_tokens", "maxInputTokens", "structuredOutput", "toolCalling"]
-        for k in keys_to_copy:
-            if k in profile:
-                features[k if "_" in k else _normalize_key(k)] = profile[k]
-
-    return features
 
 
 # =========================
@@ -200,67 +125,7 @@ class MultiAgentEngine:
         if self.on_progress:
             self.on_progress(pct, agent_name)
 
-    def _compute_cost(
-            self,
-            model: str,
-            input_tokens: Optional[int],
-            output_tokens: Optional[int],
-            provider_id: Optional[str] = None,
-    ) -> tuple[float, float, float]:
-        """Compute approximate cost for a single LLM call.
 
-        Return (total_cost, input_cost, output_cost).
-
-        Prices are per 1M tokens.
-
-        This helper is provider-aware: for OpenAI-family providers
-        (provider_id is None/'' or 'openai' or 'azure_openai') it uses
-        OPENAI_PRICING. For other providers we currently return zero so that
-        non-OpenAI calls do not get mis-attributed OpenAI prices.
-        """
-        if input_tokens is None and output_tokens is None:
-            return 0.0, 0.0, 0.0
-
-        # Parse provider/model string format
-        model_for_pricing = model
-        if "/" in model:
-            # Split only on first slash
-            maybe_provider, model_name = model.split("/", 1)
-            model_for_pricing = model_name
-            # If provider_id not specified, use extracted provider
-            if provider_id is None:
-                provider_id = maybe_provider
-            # If provider_id specified but differs, log warning but use extracted provider
-            elif provider_id != maybe_provider:
-                logger.debug(
-                    f"Provider mismatch in _compute_cost: model suggests '{maybe_provider}', "
-                    f"but provider_id is '{provider_id}'. Using '{maybe_provider}' for pricing."
-                )
-                provider_id = maybe_provider
-
-        provider = (provider_id or "").strip().lower()
-
-        # Backwards-compatible default: treat missing provider_id as OpenAI.
-        is_openai_family = (not provider) or provider in ("openai", "azure_openai")
-
-        pricing = None
-        if is_openai_family:
-            pricing = OPENAI_PRICING.get(model_for_pricing)
-        elif provider == "deepseek":
-            try:
-                from multi_agent_dashboard.config import DEEPSEEK_PRICING
-                pricing = DEEPSEEK_PRICING.get(model_for_pricing)
-            except Exception:
-                pricing = None
-        if not pricing:
-            return 0.0, 0.0, 0.0
-
-        inp = input_tokens or 0
-        out = output_tokens or 0
-
-        input_cost = inp / 1_000_000.0 * pricing.get("input", 0.0)
-        output_cost = out / 1_000_000.0 * pricing.get("output", 0.0)
-        return input_cost + output_cost, input_cost, output_cost
 
     # -------------------------
     # Sequential Execution
@@ -292,23 +157,24 @@ class MultiAgentEngine:
         logger.info("Starting pipeline: %s", steps)
 
         # Reset execution state
-        self.state = {
-            "task": initial_input,
-            "input": initial_input,
-        }
-        self.memory = {}
-        self._warnings = []
-        self.agent_metrics = {}
-        tool_usages: Dict[str, List[Dict[str, Any]]] = {}
-        # Per-agent configuration snapshot filled as agents run
-        agent_configs: Dict[str, Dict[str, Any]] = {}
-        # Strict schema validation flags
-        strict_schema_exit = False
-        agent_schema_validation_failed: Dict[str, bool] = {}
+        # Create pipeline state container
+        pipeline_state = PipelineState(
+            state={
+                "task": initial_input,
+                "input": initial_input,
+            },
+            memory={},
+            warnings=[],
+            tool_usages={},
+            agent_configs={},
+            strict_schema_exit=False,
+            agent_schema_validation_failed={},
+            agent_metrics={},
+        )
 
         # Store initial files in state so all agents can access
         if files:
-            self.state["files"] = files
+            pipeline_state.state["files"] = files
 
         # Optional domain filters for web_search
         if allowed_domains:
@@ -319,12 +185,21 @@ class MultiAgentEngine:
                     if isinstance(v, list) and v
                 }
                 if filtered:
-                    self.state["allowed_domains_by_agent"] = filtered
+                    pipeline_state.state["allowed_domains_by_agent"] = filtered
             else:
                 # Backwards-compatible: single global list
-                self.state["allowed_domains"] = allowed_domains
+                pipeline_state.state["allowed_domains"] = allowed_domains
+
+        # Create agent executor
+        executor = AgentExecutor(
+            llm_client=self.llm_client,
+            strict=strict,
+            strict_schema_validation=strict_schema_validation,
+            warning_callback=self._warn,
+        )
 
         last_output: Any = None
+        last_agent: Optional[str] = None
         # ---- Progress bar: initialize ----
         num_steps = len(steps)
         total_ticks = max(1, 2 * num_steps)
@@ -336,7 +211,6 @@ class MultiAgentEngine:
             self._progress(start_pct, agent_name)
 
             agent = self.agents.get(agent_name)
-
             last_agent = agent_name
 
             if not agent:
@@ -344,380 +218,62 @@ class MultiAgentEngine:
                 if strict:
                     raise ValueError(msg)
                 self._warn(msg)
-                self.memory[agent_name] = msg
+                pipeline_state.memory[agent_name] = msg
                 continue
 
-            # ---- Input validation ----
-            for var in agent.spec.input_vars:
-                if var == "files":
-                    # Special-case: files in input validation
-                    # files are injected once and may be an empty list; presence is enough
-                    if "files" not in self.state:
-                        msg = f"[{agent_name}] Missing input var 'files'"
-                        if strict:
-                            raise ValueError(msg)
-                        self._warn(msg)
-                    continue
-
-                if var not in self.state or self.state[var] in ("", None):
-                    msg = f"[{agent_name}] Missing input var '{var}'"
-                    if strict:
-                        raise ValueError(msg)
-                    self._warn(msg)
-
-            # ---- Execute agent ----
             try:
-                run_kwargs = {}
-                if "files" in inspect.signature(agent.run).parameters:
-                    run_kwargs["files"] = self.state.get("files")
-                raw_output = agent.run(self.state, **run_kwargs)
+                result = executor.execute_agent(agent_name, agent, pipeline_state)
+                last_output = result.raw_output
             except Exception as e:
-                # Enabled 'real error' display during development
-                # logger.exception("Agent '%s' failed", agent_name)
-                # raise RuntimeError(f"Agent '{agent_name}' failed") from e
-                logger.exception("Agent '%s' failed with real error:", agent_name)
+                # The executor already logs the error; propagate
                 raise
 
-            # Retrieve metrics from AgentRuntime.last_metrics
-            metrics = getattr(agent, "last_metrics", {}) or {}
-            raw_metrics = metrics.get("raw") or {}
-
-            # If LangChain agent path was used but instrumentation appears missing, warn
-            try:
-                used_langchain = bool(metrics.get("used_langchain_agent"))
-                instrumentation_attached = bool(metrics.get("instrumentation_attached"))
-                has_content_blocks = bool(metrics.get("content_blocks"))
-                has_instrumentation_events = bool(metrics.get("instrumentation_events"))
-                # If instrumentation was attached at agent-create time but we still see no content blocks
-                if used_langchain and instrumentation_attached and not (has_content_blocks or has_instrumentation_events or metrics.get("detected_provider_profile")):
-                    # Instrumentation expected for LangChain agents to capture content_blocks/tool traces
-                    self._warn(
-                        f"[{agent_name}] Ran via LangChain with instrumentation attached but produced no content_blocks or instrumentation events. "
-                        "Confirm provider supports content_blocks or middleware hooks executed."
-                    )
-                # If instrumentation was not attached and LangChain used, warn once
-                if used_langchain and not instrumentation_attached:
-                    self._warn(
-                        f"[{agent_name}] Ran via LangChain but instrumentation middleware was not attached. "
-                        "Enable instrumentation to capture content_blocks/tool traces."
-                    )
-            except Exception:
-                logger.debug("Failed to validate instrumentation presence for agent=%s", agent_name, exc_info=True)
-
-            # Extract config used for this agent call
-            tc = metrics.get("tools_config")
-            rc = metrics.get("reasoning_config")
-
-            # Extract tool usage for this agent (per-call details)
-            tools = (metrics.get("tools") or [])
-            if tools:
-                for t in tools:
-                    # Keep config on the in-memory tool events for convenience;
-                    # DB writes now use agent_run_configs instead.
-                    if tc:
-                        t["tools_config"] = tc
-                    if rc:
-                        t["reasoning_config"] = rc
-                tool_usages[agent_name] = tools
-
-            # Snapshot this agent's configuration for this particular run.
-            # This keeps agent config concerns out of tool_usages rows.
-            # Include both user-facing prompt_template and system_prompt_template so
-            # stored runs capture both templates used during execution.
-            # Also include a compact summary of content_blocks for auditing
-            content_blocks = metrics.get("content_blocks")
-            if not isinstance(content_blocks, list):
-                content_blocks = _collect_content_blocks(raw_metrics)
-
-            def _filter_extra_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-                # Exclude plain text blocks from extra_config_json to avoid duplicating agent_outputs.output
-                out: List[Dict[str, Any]] = []
-                for b in blocks:
-                    if not isinstance(b, dict):
-                        continue
-                    btype = (b.get("type") or "").lower()
-                    if btype == "text":
-                        continue
-                    out.append(b)
-                return out
-
-            content_blocks_summary = None
-            try:
-                if isinstance(content_blocks, list) and content_blocks:
-                    filtered_blocks = _filter_extra_blocks(content_blocks)
-                    content_blocks_summary = [
-                        {
-                            "type": (cb.get("type") if isinstance(cb, dict) else None),
-                            "name": (cb.get("name") if isinstance(cb, dict) else None),
-                            "id": (cb.get("id") if isinstance(cb, dict) else None),
-                        }
-                        for cb in filtered_blocks
-                    ]
-            except Exception:
-                content_blocks_summary = None
-
-            # Normalize full content blocks for DB storage (best-effort)
-            content_blocks_full = _normalize_content_blocks(_filter_extra_blocks(content_blocks or []))
-
-            # Provider profile hints detected at runtime (from model or response)
-            detected_profile = metrics.get("detected_provider_profile") or raw_metrics.get("detected_provider_profile")
-            # Derive a compact provider_features mapping when the AgentSpec didn't provide any
-            spec_provider_features = getattr(agent.spec, "provider_features", None) or {}
-            provider_features_to_store = dict(spec_provider_features) if isinstance(spec_provider_features, dict) else (spec_provider_features or {})
-            if not provider_features_to_store and detected_profile:
-                derived = _extract_provider_features_from_profile(detected_profile)
-                if derived:
-                    provider_features_to_store = derived
-                else:
-                    # Keep a trace of the raw detected profile when we cannot derive concise features
-                    provider_features_to_store = {"detected_profile_present": True}
-
-            # Capture instrumentation events & structured_response for auditing
-            instrumentation_events = _extract_instrumentation_events(raw_metrics)
-            structured_response = None
-            try:
-                if isinstance(raw_metrics, dict):
-                    structured_response = raw_metrics.get("structured_response") or raw_metrics.get("structured")
-                if structured_response is None:
-                    # check instrumentation events for structured payload
-                    structured_response = _structured_from_instrumentation(raw_metrics)
-            except Exception:
-                structured_response = None
-
-            # Record whether instrumentation middleware was attached to the agent (if agent runtime set it)
-            instrumentation_attached_flag = bool(metrics.get("instrumentation_attached"))
-
-            extra_dict: Dict[str, Any] = {}
-            if content_blocks_summary is not None:
-                extra_dict["content_blocks_summary"] = content_blocks_summary
-            if content_blocks_full:
-                extra_dict["content_blocks"] = content_blocks_full
-            if detected_profile is not None:
-                extra_dict["detected_provider_profile"] = detected_profile
-            if instrumentation_events:
-                extra_dict["instrumentation_events"] = instrumentation_events
-            if structured_response is not None:
-                extra_dict["structured_response"] = structured_response
-            if instrumentation_attached_flag:
-                extra_dict["instrumentation_attached"] = True
-
-            agent_configs[agent_name] = {
-                "model": agent.spec.model,
-                "prompt_template": agent.spec.prompt_template,
-                "system_prompt_template": agent.spec.system_prompt_template,
-                "role": agent.spec.role,
-                "input_vars": list(agent.spec.input_vars),
-                "output_vars": list(agent.spec.output_vars),
-                # High-level tools overview from AgentSpec.tools
-                "tools": agent.spec.tools or {},
-                # Low-level tools/reasoning config used in this run
-                "tools_config": tc,
-                "reasoning_effort": agent.spec.reasoning_effort,
-                "reasoning_summary": agent.spec.reasoning_summary,
-                "reasoning_config": rc,
-                # Reserved for future options such as temperature
-                "extra": extra_dict,
-                # Provider metadata (ensure runs capture which provider/model was used)
-                "provider_id": getattr(agent.spec, "provider_id", None),
-                "model_class": getattr(agent.spec, "model_class", None),
-                "endpoint": getattr(agent.spec, "endpoint", None),
-                "use_responses_api": bool(getattr(agent.spec, "use_responses_api", False)),
-                # Persist provider feature hints (explicit OR derived)
-                "provider_features": provider_features_to_store,
-                # Structured output configuration (provider-agnostic)
-                "structured_output_enabled": bool(getattr(agent.spec, "structured_output_enabled", False)),
-                "schema_json": getattr(agent.spec, "schema_json", None),
-                "schema_name": getattr(agent.spec, "schema_name", None),
-                "temperature": getattr(agent.spec, "temperature", None),
-                "strict_schema_validation": bool(strict_schema_validation),
-            }
-
-            # -------------------------
-            # Metric extraction and token/cost computation
-            # -------------------------
-            input_tokens = metrics.get("input_tokens")
-            output_tokens = metrics.get("output_tokens")
-
-            # Fallback to raw usage metadata if necessary
-            if (input_tokens is None or output_tokens is None) and isinstance(raw_metrics, dict):
-                try:
-                    usage = raw_metrics.get("usage") or raw_metrics.get("usage_metadata") or {}
-                    if isinstance(usage, dict):
-                        if input_tokens is None:
-                            input_tokens = usage.get("input_tokens") or usage.get("prompt_tokens") or usage.get("prompt_token_count")
-                            if input_tokens is None and isinstance(usage.get("token_usage"), dict):
-                                input_tokens = usage["token_usage"].get("prompt_tokens") or usage["token_usage"].get("input_tokens")
-                        if output_tokens is None:
-                            output_tokens = usage.get("output_tokens") or usage.get("completion_tokens") or usage.get("completion_token_count")
-                            if output_tokens is None and isinstance(usage.get("token_usage"), dict):
-                                output_tokens = usage["token_usage"].get("completion_tokens") or usage["token_usage"].get("output_tokens")
-                except Exception:
-                    logger.debug("Engine-level token fallback extraction failed for agent=%s", agent_name, exc_info=True)
-
-            latency = metrics.get("latency")
-
-            total_cost, input_cost, output_cost = self._compute_cost(
-                model=agent.spec.model,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                provider_id=getattr(agent.spec, "provider_id", None),
-            )
-
-            self.agent_metrics[agent_name] = {
-                "model": agent.spec.model,
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "latency": latency,
-                "input_cost": input_cost,
-                "output_cost": output_cost,
-                "cost": total_cost,
-            }
-
-            self.memory[agent_name] = raw_output
-            last_output = raw_output
-
-            # ---- Prefer structured outputs surfaced via LangChain content_blocks or structured response ----
-            parsed = None
-            # 1) If the LLM client included a canonical 'structured' key (created by LLMClient when with_structured_output returned a parsed object),
-            #    or when using LangChain agents, a top-level 'structured_response' key from the agent state.
-            if isinstance(raw_metrics, dict):
-                if "structured" in raw_metrics:
-                    parsed = raw_metrics.get("structured")
-                elif "structured_response" in raw_metrics:
-                    parsed = raw_metrics.get("structured_response")
-                else:
-                    # 2) Look through content_blocks for structured / structured_response / server_tool_result
-                    cbs = raw_metrics.get("content_blocks") or raw_metrics.get("output") or []
-                    if isinstance(cbs, list):
-                        for cb in cbs:
-                            if not isinstance(cb, dict):
-                                continue
-                            ctype = cb.get("type", "").lower()
-                            # Typical structured response block names
-                            if ctype in ("structured", "structured_response", "structured_output"):
-                                # block may carry its payload under 'value' / 'data' / 'json' / 'args'
-                                parsed = cb.get("value") or cb.get("data") or cb.get("json") or cb.get("args") or cb.get("output")
-                                break
-                            # Another pattern: provider returns a tool call with args that represent structured payload
-                            if ctype in ("tool_call", "server_tool_call") and isinstance(cb.get("args"), dict):
-                                # If agent declares output_vars with single key, try to use tool args as parsed output
-                                parsed = cb.get("args")
-                                # do not break here if you prefer more explicit; break for pragmatic mapping
-                                break
-
-            # 3) Fallback: try best-effort JSON parsing of the textual output
-            if parsed is None:
-                parsed = LLMClient.safe_json(raw_output) if isinstance(raw_output, str) else None
-
-            # ---- Writeback rules ----
-            if agent.spec.output_vars:
-                if isinstance(parsed, dict):
-                    for key in parsed:
-                        if key not in agent.spec.output_vars:
-                            msg = (
-                                f"[{agent_name}] Unexpected output key '{key}'"
-                            )
-                            if strict:
-                                raise ValueError(msg)
-                            self._warn(msg)
-
-                    for var in agent.spec.output_vars:
-                        if var in parsed:
-                            self.state[var] = parsed[var]
-                        else:
-                            msg = (
-                                f"[{agent_name}] Declared output '{var}' missing"
-                            )
-                            if strict:
-                                raise ValueError(msg)
-                            self._warn(msg)
-                else:
-                    if len(agent.spec.output_vars) == 1:
-                        self.state[agent.spec.output_vars[0]] = raw_output
-                    else:
-                        key = f"{agent_name}__raw"
-                        self.state[key] = raw_output
-                        self._warn(
-                            f"[{agent_name}] Non-JSON output stored as '{key}'"
-                        )
-            else:
-                self.state[agent_name] = raw_output
-
-            # ---- Structured output validation (per-agent; global strict optionally exits) ----
-            def _schema_resolution_state() -> Dict[str, Any]:
-                cfg_schema_json = getattr(agent.spec, "schema_json", None)
-                cfg_schema_name = getattr(agent.spec, "schema_name", None)
-                configured = bool(cfg_schema_json) or bool(cfg_schema_name)
-                if not configured:
-                    return {"status": "missing", "schema": None, "error": "Schema not configured"}
-                try:
-                    schema = resolve_schema_json(cfg_schema_json, cfg_schema_name)
-                except Exception as e:
-                    return {"status": "invalid_json", "schema": None, "error": str(e)}
-                if schema is None:
-                    return {"status": "invalid_json", "schema": None, "error": "Schema could not be resolved"}
-                if isinstance(schema, dict) and len(schema) == 0:
-                    return {"status": "empty", "schema": schema, "error": "Schema resolved to empty object"}
-                return {"status": "resolved", "schema": schema, "error": None}
-
-            if getattr(agent.spec, "structured_output_enabled", False):
-                res = _schema_resolution_state()
-                validation_failed = False
-                fail_reason = ""
-
-                if res["status"] != "resolved":
-                    validation_failed = True
-                    fail_reason = res.get("error") or res["status"]
-                    self._warn(f"[{agent_name}] schema validation skipped: {fail_reason}")
-                else:
-                    schema = res["schema"]
-                    candidate = parsed if isinstance(parsed, dict) else LLMClient.safe_json(raw_output) if isinstance(raw_output, str) else None
-                    if candidate is None:
-                        validation_failed = True
-                        fail_reason = "No JSON payload to validate"
-                        self._warn(f"[{agent_name}] schema validation failed: {fail_reason}")
-                    else:
-                        try:
-                            jsonschema_validate(candidate, schema)
-                        except ValidationError as ve:
-                            validation_failed = True
-                            fail_reason = str(ve).splitlines()[0]
-                            self._warn(f"[{agent_name}] schema validation failed: {fail_reason}")
-                        except Exception as ve:
-                            validation_failed = True
-                            fail_reason = str(ve)
-                            self._warn(f"[{agent_name}] schema validation failed: {fail_reason}")
-
-                if validation_failed:
-                    agent_schema_validation_failed[agent_name] = True
-                    if strict_schema_validation:
-                        strict_schema_exit = True
-                        logger.error(
-                            "[%s] Strict schema validation triggered early exit; output preserved. Reason: %s",
-                            agent_name,
-                            fail_reason or "schema validation failed",
-                        )
-                        # Exit early: skip remaining agents, keep observability/costs
-                        break
+            # Break early if strict schema validation triggered exit
+            if pipeline_state.strict_schema_exit:
+                logger.error(
+                    "[%s] Strict schema validation triggered early exit; skipping remaining agents",
+                    agent_name,
+                )
+                break
 
             # ---- Progress bar: agent end ----
             end_tick = 2 * i + 2
             end_pct = int(100 * end_tick / total_ticks)
             self._progress(end_pct, agent_name)
 
+        # After loop, synchronize engine instance attributes for compatibility
+        self.state = pipeline_state.state
+        self.memory = pipeline_state.memory
+        self._warnings = pipeline_state.warnings
+
+        # Convert RunMetrics to dict for EngineResult
+        agent_metrics_dict: Dict[str, Dict[str, Any]] = {}
+        for agent_name, metrics in pipeline_state.agent_metrics.items():
+            agent_metrics_dict[agent_name] = {
+                "model": metrics.model,
+                "input_tokens": metrics.input_tokens,
+                "output_tokens": metrics.output_tokens,
+                "latency": metrics.latency,
+                "input_cost": metrics.input_cost,
+                "output_cost": metrics.output_cost,
+                "cost": metrics.total_cost,
+            }
+
+        self.agent_metrics = agent_metrics_dict
+
         final_output = self.state.get("final", last_output)
 
         total_cost = sum(
-            (m.get("cost") or 0.0) for m in self.agent_metrics.values()
+            (m.total_cost or 0.0) for m in pipeline_state.agent_metrics.values()
         )
         total_input_cost = sum(
-            (m.get("input_cost") or 0.0) for m in self.agent_metrics.values()
+            (m.input_cost or 0.0) for m in pipeline_state.agent_metrics.values()
         )
         total_output_cost = sum(
-            (m.get("output_cost") or 0.0) for m in self.agent_metrics.values()
+            (m.output_cost or 0.0) for m in pipeline_state.agent_metrics.values()
         )
         total_latency = sum(
-            (m.get("latency") or 0.0) for m in self.agent_metrics.values()
+            (m.latency or 0.0) for m in pipeline_state.agent_metrics.values()
         )
 
         return EngineResult(
@@ -729,12 +285,12 @@ class MultiAgentEngine:
                                 "final" in self.state and last_agent
                         ) or last_agent,
             agent_metrics=dict(self.agent_metrics),
-            agent_configs=agent_configs,
+            agent_configs=pipeline_state.agent_configs,
             total_cost=total_cost,
             total_latency=total_latency,
             total_input_cost=total_input_cost,
             total_output_cost=total_output_cost,
-            tool_usages=tool_usages,
-            strict_schema_exit=strict_schema_exit,
-            agent_schema_validation_failed=agent_schema_validation_failed,
+            tool_usages=pipeline_state.tool_usages,
+            strict_schema_exit=pipeline_state.strict_schema_exit,
+            agent_schema_validation_failed=pipeline_state.agent_schema_validation_failed,
         )

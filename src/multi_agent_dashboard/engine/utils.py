@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, Dict, List, Optional
+from multi_agent_dashboard.config import OPENAI_PRICING, DEEPSEEK_PRICING
 
 logger = logging.getLogger(__name__)
 
@@ -184,3 +186,147 @@ def _normalize_content_blocks(blocks: List[Any]) -> List[Dict[str, Any]]:
         except Exception:
             out_blocks.append({"__repr": repr(b)})
     return out_blocks
+
+
+def _compute_cost(
+        model: str,
+        input_tokens: Optional[int],
+        output_tokens: Optional[int],
+        provider_id: Optional[str] = None,
+) -> tuple[float, float, float]:
+    """Compute approximate cost for a single LLM call.
+
+    Return (total_cost, input_cost, output_cost).
+
+    Prices are per 1M tokens.
+
+    This helper is provider-aware: for OpenAI-family providers
+    (provider_id is None/'' or 'openai' or 'azure_openai') it uses
+    OPENAI_PRICING. For other providers we currently return zero so that
+    non-OpenAI calls do not get mis-attributed OpenAI prices.
+    """
+    if input_tokens is None and output_tokens is None:
+        return 0.0, 0.0, 0.0
+
+    # Parse provider/model string format
+    model_for_pricing = model
+    if "/" in model:
+        # Split only on first slash
+        maybe_provider, model_name = model.split("/", 1)
+        model_for_pricing = model_name
+        # If provider_id not specified, use extracted provider
+        if provider_id is None:
+            provider_id = maybe_provider
+        # If provider_id specified but differs, log warning but use extracted provider
+        elif provider_id != maybe_provider:
+            logger.debug(
+                f"Provider mismatch in _compute_cost: model suggests '{maybe_provider}', "
+                f"but provider_id is '{provider_id}'. Using '{maybe_provider}' for pricing."
+            )
+            provider_id = maybe_provider
+
+    provider = (provider_id or "").strip().lower()
+
+    # Backwards-compatible default: treat missing provider_id as OpenAI.
+    is_openai_family = (not provider) or provider in ("openai", "azure_openai")
+
+    pricing = None
+    if is_openai_family:
+        pricing = OPENAI_PRICING.get(model_for_pricing)
+    elif provider == "deepseek":
+        try:
+            from multi_agent_dashboard.config import DEEPSEEK_PRICING
+            pricing = DEEPSEEK_PRICING.get(model_for_pricing)
+        except Exception:
+            pricing = None
+    if not pricing:
+        return 0.0, 0.0, 0.0
+
+    inp = input_tokens or 0
+    out = output_tokens or 0
+
+    input_cost = inp / 1_000_000.0 * pricing.get("input", 0.0)
+    output_cost = out / 1_000_000.0 * pricing.get("output", 0.0)
+    return input_cost + output_cost, input_cost, output_cost
+
+
+def _extract_provider_features_from_profile(profile: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Convert a LangChain model 'profile' into a compact provider_features mapping.
+
+    This is intentionally conservative: only expose a few well-known capability hints
+    used by the UI (structured_output, tool_calling, reasoning, image_inputs, max_input_tokens).
+    """
+
+    features: Dict[str, Any] = {}
+
+    if not isinstance(profile, dict):
+        return features
+
+    # Normalize profile keys to handle camelCase, snake_case, and lower-case variants.
+    def _normalize_key(k: str) -> str:
+        # Convert camelCase / PascalCase to snake_case
+        s = re.sub(r'(?<!^)(?=[A-Z])', '_', str(k)).lower()
+        s = s.replace('-', '_')
+        return s
+
+    normalized: Dict[str, Any] = {}
+    for k, v in profile.items():
+        try:
+            normalized[str(k)] = v
+        except Exception:
+            normalized[k] = v
+        try:
+            normalized[str(k).lower()] = v
+        except Exception:
+            pass
+        try:
+            nk = _normalize_key(str(k))
+            normalized[nk] = v
+        except Exception:
+            pass
+
+    # Structured output related hints
+    if normalized.get("structured_output") or normalized.get("structuredoutput") or normalized.get("reasoning_output") or normalized.get("structured"):
+        features["structured_output"] = True
+
+    # Tool calling hints
+    if normalized.get("tool_calling") or normalized.get("toolcalling") or normalized.get("tool_calls") or normalized.get("toolcalls") or normalized.get("tool_call"):
+        features["tool_calling"] = True
+
+    # Reasoning hints
+    if normalized.get("reasoning") or normalized.get("reasoning_output") or normalized.get("reasoningoutput") or normalized.get("supports_reasoning"):
+        features["reasoning"] = True
+
+    # Image / multimodal hints
+    if "image_inputs" in normalized or "imageinputs" in normalized:
+        try:
+            features["image_inputs"] = bool(normalized.get("image_inputs") or normalized.get("imageinputs"))
+        except Exception:
+            features["image_inputs"] = True
+
+    # Max input tokens (context window) — try variants
+    max_tokens_candidates = [
+        normalized.get("max_input_tokens"),
+        normalized.get("maxinputtokens"),
+        normalized.get("max_input_token"),
+        normalized.get("max_input"),
+        normalized.get("maxInputTokens"),
+    ]
+    for candidate in max_tokens_candidates:
+        if candidate is not None:
+            try:
+                features["max_input_tokens"] = int(candidate)
+            except Exception:
+                features["max_input_tokens"] = candidate
+            break
+
+    # If nothing obvious matched, expose a shallow copy for auditing
+    if not features and profile:
+        # Keep only a small subset to avoid clobbering DB with huge dicts
+        keys_to_copy = ["tool_calling", "structured_output", "reasoning", "image_inputs", "max_input_tokens", "maxInputTokens", "structuredOutput", "toolCalling"]
+        for k in keys_to_copy:
+            if k in profile:
+                features[k if "_" in k else _normalize_key(k)] = profile[k]
+
+    return features
