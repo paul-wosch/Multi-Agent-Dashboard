@@ -1,18 +1,15 @@
 # engine.py
 from __future__ import annotations
 
-import inspect
+
 import logging
-import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Callable
 
-from jsonschema import validate as jsonschema_validate, ValidationError  # type: ignore
 
-from multi_agent_dashboard.config import OPENAI_PRICING
 from multi_agent_dashboard.models import AgentSpec, AgentRuntime
 from multi_agent_dashboard.llm_client import LLMClient
-from multi_agent_dashboard.structured_schemas import resolve_schema_json
+
 
 logger = logging.getLogger(__name__)
 
@@ -21,14 +18,10 @@ logger = logging.getLogger(__name__)
 # Helper Functions
 # =========================
 
-from .utils import (
-    _extract_instrumentation_events,
-    _collect_content_blocks,
-    _structured_from_instrumentation,
-    _normalize_content_blocks,
-    _compute_cost,
-    _extract_provider_features_from_profile,
-)
+
+
+from .metrics_aggregator import MetricsAggregator
+from .progress_reporter import ProgressReporter
 
 from .agent_executor import AgentExecutor
 from .types import PipelineState
@@ -201,14 +194,14 @@ class MultiAgentEngine:
         last_output: Any = None
         last_agent: Optional[str] = None
         # ---- Progress bar: initialize ----
-        num_steps = len(steps)
-        total_ticks = max(1, 2 * num_steps)
+        progress_reporter = ProgressReporter(
+            on_progress=self.on_progress,
+            num_steps=len(steps),
+        )
 
         for i, agent_name in enumerate(steps):
             # ---- Progress bar: agent start ----
-            start_tick = 2 * i + 1
-            start_pct = int(100 * start_tick / total_ticks)
-            self._progress(start_pct, agent_name)
+            progress_reporter.start_agent(i, agent_name)
 
             agent = self.agents.get(agent_name)
             last_agent = agent_name
@@ -237,9 +230,7 @@ class MultiAgentEngine:
                 break
 
             # ---- Progress bar: agent end ----
-            end_tick = 2 * i + 2
-            end_pct = int(100 * end_tick / total_ticks)
-            self._progress(end_pct, agent_name)
+            progress_reporter.end_agent(i, agent_name)
 
         # After loop, synchronize engine instance attributes for compatibility
         self.state = pipeline_state.state
@@ -263,17 +254,8 @@ class MultiAgentEngine:
 
         final_output = self.state.get("final", last_output)
 
-        total_cost = sum(
-            (m.total_cost or 0.0) for m in pipeline_state.agent_metrics.values()
-        )
-        total_input_cost = sum(
-            (m.input_cost or 0.0) for m in pipeline_state.agent_metrics.values()
-        )
-        total_output_cost = sum(
-            (m.output_cost or 0.0) for m in pipeline_state.agent_metrics.values()
-        )
-        total_latency = sum(
-            (m.latency or 0.0) for m in pipeline_state.agent_metrics.values()
+        total_cost, total_input_cost, total_output_cost, total_latency = MetricsAggregator.aggregate_totals(
+            list(pipeline_state.agent_metrics.values())
         )
 
         return EngineResult(

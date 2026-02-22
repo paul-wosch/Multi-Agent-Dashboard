@@ -19,9 +19,11 @@ from .utils import (
     _collect_content_blocks,
     _structured_from_instrumentation,
     _normalize_content_blocks,
-    _compute_cost,
     _extract_provider_features_from_profile,
 )
+from .snapshot_builder import RunSnapshotBuilder
+from .schema_validator import SchemaValidator
+from .metrics_aggregator import MetricsAggregator
 from .types import AgentRunResult, PipelineState, RunMetrics
 
 logger = logging.getLogger(__name__)
@@ -162,117 +164,15 @@ class AgentExecutor:
                     t["reasoning_config"] = rc
             pipeline_state.tool_usages[agent_name] = tools
 
-        # Snapshot this agent's configuration for this particular run.
-        # This keeps agent config concerns out of tool_usages rows.
-        # Include both user-facing prompt_template and system_prompt_template so
-        # stored runs capture both templates used during execution.
-        # Also include a compact summary of content_blocks for auditing
-        content_blocks = metrics.get("content_blocks")
-        if not isinstance(content_blocks, list):
-            content_blocks = _collect_content_blocks(raw_metrics)
-
-        def _filter_extra_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-            # Exclude plain text blocks from extra_config_json to avoid duplicating agent_outputs.output
-            out: List[Dict[str, Any]] = []
-            for b in blocks:
-                if not isinstance(b, dict):
-                    continue
-                btype = (b.get("type") or "").lower()
-                if btype == "text":
-                    continue
-                out.append(b)
-            return out
-
-        content_blocks_summary = None
-        try:
-            if isinstance(content_blocks, list) and content_blocks:
-                filtered_blocks = _filter_extra_blocks(content_blocks)
-                content_blocks_summary = [
-                    {
-                        "type": (cb.get("type") if isinstance(cb, dict) else None),
-                        "name": (cb.get("name") if isinstance(cb, dict) else None),
-                        "id": (cb.get("id") if isinstance(cb, dict) else None),
-                    }
-                    for cb in filtered_blocks
-                ]
-        except Exception:
-            content_blocks_summary = None
-
-        # Normalize full content blocks for DB storage (best-effort)
-        content_blocks_full = _normalize_content_blocks(_filter_extra_blocks(content_blocks or []))
-
-        # Provider profile hints detected at runtime (from model or response)
-        detected_profile = metrics.get("detected_provider_profile") or raw_metrics.get("detected_provider_profile")
-        # Derive a compact provider_features mapping when the AgentSpec didn't provide any
-        spec_provider_features = getattr(agent.spec, "provider_features", None) or {}
-        provider_features_to_store = dict(spec_provider_features) if isinstance(spec_provider_features, dict) else (spec_provider_features or {})
-        if not provider_features_to_store and detected_profile:
-            derived = _extract_provider_features_from_profile(detected_profile)
-            if derived:
-                provider_features_to_store = derived
-            else:
-                # Keep a trace of the raw detected profile when we cannot derive concise features
-                provider_features_to_store = {"detected_profile_present": True}
-
-        # Capture instrumentation events & structured_response for auditing
-        instrumentation_events = _extract_instrumentation_events(raw_metrics)
-        structured_response = None
-        try:
-            if isinstance(raw_metrics, dict):
-                structured_response = raw_metrics.get("structured_response") or raw_metrics.get("structured")
-            if structured_response is None:
-                # check instrumentation events for structured payload
-                structured_response = _structured_from_instrumentation(raw_metrics)
-        except Exception:
-            structured_response = None
-
-        # Record whether instrumentation middleware was attached to the agent (if agent runtime set it)
-        instrumentation_attached_flag = bool(metrics.get("instrumentation_attached"))
-
-        extra_dict: Dict[str, Any] = {}
-        if content_blocks_summary is not None:
-            extra_dict["content_blocks_summary"] = content_blocks_summary
-        if content_blocks_full:
-            extra_dict["content_blocks"] = content_blocks_full
-        if detected_profile is not None:
-            extra_dict["detected_provider_profile"] = detected_profile
-        if instrumentation_events:
-            extra_dict["instrumentation_events"] = instrumentation_events
-        if structured_response is not None:
-            extra_dict["structured_response"] = structured_response
-        if instrumentation_attached_flag:
-            extra_dict["instrumentation_attached"] = True
-
-        agent_config = {
-            "model": agent.spec.model,
-            "prompt_template": agent.spec.prompt_template,
-            "system_prompt_template": agent.spec.system_prompt_template,
-            "role": agent.spec.role,
-            "input_vars": list(agent.spec.input_vars),
-            "output_vars": list(agent.spec.output_vars),
-            # High-level tools overview from AgentSpec.tools
-            "tools": agent.spec.tools or {},
-            # Low-level tools/reasoning config used in this run
-            "tools_config": tc,
-            "reasoning_effort": agent.spec.reasoning_effort,
-            "reasoning_summary": agent.spec.reasoning_summary,
-            "reasoning_config": rc,
-            # Reserved for future options such as temperature
-            "extra": extra_dict,
-            # Provider metadata (ensure runs capture which provider/model was used)
-            "provider_id": getattr(agent.spec, "provider_id", None),
-            "model_class": getattr(agent.spec, "model_class", None),
-            "endpoint": getattr(agent.spec, "endpoint", None),
-            "use_responses_api": bool(getattr(agent.spec, "use_responses_api", False)),
-            # Persist provider feature hints (explicit OR derived)
-            "provider_features": provider_features_to_store,
-            # Structured output configuration (provider-agnostic)
-            "structured_output_enabled": bool(getattr(agent.spec, "structured_output_enabled", False)),
-            "schema_json": getattr(agent.spec, "schema_json", None),
-            "schema_name": getattr(agent.spec, "schema_name", None),
-            "temperature": getattr(agent.spec, "temperature", None),
-            "strict_schema_validation": bool(self.strict_schema_validation),
-        }
+        # Build agent configuration snapshot
+        snapshot_builder = RunSnapshotBuilder()
+        agent_config = snapshot_builder.build(
+            agent_name=agent_name,
+            agent=agent,
+            metrics=metrics,
+            raw_metrics=raw_metrics,
+            strict_schema_validation=self.strict_schema_validation,
+        )
         pipeline_state.agent_configs[agent_name] = agent_config
 
         # -------------------------
@@ -299,7 +199,7 @@ class AgentExecutor:
 
         latency = metrics.get("latency")
 
-        total_cost, input_cost, output_cost = _compute_cost(
+        total_cost, input_cost, output_cost = MetricsAggregator.compute_cost(
             model=agent.spec.model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
@@ -389,61 +289,38 @@ class AgentExecutor:
             pipeline_state.state[agent_name] = raw_output
 
         # ---- Structured output validation (per-agent; global strict optionally exits) ----
-        def _schema_resolution_state() -> Dict[str, Any]:
-            cfg_schema_json = getattr(agent.spec, "schema_json", None)
-            cfg_schema_name = getattr(agent.spec, "schema_name", None)
-            configured = bool(cfg_schema_json) or bool(cfg_schema_name)
-            if not configured:
-                return {"status": "missing", "schema": None, "error": "Schema not configured"}
-            try:
-                schema = resolve_schema_json(cfg_schema_json, cfg_schema_name)
-            except Exception as e:
-                return {"status": "invalid_json", "schema": None, "error": str(e)}
-            if schema is None:
-                return {"status": "invalid_json", "schema": None, "error": "Schema could not be resolved"}
-            if isinstance(schema, dict) and len(schema) == 0:
-                return {"status": "empty", "schema": schema, "error": "Schema resolved to empty object"}
-            return {"status": "resolved", "schema": schema, "error": None}
+        validator = SchemaValidator()
+        status, reason = validator.validate(
+            agent_spec=agent.spec,
+            parsed=parsed,
+            raw_output=raw_output,
+            strict_schema_validation=self.strict_schema_validation,
+        )
+        validation_failed = False
+        if status == "ok":
+            pass  # validation succeeded
+        elif status in ("missing", "invalid_json", "empty"):
+            validation_failed = True
+            self._warn(f"[{agent_name}] schema validation skipped: {reason}", pipeline_state)
+        elif status == "validation_error":
+            validation_failed = True
+            self._warn(f"[{agent_name}] schema validation failed: {reason}", pipeline_state)
+        else:
+            # unexpected status; treat as failure
+            validation_failed = True
+            self._warn(f"[{agent_name}] schema validation unexpected status: {status}", pipeline_state)
 
-        if getattr(agent.spec, "structured_output_enabled", False):
-            res = _schema_resolution_state()
-            validation_failed = False
-            fail_reason = ""
-
-            if res["status"] != "resolved":
-                validation_failed = True
-                fail_reason = res.get("error") or res["status"]
-                self._warn(f"[{agent_name}] schema validation skipped: {fail_reason}", pipeline_state)
-            else:
-                schema = res["schema"]
-                candidate = parsed if isinstance(parsed, dict) else LLMClient.safe_json(raw_output) if isinstance(raw_output, str) else None
-                if candidate is None:
-                    validation_failed = True
-                    fail_reason = "No JSON payload to validate"
-                    self._warn(f"[{agent_name}] schema validation failed: {fail_reason}", pipeline_state)
-                else:
-                    try:
-                        jsonschema_validate(candidate, schema)
-                    except ValidationError as ve:
-                        validation_failed = True
-                        fail_reason = str(ve).splitlines()[0]
-                        self._warn(f"[{agent_name}] schema validation failed: {fail_reason}", pipeline_state)
-                    except Exception as ve:
-                        validation_failed = True
-                        fail_reason = str(ve)
-                        self._warn(f"[{agent_name}] schema validation failed: {fail_reason}", pipeline_state)
-
-            if validation_failed:
-                pipeline_state.agent_schema_validation_failed[agent_name] = True
-                if self.strict_schema_validation:
-                    pipeline_state.strict_schema_exit = True
-                    logger.error(
-                        "[%s] Strict schema validation triggered early exit; output preserved. Reason: %s",
-                        agent_name,
-                        fail_reason or "schema validation failed",
-                    )
-                    # Exit early: skip remaining agents, keep observability/costs
-                    # The caller (run_seq) will break the loop when pipeline_state.strict_schema_exit is True
+        if validation_failed:
+            pipeline_state.agent_schema_validation_failed[agent_name] = True
+            if self.strict_schema_validation:
+                pipeline_state.strict_schema_exit = True
+                logger.error(
+                    "[%s] Strict schema validation triggered early exit; output preserved. Reason: %s",
+                    agent_name,
+                    reason or "schema validation failed",
+                )
+                # Exit early: skip remaining agents, keep observability/costs
+                # The caller (run_seq) will break the loop when pipeline_state.strict_schema_exit is True
 
         # Build cost breakdown dict for AgentRunResult
         cost_breakdown = {
