@@ -3,23 +3,11 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from typing import Any, Dict, List, Optional
-from multi_agent_dashboard.config import OPENAI_PRICING, DEEPSEEK_PRICING
-from multi_agent_dashboard.shared.instrumentation import (
-    _extract_instrumentation_events,
-    _value_to_dict,
-    _collect_content_blocks,
-    _structured_from_instrumentation,
-    _collect_tool_calls,
-    _tool_usage_entry_from_payload,
-)
 
 logger = logging.getLogger(__name__)
-
-
 
 
 def _normalize_content_blocks(blocks: List[Any]) -> List[Dict[str, Any]]:
@@ -45,9 +33,6 @@ def _normalize_content_blocks(blocks: List[Any]) -> List[Dict[str, Any]]:
         except Exception:
             out_blocks.append({"__repr": repr(b)})
     return out_blocks
-
-
-
 
 
 def _extract_provider_features_from_profile(profile: Dict[str, Any]) -> Dict[str, Any]:

@@ -8,7 +8,8 @@ import os
 project_root = os.path.join(os.path.dirname(__file__), "../..")
 sys.path.insert(0, project_root)
 
-from src.multi_agent_dashboard.models import AgentRuntime, AgentSpec
+from src.multi_agent_dashboard.runtime import AgentRuntime
+from src.multi_agent_dashboard.models import AgentSpec
 from src.multi_agent_dashboard.llm_client import LLMClient
 from unittest.mock import Mock, patch, MagicMock
 import logging
@@ -78,7 +79,8 @@ def test_filters_merging():
     """Test that allowed_domains filters are merged into tool spec."""
     # We'll directly test the logic by calling convert_tools_for_provider and merging
     from src.multi_agent_dashboard.tool_integration.provider_tool_adapter import convert_tools_for_provider
-    from src.multi_agent_dashboard.models import AgentRuntime, AgentSpec
+    from src.multi_agent_dashboard.runtime import AgentRuntime
+    from src.multi_agent_dashboard.models import AgentSpec
     import json
     
     spec = AgentSpec(
