@@ -29,6 +29,7 @@ from .runtime.tool_converter import (
     prepare_tools_for_agent,
 )
 from .runtime.metrics_extractor import extract_tokens_from_raw, collect_tool_usage, extract_detected_provider_profile
+from .runtime.structured_output_detector import detect_structured_output, writeback_to_state
 
 
 # -------------------------
@@ -259,71 +260,9 @@ class AgentRuntime:
         # -------------------------
         # Structured output detection & local writeback (standalone runtime behavior)
         # -------------------------
-        parsed = None
-
-        # 1) Structured keys directly on raw
-        if isinstance(raw, dict):
-            if "structured" in raw:
-                parsed = raw.get("structured")
-            elif "structured_response" in raw:
-                parsed = raw.get("structured_response")
-            else:
-                # 2) Inspect instrumentation events
-                parsed = _structured_from_instrumentation(raw)
-
-            # 3) If still none, look through content blocks for structured payloads
-            if parsed is None and isinstance(content_blocks, list):
-                for cb in content_blocks:
-                    if not isinstance(cb, dict):
-                        continue
-                    ctype = (cb.get("type") or "").lower()
-                    # Typical structured response block names
-                    if ctype in ("structured", "structured_response", "structured_output"):
-                        parsed = cb.get("value") or cb.get("data") or cb.get("json") or cb.get("args") or cb.get("output")
-                        break
-                    # Another pattern: provider returns a tool call with args that represent structured payload
-                    if ctype in ("tool_call", "server_tool_call") and isinstance(cb.get("args"), dict):
-                        parsed = cb.get("args")
-                        break
-
-        # 4) Fallback: try best-effort JSON parsing of the textual output
         raw_output = response.text
-        if parsed is None and isinstance(raw_output, str):
-            try:
-                parsed = json.loads(raw_output) if raw_output.strip() else None
-            except Exception:
-                parsed = None
-
-        # Local writeback to the passed-in state dict (mirrors engine.run_seq writeback semantics)
-        if self.spec.output_vars:
-            if isinstance(parsed, dict):
-                # Warn about unexpected keys (do not raise; standalone runtime mirrors engine's warning behavior)
-                for key in parsed:
-                    if key not in self.spec.output_vars:
-                        logger.warning(
-                            "[%s] Unexpected output key '%s' (standalone runtime)", self.spec.name, key
-                        )
-                # Populate declared output vars
-                for var in self.spec.output_vars:
-                    if var in parsed:
-                        state[var] = parsed[var]
-                    else:
-                        logger.warning(
-                            "[%s] Declared output '%s' missing (standalone runtime)", self.spec.name, var
-                        )
-            else:
-                # Non-JSON output: if single output var, write the raw text; otherwise store under a raw key
-                if len(self.spec.output_vars) == 1:
-                    state[self.spec.output_vars[0]] = raw_output
-                else:
-                    key = f"{self.spec.name}__raw"
-                    state[key] = raw_output
-                    logger.warning(
-                        "[%s] Non-JSON output stored as '%s' (standalone runtime)", self.spec.name, key
-                    )
-        else:
-            # No declared output_vars: store whole raw output under agent name
-            state[self.spec.name] = raw_output
+        parsed = detect_structured_output(raw, content_blocks, raw_output)
+        writeback_to_state(self.spec, state, parsed, raw_output)
 
         return response.text
 
