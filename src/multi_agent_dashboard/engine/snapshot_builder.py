@@ -16,7 +16,7 @@ from .utils import (
     _normalize_content_blocks,
     _extract_provider_features_from_profile,
 )
-from multi_agent_dashboard.models import AgentRuntime
+from multi_agent_dashboard.runtime import AgentRuntime
 
 logger = logging.getLogger(__name__)
 

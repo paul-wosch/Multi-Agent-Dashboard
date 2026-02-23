@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Callable
 from jsonschema import validate as jsonschema_validate, ValidationError  # type: ignore
 
 from multi_agent_dashboard.llm_client import LLMClient
-from multi_agent_dashboard.models import AgentRuntime
+from multi_agent_dashboard.runtime import AgentRuntime
 from multi_agent_dashboard.structured_schemas import resolve_schema_json
 
 from ..shared.instrumentation import (

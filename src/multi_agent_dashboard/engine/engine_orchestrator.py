@@ -7,7 +7,8 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Callable
 
 
-from multi_agent_dashboard.models import AgentSpec, AgentRuntime
+from multi_agent_dashboard.models import AgentSpec
+from multi_agent_dashboard.runtime import AgentRuntime
 from multi_agent_dashboard.llm_client import LLMClient
 
 
