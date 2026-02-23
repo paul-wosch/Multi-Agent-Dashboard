@@ -6,7 +6,6 @@ from typing import List, Dict, Any, Optional
 
 from multi_agent_dashboard.utils import safe_format
 from multi_agent_dashboard.llm_client import LLMError
-from multi_agent_dashboard.tool_integration.provider_tool_adapter import convert_tools_for_provider
 from ..models import AgentSpec
 
 from ..shared.instrumentation import (
@@ -223,87 +222,5 @@ class AgentRuntime:
 
         return response.text
 
-    def _get_allowed_domains(self, state: Dict[str, Any]) -> Optional[List[str]]:
-        """
-        Extract allowed domains for this agent from state.
-        Returns list of domains or None if no restrictions.
-        """
-        # 1) Per-agent domains, if provided
-        per_agent = state.get("allowed_domains_by_agent")
-        if isinstance(per_agent, dict):
-            maybe = per_agent.get(self.spec.name)
-            if isinstance(maybe, list) and maybe:
-                return maybe
 
-        # 2) Global domains as fallback
-        global_domains = state.get("allowed_domains")
-        if isinstance(global_domains, list) and global_domains:
-            return global_domains
 
-        return None
-
-    def _build_tools_config(self, state: Dict[str, Any]) -> Dict[str, Any] | None:
-        """
-        Build tools/tool_choice/include args for OpenAI Responses API
-        based on agent spec tools and state (allowed domains).
-        Supports:
-          - state["allowed_domains_by_agent"][agent_name]
-          - state["allowed_domains"] as a global fallback.
-        """
-        tools_cfg = self.spec.tools or {}
-        if not tools_cfg.get("enabled"):
-            return None
-
-        enabled_tools = tools_cfg.get("tools") or []
-        tools_array: List[Dict[str, Any]] = []
-        allowed_domains = self._get_allowed_domains(state)
-
-        for tool_name in enabled_tools:
-            if tool_name == "web_search":
-                tool_obj: Dict[str, Any] = {"type": "web_search"}
-                if allowed_domains:
-                    tool_obj["filters"] = {"allowed_domains": allowed_domains}
-                tools_array.append(tool_obj)
-            elif tool_name == "web_search_ddg":
-                tool_obj: Dict[str, Any] = {
-                    "type": "function",
-                    "function": {"name": "duckduckgo_search"}
-                }
-                if allowed_domains:
-                    tool_obj["filters"] = {"allowed_domains": allowed_domains}
-                tools_array.append(tool_obj)
-            elif tool_name == "web_fetch":
-                tool_obj: Dict[str, Any] = {
-                    "type": "function",
-                    "function": {"name": "web_fetch"}
-                }
-                # web_fetch does not use domain filters
-                tools_array.append(tool_obj)
-            # Other tools could be added here later
-
-        if not tools_array:
-            return None
-
-        return {
-            "tools": tools_array,
-            "tool_choice": "required",
-            "include": ["web_search_call.action.sources"],
-        }
-
-    def _build_reasoning_config(self) -> Dict[str, Any] | None:
-        effort = self.spec.reasoning_effort
-        summary = self.spec.reasoning_summary
-
-        if not effort and not summary:
-            return None
-
-        reasoning: Dict[str, Any] = {}
-        if effort and effort != "none":
-            reasoning["effort"] = effort
-        # For summary, "none" means do not request it
-        if summary and summary != "none":
-            reasoning["summary"] = summary
-
-        if not reasoning:
-            return None
-        return reasoning
