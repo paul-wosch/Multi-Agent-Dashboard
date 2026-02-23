@@ -14,10 +14,12 @@ from multi_agent_dashboard.llm_client import LLMClient
 from multi_agent_dashboard.models import AgentRuntime
 from multi_agent_dashboard.structured_schemas import resolve_schema_json
 
-from .utils import (
+from ..shared.instrumentation import (
     _extract_instrumentation_events,
     _collect_content_blocks,
     _structured_from_instrumentation,
+)
+from .utils import (
     _normalize_content_blocks,
     _extract_provider_features_from_profile,
 )

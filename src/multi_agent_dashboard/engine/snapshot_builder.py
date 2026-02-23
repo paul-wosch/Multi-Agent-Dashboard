@@ -7,11 +7,13 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from .utils import (
+from ..shared.instrumentation import (
     _collect_content_blocks,
-    _normalize_content_blocks,
     _extract_instrumentation_events,
     _structured_from_instrumentation,
+)
+from .utils import (
+    _normalize_content_blocks,
     _extract_provider_features_from_profile,
 )
 from multi_agent_dashboard.models import AgentRuntime
