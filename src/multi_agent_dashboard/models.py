@@ -22,6 +22,12 @@ from .shared.instrumentation import (
     _tool_usage_entry_from_payload,
 )
 from .runtime.file_processor import process_files
+from .runtime.tool_converter import (
+    get_allowed_domains,
+    build_tools_config,
+    build_reasoning_config,
+    prepare_tools_for_agent,
+)
 
 
 # -------------------------
@@ -130,10 +136,10 @@ class AgentRuntime:
         # -------------------------
         # Call LLM client (LangChain-only path)
         # -------------------------
-        tc = self._build_tools_config(state)
-        rc = self._build_reasoning_config()
+        tc = build_tools_config(self.spec, state)
+        rc = build_reasoning_config(self.spec)
         # Extract allowed domains for tool instance configuration (runtime-only)
-        allowed_domains = self._get_allowed_domains(state)
+        allowed_domains = get_allowed_domains(self.spec, state)
         logger.debug("Agent %s tools_config=%r reasoning_config=%r", self.spec.name, tc, rc)
 
         response = None
@@ -141,75 +147,20 @@ class AgentRuntime:
         agent_obj_for_invoke = None
         langchain_tools = None
 
-        # Map configured tools to LangChain-compatible tool specs using provider adapter
-        try:
-            tools_cfg = self.spec.tools or {}
-            provider_id = (getattr(self.spec, "provider_id", None) or "").lower()
-            model = getattr(self.spec, "model", "")
-            use_responses_api = getattr(self.spec, "use_responses_api", False)
-            provider_features = getattr(self.spec, "provider_features", None)
-            
-            # Convert using provider adapter (supports OpenAI, DeepSeek, Ollama)
-            converted = convert_tools_for_provider(
-                tools_cfg,
-                provider_id,
-                model,
-                use_responses_api,
-                provider_features,
-            )
-            
-            langchain_tools = None
-            if "tools" in converted:
-                langchain_tools = converted["tools"]
-            elif "web_search_options" in converted:
-                # Completions API style - cannot be passed as tools list
-                # Log warning and treat as no tools (binding must happen elsewhere)
-                logger.debug(
-                    f"Agent {self.spec.name}: web_search_options returned by adapter; "
-                    f"binding will be handled by LLMClient."
-                )
-                langchain_tools = None
-            # else empty dict -> langchain_tools stays None
-            
-            # Merge allowed_domains filters from tc into tool specs
-            if langchain_tools and isinstance(tc, dict):
-                tools_arr = tc.get("tools")
-                if isinstance(tools_arr, list):
-                    for tc_tool in tools_arr:
-                        if isinstance(tc_tool, dict) and (tc_tool.get("type") == "web_search" or (tc_tool.get("type") == "function" and tc_tool.get("function", {}).get("name") == "duckduckgo_search")):
-                            filters = tc_tool.get("filters")
-                            if filters:
-                                # Find matching web_search tool in langchain_tools
-                                for lt in langchain_tools:
-                                    if isinstance(lt, dict):
-                                        # Match by type "web_search" or function name "web_search"/"duckduckgo_search"
-                                        if lt.get("type") == "web_search":
-                                            lt["filters"] = filters
-                                            break
-                                        func = lt.get("function", {})
-                                        if isinstance(func, dict) and func.get("name") in ("web_search", "duckduckgo_search"):
-                                            # For function tools, set default domain_filter in schema
-                                            # and keep filters as extra metadata for compatibility
-                                            lt["filters"] = filters
-                                            # Set default domain_filter in parameters if present
-                                            allowed_domains = filters.get("allowed_domains")
-                                            if allowed_domains and isinstance(allowed_domains, list):
-                                                params = func.get("parameters", {})
-                                                if isinstance(params, dict):
-                                                    props = params.get("properties", {})
-                                                    if isinstance(props, dict) and "domain_filter" in props:
-                                                        # Set default value in schema (optional, will be hidden)
-                                                        props["domain_filter"]["default"] = allowed_domains
-                                                        # Hide domain_filter from LLM by removing the property
-                                                        del props["domain_filter"]
-                                                        # Also remove from required list if present
-                                                        required = params.get("required")
-                                                        if isinstance(required, list) and "domain_filter" in required:
-                                                            required.remove("domain_filter")
-                                            break
-        except Exception:
-            logger.debug("Tool conversion failed for agent %s", self.spec.name, exc_info=True)
-            langchain_tools = None
+        # Extract provider-specific parameters for tool conversion
+        provider_id = (getattr(self.spec, "provider_id", None) or "").lower()
+        model = getattr(self.spec, "model", "")
+        use_responses_api = getattr(self.spec, "use_responses_api", False)
+        provider_features = getattr(self.spec, "provider_features", None)
+        
+        langchain_tools = prepare_tools_for_agent(
+            self.spec,
+            state,
+            provider_id,
+            model,
+            use_responses_api,
+            provider_features,
+        )
 
         # Enforce LangChain-only runtime: create_agent_for_spec + invoke_agent must be available.
         if not getattr(self.llm_client, "_langchain_available", False):
