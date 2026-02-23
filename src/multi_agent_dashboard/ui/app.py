@@ -127,13 +127,13 @@ st.markdown(
 # Heading and Metrics columns
 col_main, col_right = st.columns([7, 2])
 with col_main:
-    st.title("🧠 Multi-Agent Pipeline Dashboard")
+    st.title(":material/neurology: Multi Agent Dashboard")
     st.caption("Design pipelines, run tasks, inspect agent behavior, and manage agent snapshots.")
 
-    MODE_RUN = "▶️ Run Pipeline"
-    MODE_AGENTS = "🧠 Manage Agents"
-    MODE_HISTORY = "📜 History"
-    MODE_LOGS = "🪵 Logs"
+    MODE_RUN = ":material/play_arrow: Run Pipeline"
+    MODE_AGENTS = ":material/psychology: Manage Agents"
+    MODE_HISTORY = ":material/description: History"
+    MODE_LOGS = ":material/list: Logs"
 
     mode = st.radio(
         "Mode",

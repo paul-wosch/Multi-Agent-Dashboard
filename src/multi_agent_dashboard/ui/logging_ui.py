@@ -167,7 +167,7 @@ def attach_streamlit_log_handler(capacity: int = 500):
 # Logs-view renderer (extracted from app.py during Phase 4)
 # ------------------------------------------------------
 def render_logs_mode():
-    st.header("🪵 Application Logs")
+    st.header(":material/list: Application Logs")
 
     logs = st.session_state.get("_log_buffer", [])
 
@@ -216,7 +216,7 @@ def render_logs_mode():
 
         search = st.text_input("Search")
 
-        if st.button("🧹 Clear logs"):
+        if st.button("Clear logs", icon=":material/delete_sweep:"):
             logs.clear()
             st.rerun()
 
@@ -227,7 +227,8 @@ def render_logs_mode():
         )
 
         st.download_button(
-            label="⬇️ Download logs",
+            label="Download logs",
+            icon=":material/download:",
             data=export_text,
             file_name="application.log",
             mime="text/plain",

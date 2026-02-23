@@ -46,7 +46,7 @@ def _parse_endpoint_host(endpoint: str | None) -> str | None:
 
 
 def render_history_mode():
-    st.header("📜 Past Runs")
+    st.header(":material/description: Past Runs")
 
     runs = cached_load_runs()
 
@@ -348,6 +348,7 @@ def render_history_mode():
 
     st.download_button(
         "Download Run as JSON",
+        icon=":material/download:",
         data=__import__("json").dumps(export, indent=2),
         file_name=f"run_{run_id}.json",
         mime="application/json",

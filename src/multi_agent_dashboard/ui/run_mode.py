@@ -161,7 +161,7 @@ def render_run_sidebar() -> Tuple[
     file_error = False
 
     if requires_files:
-        with st.sidebar.expander("📎 Attach files", expanded=True):
+        with st.sidebar.expander(":material/attach_file: Attach files", expanded=True):
             # Determine the 'type' parameter for Streamlit's file_uploader:
             # - If ATTACHMENT_FILE_TYPES_RESTRICTED is True, pass the allowed extensions list.
             # - If False, pass None to allow any file extension.
@@ -218,7 +218,7 @@ def render_run_sidebar() -> Tuple[
     allowed_domains_by_agent: Dict[str, List[str]] = {}
 
     if any_web_search:
-        st.sidebar.markdown("### 🔎 Web Search Domains")
+        st.sidebar.markdown("### :material/search: Web Search Domains")
         st.sidebar.caption(
             "Optionally limit web search to specific domains for each agent "
             "(one domain per line). Leave empty to allow any domain."
@@ -250,7 +250,8 @@ def render_run_sidebar() -> Tuple[
     # Run button
     # -------------------------
     run_clicked = st.sidebar.button(
-        "🚀 Run Pipeline",
+        "Run Pipeline",
+        icon=":material/rocket_launch:",
         width="stretch",
     )
 
@@ -260,7 +261,7 @@ def render_run_sidebar() -> Tuple[
     with st.sidebar.expander("Advanced", expanded=False):
         name = st.text_input("Save as Pipeline")
 
-        if st.button("💾 Save Pipeline"):
+        if st.button("Save Pipeline", icon=":material/save:"):
             pipeline_name = name.strip()
             if not pipeline_name:
                 st.error("Pipeline name cannot be empty.")
@@ -286,7 +287,8 @@ def render_run_sidebar() -> Tuple[
             )
 
             st.download_button(
-                label="⬇️ Download Pipeline Agents (JSON)",
+                label="Download Pipeline Agents (JSON)",
+                icon=":material/download:",
                 data=agents_json,
                 file_name=f"{selected_pipeline}_agents.json",
                 mime="application/json",
@@ -311,7 +313,7 @@ def render_warnings(result: EngineResult):
     if not result.warnings:
         return
 
-    st.warning("⚠️ Pipeline Warnings")
+    st.warning("Pipeline Warnings", icon=":material/warning:")
     for w in result.warnings:
         st.markdown(f"- {w}")
 
@@ -350,7 +352,7 @@ def render_output_block(
                     st.json(parsed)
                     return
             except Exception:
-                st.warning("⚠️ Marked as JSON but failed to parse; falling back to text view.")
+                st.warning("Marked as JSON but failed to parse; falling back to text view.", icon=":material/warning:")
 
         # Try a best-effort parse: if the stored text looks like JSON, render it
         if isinstance(text, str):
@@ -392,7 +394,8 @@ def render_final_output(
     # Download button for the current run JSON export (if provided)
     if current_run_export is not None:
         st.download_button(
-            "⬇️ Download This Run as JSON",
+            "Download This Run as JSON",
+            icon=":material/download:",
             data=json.dumps(current_run_export, indent=2),
             file_name="current_run.json",
             mime="application/json",
@@ -404,7 +407,7 @@ def render_agent_outputs(result: EngineResult, steps: List[str]):
     for agent in steps:
         out = result.memory.get(agent, "")
         render_output_block(
-            f"🔹 {agent}",
+            f":material/circle: {agent}",
             out,
             key_prefix=f"run_agent_{agent}",
         )
@@ -559,13 +562,13 @@ def render_run_results(
 ):
     tabs = st.tabs(
         [
-            "🟢 Final Output",
-            "⚠️ Warnings",
-            "📁 Agent Outputs",
-            "🧩 Graph",
-            "🔍 Compare",
-            "💲 Cost & Latency",
-            "🛠 Tools & Advanced",
+            ":material/check_circle: Final Output",
+            ":material/warning: Warnings",
+            ":material/folder: Agent Outputs",
+            ":material/polyline: Graph",
+            ":material/search: Compare",
+            ":material/attach_money: Cost & Latency",
+            ":material/build: Tools & Advanced",
         ]
     )
 
@@ -706,7 +709,7 @@ def render_run_mode(strict_mode: bool = False, strict_schema_validation: bool = 
 
         # One final update when done
         progress_bar.progress(100)
-        progress_text.caption("Pipeline completed ✅")
+        progress_text.caption("Pipeline completed :material/check:")
         _update_timer()
 
         # -----------------------

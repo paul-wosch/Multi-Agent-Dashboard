@@ -70,7 +70,7 @@ def _compose_endpoint_from_host_port(host: str | None, port: str | None) -> str 
 
 
 def render_agent_editor():
-    st.header("🧠 Agent Editor")
+    st.header(":material/psychology: Agent Editor")
 
     # -------------------------
     # Load agents from DB
@@ -262,11 +262,11 @@ def render_agent_editor():
     # -------------------------
     tabs = st.tabs(
         [
-            "1️⃣ Basics",
-            "2️⃣ Prompt",
-            "3️⃣ Inputs / Outputs",
-            "⚙️ Advanced",
-            "📚 Snapshots",
+            ":material/looks_one: Basics",
+            ":material/looks_two: Prompt",
+            ":material/looks_3: Inputs / Outputs",
+            ":material/settings: Advanced",
+            ":material/library_books: Snapshots",
         ]
     )
 
@@ -446,7 +446,7 @@ def render_agent_editor():
             placeholder="Short note about this snapshot",
         )
 
-        if st.button("📸 Create Snapshot", key=f"create_snapshot_{state['name']}"):
+        if st.button("Create Snapshot", icon=":material/photo_camera:", key=f"create_snapshot_{state['name']}"):
             # Build snapshot dict based on current editor state
             snapshot = {
                 "model": state["model"],
@@ -504,7 +504,7 @@ def render_agent_editor():
 
         col_prune_a, col_prune_b = st.columns(2)
         with col_prune_a:
-            if st.button("🧹 Prune snapshots for this agent", key=f"prune_agent_{state['name']}"):
+            if st.button("Prune snapshots for this agent", icon=":material/delete_sweep:", key=f"prune_agent_{state['name']}"):
                 try:
                     deleted = get_agent_service().prune_snapshots(agent_name=state["name"], keep=int(keep_val))
                     invalidate_agents()
@@ -514,7 +514,7 @@ def render_agent_editor():
                     logger.exception("Failed to prune snapshots for %s", state["name"])
                     st.error("Failed to prune snapshots; check logs for details")
         with col_prune_b:
-            if st.button("🧹 Prune snapshots for all agents", key=f"prune_all_{state['name']}"):
+            if st.button("Prune snapshots for all agents", icon=":material/delete_sweep:", key=f"prune_all_{state['name']}"):
                 try:
                     deleted = get_agent_service().prune_snapshots(agent_name=None, keep=int(keep_val))
                     invalidate_agents()
@@ -812,7 +812,7 @@ def render_agent_editor():
     # Save button
     # -------------------------
     with col_a:
-        if st.button("💾 Save"):
+        if st.button("Save", icon=":material/save:"):
             old_name = state["selected_name"] if not is_new else ""
             new_name = state["name"].strip()
 
@@ -886,7 +886,7 @@ def render_agent_editor():
     # Duplicate button
     # -------------------------
     with col_b:
-        if not is_new and st.button("📄 Duplicate"):
+        if not is_new and st.button("Duplicate", icon=":material/content_copy:"):
             try:
                 get_agent_service().save_agent(
                     f"{state['name']}_copy",
@@ -924,7 +924,7 @@ def render_agent_editor():
     # Delete button
     # -------------------------
     with col_c:
-        if not is_new and st.button("🗑 Delete"):
+        if not is_new and st.button("Delete", icon=":material/delete:"):
             try:
                 get_agent_service().delete_agent_atomic(state["name"])
             except Exception:
