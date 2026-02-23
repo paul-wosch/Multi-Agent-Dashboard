@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 from .metrics_aggregator import MetricsAggregator
 from .progress_reporter import ProgressReporter
+from .state_manager import StateManager
 
 from .agent_executor import AgentExecutor
 from .types import PipelineState
@@ -84,11 +85,12 @@ class MultiAgentEngine:
         self.on_warning = on_warning
 
         self.agents: Dict[str, AgentRuntime] = {}
-        self.state: Dict[str, Any] = {}
-        self.memory: Dict[str, Any] = {}
-        self._warnings: List[str] = []
-        # metrics per agent for last run
-        self.agent_metrics: Dict[str, Dict[str, Any]] = {}
+        self.state_manager = StateManager()
+        # Backward‑compatibility aliases (properties could be added later if needed)
+        self.state = self.state_manager.state
+        self.memory = self.state_manager.memory
+        self._warnings = self.state_manager.warnings
+        self.agent_metrics = self.state_manager.agent_metrics
 
     # -------------------------
     # Agent Management
@@ -108,7 +110,7 @@ class MultiAgentEngine:
     # -------------------------
 
     def _warn(self, message: str) -> None:
-        self._warnings.append(message)
+        self.state_manager.add_warning(message)
         if self.on_warning:
             self.on_warning(message)
         else:
@@ -232,25 +234,8 @@ class MultiAgentEngine:
             # ---- Progress bar: agent end ----
             progress_reporter.end_agent(i, agent_name)
 
-        # After loop, synchronize engine instance attributes for compatibility
-        self.state = pipeline_state.state
-        self.memory = pipeline_state.memory
-        self._warnings = pipeline_state.warnings
-
-        # Convert RunMetrics to dict for EngineResult
-        agent_metrics_dict: Dict[str, Dict[str, Any]] = {}
-        for agent_name, metrics in pipeline_state.agent_metrics.items():
-            agent_metrics_dict[agent_name] = {
-                "model": metrics.model,
-                "input_tokens": metrics.input_tokens,
-                "output_tokens": metrics.output_tokens,
-                "latency": metrics.latency,
-                "input_cost": metrics.input_cost,
-                "output_cost": metrics.output_cost,
-                "cost": metrics.total_cost,
-            }
-
-        self.agent_metrics = agent_metrics_dict
+        # After loop, synchronize engine instance attributes via StateManager
+        self.state_manager.update_from_pipeline_state(pipeline_state)
 
         final_output = self.state.get("final", last_output)
 
