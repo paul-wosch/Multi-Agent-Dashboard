@@ -28,6 +28,7 @@ from .runtime.tool_converter import (
     build_reasoning_config,
     prepare_tools_for_agent,
 )
+from .runtime.metrics_extractor import extract_tokens_from_raw, collect_tool_usage, extract_detected_provider_profile
 
 
 # -------------------------
@@ -222,22 +223,7 @@ class AgentRuntime:
         raw = response.raw or {}
 
         # Fallback token extraction from raw usage metadata if TextResponse left them None
-        input_tokens = response.input_tokens
-        output_tokens = response.output_tokens
-        try:
-            if (input_tokens is None or output_tokens is None) and isinstance(raw, dict):
-                usage = raw.get("usage") or raw.get("usage_metadata") or {}
-                if isinstance(usage, dict):
-                    if input_tokens is None:
-                        input_tokens = usage.get("input_tokens") or usage.get("prompt_tokens") or usage.get("prompt_token_count")
-                        if input_tokens is None and isinstance(usage.get("token_usage"), dict):
-                            input_tokens = usage["token_usage"].get("prompt_tokens") or usage["token_usage"].get("input_tokens")
-                    if output_tokens is None:
-                        output_tokens = usage.get("output_tokens") or usage.get("completion_tokens") or usage.get("completion_token_count")
-                        if output_tokens is None and isinstance(usage.get("token_usage"), dict):
-                            output_tokens = usage["token_usage"].get("completion_tokens") or usage["token_usage"].get("output_tokens")
-        except Exception:
-            logger.debug("Token fallback extraction from raw usage failed for agent=%s", self.spec.name, exc_info=True)
+        input_tokens, output_tokens = extract_tokens_from_raw(raw, response)
 
         instrumentation_events = _extract_instrumentation_events(raw)
         content_blocks = _collect_content_blocks(raw)
@@ -259,48 +245,14 @@ class AgentRuntime:
         }
 
         # surface detected provider profile if available on the agent (propagated from LLMClient.create_agent_for_spec)
-        try:
-            detected = getattr(agent_obj_for_invoke, "_detected_provider_profile", None)
-            if detected is not None:
-                self.last_metrics["detected_provider_profile"] = detected
-            else:
-                # In some flows, the LLM client may have included this in response.raw
-                resp_detected = raw.get("detected_provider_profile")
-                if resp_detected is not None:
-                    self.last_metrics["detected_provider_profile"] = resp_detected
-        except Exception:
-            pass
+        detected = extract_detected_provider_profile(agent_obj_for_invoke, raw)
+        if detected is not None:
+            self.last_metrics["detected_provider_profile"] = detected
 
         # -------------------------
         # Tool usage extraction from content_blocks and legacy tool_calls
         # -------------------------
-        used_tools: List[Dict[str, Any]] = []
-        seen_tool_entries: set[tuple[str, str | None]] = set()
-
-        def _maybe_add_tool_entry(entry: Dict[str, Any] | None) -> None:
-            if not entry:
-                return
-            tool_type = entry.get("tool_type")
-            if not tool_type:
-                return
-            key = (tool_type, entry.get("id"))
-            if key in seen_tool_entries:
-                return
-            seen_tool_entries.add(key)
-            used_tools.append(entry)
-
-        TOOL_BLOCK_TYPES = {"tool_call", "server_tool_call", "web_search_call", "web_search", "function_call"}
-        for item in content_blocks:
-            if not isinstance(item, dict):
-                continue
-            btype = str(item.get("type") or "").lower()
-            if btype and btype not in TOOL_BLOCK_TYPES:
-                continue
-            _maybe_add_tool_entry(_tool_usage_entry_from_payload(item))
-
-        for call_payload in _collect_tool_calls(raw):
-            _maybe_add_tool_entry(_tool_usage_entry_from_payload(call_payload))
-
+        used_tools = collect_tool_usage(raw, content_blocks)
         if used_tools:
             self.last_metrics["tools"] = used_tools
 
