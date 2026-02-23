@@ -21,6 +21,7 @@ from .shared.instrumentation import (
     _collect_tool_calls,
     _tool_usage_entry_from_payload,
 )
+from .runtime.file_processor import process_files
 
 
 # -------------------------
@@ -92,25 +93,7 @@ class AgentRuntime:
         # Determine files to use
         # -------------------------
         all_files = files or state.get("files", [])
-        text_files: List[Dict[str, Any]] = []
-        binary_files: List[Dict[str, Any]] = []
-
-        for f in all_files:
-            mime = f.get("mime_type", "")
-            if mime in {"text/plain", "text/markdown", "text/csv", "application/json"}:
-                # Inline small text files
-                try:
-                    content = f["content"].decode("utf-8", errors="replace")
-                except Exception:
-                    content = ""
-                text_files.append({
-                    "filename": f["filename"],
-                    "mime_type": mime,
-                    "content": content.encode("utf-8"),
-                })
-            else:
-                # Treat as binary (PDF, images, audio)
-                binary_files.append(f)
+        text_files, binary_files = process_files(all_files)
 
         # -------------------------
         # Build prompt variables
