@@ -6,7 +6,7 @@ This document provides essential information for AI agents working in this codeb
 
 The Multi-Agent Dashboard is a Streamlit-based Python application for building, managing, and running multi-agent LLM pipelines. It features:
 
-- **UI-agnostic execution engine** (`engine.py`) for reusable agent orchestration
+- **UI-agnostic execution engine** (`engine/` package) for reusable agent orchestration
 - **Persistent SQLite storage** with automatic migrations
 - **Rich observability** (cost, latency, logs, history)
 - **Tool calling** with per-agent controls
@@ -98,7 +98,7 @@ python -m multi_agent_dashboard.db.infra.prune_snapshots my_agent my_custom.db -
 src/multi_agent_dashboard/
 ├── __init__.py
 ├── config.py              # Global constants, environment variables, pricing
-├── engine.py              # Core multi-agent orchestration engine
+├── engine/              # Modular multi-agent orchestration engine
 ├── llm_client/            # Modular LLM provider integration subpackage
 ├── models.py              # Data classes (AgentSpec, AgentRuntime, etc.)
 ├── structured_schemas.py  # JSON schema resolution for structured output
