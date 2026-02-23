@@ -6,7 +6,7 @@ This document provides essential information for AI agents working in this codeb
 
 The Multi-Agent Dashboard is a Streamlit-based Python application for building, managing, and running multi-agent LLM pipelines. It features:
 
-- **UI-agnostic execution engine** (`engine/` package) for reusable agent orchestration
+- **UI-agnostic execution engine** (`engine/` and `runtime/` packages) for reusable agent orchestration
 - **Persistent SQLite storage** with automatic migrations
 - **Rich observability** (cost, latency, logs, history)
 - **Tool calling** with per-agent controls
@@ -98,9 +98,19 @@ python -m multi_agent_dashboard.db.infra.prune_snapshots my_agent my_custom.db -
 src/multi_agent_dashboard/
 ├── __init__.py
 ├── config.py              # Global constants, environment variables, pricing
-├── engine/              # Modular multi-agent orchestration engine
+├── engine/                # Modular multi-agent orchestration engine
+├── runtime/               # AgentRuntime class and execution logic
+│   ├── __init__.py
+│   ├── agent_runtime.py   # Main AgentRuntime class
+│   ├── file_processor.py  # File type detection & content decoding
+│   ├── tool_converter.py  # Tool configuration merging & provider conversion
+│   ├── metrics_extractor.py # Token extraction & provider profile detection
+│   └── structured_output_detector.py # 4‑path detection & state writeback
+├── shared/                # Shared utilities between engine and runtime
+│   ├── __init__.py
+│   └── instrumentation.py # Helper functions for metrics/instrumentation extraction
 ├── llm_client/            # Modular LLM provider integration subpackage
-├── models.py              # Data classes (AgentSpec, AgentRuntime, etc.)
+├── models.py              # Data classes (AgentSpec, PipelineSpec) – pure dataclasses
 ├── structured_schemas.py  # JSON schema resolution for structured output
 ├── runtime_hooks.py       # Runtime hooks for agent execution
 ├── utils.py               # Utility functions (safe_format, etc.)
@@ -138,6 +148,7 @@ docs/                      # Project documentation
 ### Import Style
 
 - Use absolute imports within the package: `from multi_agent_dashboard.models import AgentSpec`
+- Import runtime classes from the runtime package: `from multi_agent_dashboard.runtime import AgentRuntime`
 - Keep Streamlit-specific code isolated in `ui/` modules
 - Engine and services remain UI-agnostic for reuse in scripts/tests
 
@@ -185,7 +196,7 @@ agents = dao.list_all()
 ### Type Hints
 
 - Use Python type hints extensively (`from typing import Dict, List, Optional, Any`)
-- Dataclasses are used for data containers (`AgentSpec`, `AgentRuntime`)
+- Dataclasses are used for data containers (`AgentSpec`, `PipelineSpec`)
 
 ### Code Style & Formatting
 
