@@ -19,7 +19,7 @@ import json
 import logging
 from typing import Dict, Any, List, Optional, Tuple
 
-from multi_agent_dashboard.provider_capabilities import supports_feature
+from multi_agent_dashboard.shared.provider_capabilities import supports_feature
 
 logger = logging.getLogger(__name__)
 

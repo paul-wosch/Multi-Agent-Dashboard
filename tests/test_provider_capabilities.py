@@ -4,7 +4,7 @@ Unit tests for provider_capabilities.py.
 import logging
 from unittest.mock import patch
 
-from multi_agent_dashboard.provider_capabilities import (
+from multi_agent_dashboard.shared.provider_capabilities import (
     get_capabilities,
     supports_feature,
     PROVIDER_DEFAULT_CAPABILITIES,
@@ -33,7 +33,7 @@ def test_get_capabilities_openai_with_model():
 
 def test_get_capabilities_openai_model_unknown():
     """Test get_capabilities for unknown model (should log debug)."""
-    with patch.object(logging.getLogger("multi_agent_dashboard.provider_capabilities"), "debug") as mock_debug:
+    with patch.object(logging.getLogger("multi_agent_dashboard.shared.provider_capabilities"), "debug") as mock_debug:
         caps = get_capabilities("openai", "unknown-model")
         # Should return provider defaults unchanged
         expected = PROVIDER_DEFAULT_CAPABILITIES["openai"]
@@ -87,7 +87,7 @@ def test_get_capabilities_ollama_tool_calling_model():
 
 def test_get_capabilities_unknown_provider():
     """Test get_capabilities for unknown provider returns empty dict."""
-    with patch.object(logging.getLogger("multi_agent_dashboard.provider_capabilities"), "debug") as mock_debug:
+    with patch.object(logging.getLogger("multi_agent_dashboard.shared.provider_capabilities"), "debug") as mock_debug:
         caps = get_capabilities("unknown_provider")
         assert caps == {}
         mock_debug.assert_called_once()
@@ -179,7 +179,7 @@ def test_supports_feature_int_capability():
 
 def test_module_exports():
     """Ensure expected symbols are exported."""
-    import multi_agent_dashboard.provider_capabilities as pc
+    import multi_agent_dashboard.shared.provider_capabilities as pc
     assert hasattr(pc, "get_capabilities")
     assert hasattr(pc, "supports_feature")
     assert hasattr(pc, "PROVIDER_DEFAULT_CAPABILITIES")

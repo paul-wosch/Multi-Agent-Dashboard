@@ -5,7 +5,7 @@ import logging
 import json
 from typing import Any, Dict, List, Optional, Callable, Tuple
 from dataclasses import dataclass
-from multi_agent_dashboard.structured_schemas import resolve_schema_json
+from multi_agent_dashboard.shared.structured_schemas import resolve_schema_json
 from multi_agent_dashboard.tool_integration.provider_tool_adapter import convert_tools_for_provider
 from multi_agent_dashboard.tool_integration.registry import get_registry
 from .provider_adapters import get_adapter
@@ -359,7 +359,7 @@ class LLMClient:
             files_processed = False
             # Try to use multimodal handler regardless of provider
             try:
-                from multi_agent_dashboard.multimodal_handler import prepare_multimodal_content
+                from multi_agent_dashboard.llm_client.multimodal import prepare_multimodal_content
             except ImportError:
                 logger.warning("multimodal_handler not available, falling back to text concatenation")
                 prepare_multimodal_content = None

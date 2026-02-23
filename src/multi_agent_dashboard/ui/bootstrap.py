@@ -16,7 +16,7 @@ from multi_agent_dashboard.ui.cache import cached_load_agents, get_agent_service
 from multi_agent_dashboard.ui.logging_ui import attach_streamlit_log_handler
 
 # Runtime hooks registration
-from multi_agent_dashboard import runtime_hooks
+from multi_agent_dashboard.shared import runtime_hooks
 
 
 # Default agent templates (moved from app.py for bootstrap)

@@ -11,7 +11,7 @@ from jsonschema import validate as jsonschema_validate, ValidationError  # type:
 
 from multi_agent_dashboard.llm_client import LLMClient
 from multi_agent_dashboard.models import AgentSpec
-from multi_agent_dashboard.structured_schemas import resolve_schema_json
+from multi_agent_dashboard.shared.structured_schemas import resolve_schema_json
 
 logger = logging.getLogger(__name__)
 

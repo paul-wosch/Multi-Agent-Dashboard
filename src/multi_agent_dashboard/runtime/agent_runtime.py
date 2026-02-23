@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 import logging
 from typing import List, Dict, Any, Optional
 
-from multi_agent_dashboard.utils import safe_format
+from .utils import safe_format
 from multi_agent_dashboard.llm_client import LLMError
 from ..models import AgentSpec
 

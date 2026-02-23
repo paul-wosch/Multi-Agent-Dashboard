@@ -82,9 +82,9 @@ def test_build_structured_output_adapter_with_schema_string():
 
 def test_build_structured_output_adapter_with_schema_name_only():
     """When schema_json is None but schema_name references a registered schema; Ollama returns raw schema."""
-    from multi_agent_dashboard.structured_schemas import register_schema, get_schema
+    from multi_agent_dashboard.shared.structured_schemas import register_schema, get_schema
     # Clean up registry before test
-    from multi_agent_dashboard.structured_schemas import SCHEMA_REGISTRY
+    from multi_agent_dashboard.shared.structured_schemas import SCHEMA_REGISTRY
     SCHEMA_REGISTRY.clear()
     
     schema = {"type": "object", "properties": {"foo": {"type": "string"}}}

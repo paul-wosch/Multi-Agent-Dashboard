@@ -13,7 +13,7 @@ import mimetypes
 from functools import lru_cache
 from typing import Dict, List, Any, Optional, Tuple, Union
 
-from multi_agent_dashboard import provider_capabilities
+from multi_agent_dashboard.shared import provider_capabilities
 
 # Optional PDF extraction library
 try:

@@ -46,7 +46,7 @@ def test_multimodal_fallback_when_no_vision():
     When provider does not support vision (image_inputs=False), multimodal_handler
     should return a concatenated string.
     """
-    with patch('multi_agent_dashboard.multimodal_handler.prepare_multimodal_content') as mock_prepare:
+    with patch('multi_agent_dashboard.llm_client.multimodal.prepare_multimodal_content') as mock_prepare:
         mock_prepare.return_value = (
             "Prompt\n\n--- FILE: test.txt ---\nHello",
             []
@@ -86,7 +86,7 @@ def test_legacy_concatenation_when_multimodal_handler_not_available():
     """
     import sys
     # Temporarily remove the module to cause ImportError
-    with patch.dict(sys.modules, {'multi_agent_dashboard.multimodal_handler': None}):
+    with patch.dict(sys.modules, {'multi_agent_dashboard.llm_client.multimodal': None}):
         client = LLMClient()
         # Mock agent (no provider_features needed)
         agent = Mock()

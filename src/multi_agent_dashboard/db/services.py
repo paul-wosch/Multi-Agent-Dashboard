@@ -8,7 +8,7 @@ from multi_agent_dashboard.db.pipelines import PipelineDAO, pipeline_dao
 from multi_agent_dashboard.config import AGENT_SNAPSHOTS_AUTO, AGENT_SNAPSHOT_PRUNE_KEEP
 
 # Runtime hooks (UI registers handlers; services call on changes)
-from multi_agent_dashboard import runtime_hooks
+from multi_agent_dashboard.shared import runtime_hooks
 
 # -----------------------
 # Run Service
