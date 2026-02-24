@@ -128,6 +128,8 @@ PROVIDER_MODELS_FILE = "provider_models.json"
 TEMPLATE_OLLAMA_MODELS_FILE = "template_ollama_models.json"
 LOCAL_OLLAMA_MODELS_FILE = "local_ollama_models.json"
 MODELS_DEV_URL = "https://models.dev/api.json"
+PROVIDER_DATA_PATH = (DATA_PATH.parent / PROVIDER_DATA_DIR).resolve()
+PROVIDER_DATA_PATH.mkdir(exist_ok=True)
 
 # Toggle whether the UI file uploader restricts selectable file extensions.
 # If True, the uploader will only allow extensions listed in ATTACHMENT_FILE_TYPES.
