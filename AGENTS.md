@@ -97,50 +97,82 @@ python -m multi_agent_dashboard.db.infra.prune_snapshots my_agent my_custom.db -
 ```
 src/multi_agent_dashboard/
 ├── __init__.py
-├── config.py              # Global constants, environment variables, pricing
-├── engine/                # Modular multi-agent orchestration engine
-├── runtime/               # AgentRuntime class and execution logic
+├── config.py                           # Global constants, environment variables, pricing
+├── engine/                             # Modular multi-agent orchestration engine
 │   ├── __init__.py
-│   ├── agent_runtime.py   # Main AgentRuntime class
-│   ├── file_processor.py  # File type detection & content decoding
-│   ├── tool_converter.py  # Tool configuration merging & provider conversion
-│   ├── metrics_extractor.py # Token extraction & provider profile detection
-│   └── structured_output_detector.py # 4‑path detection & state writeback
-├── shared/                # Shared utilities between engine and runtime
+│   ├── agent_executor.py
+│   ├── engine_orchestrator.py
+│   ├── metrics_aggregator.py
+│   ├── progress_reporter.py
+│   ├── schema_validator.py
+│   ├── snapshot_builder.py
+│   ├── state_manager.py
+│   ├── types.py
+│   └── utils.py
+├── runtime/                            # AgentRuntime class and execution logic
 │   ├── __init__.py
-│   └── instrumentation.py # Helper functions for metrics/instrumentation extraction
-├── llm_client/            # Modular LLM provider integration subpackage
-├── models.py              # Data classes (AgentSpec, PipelineSpec) – pure dataclasses
-├── structured_schemas.py  # JSON schema resolution for structured output
-├── runtime_hooks.py       # Runtime hooks for agent execution
-├── utils.py               # Utility functions (safe_format, etc.)
-├── tool_integration/      # Tool registry and provider-specific tool adapter
-├── ui/                    # Streamlit UI components
-│   ├── app.py             # Main Streamlit application
-│   ├── bootstrap.py       # UI initialization
+│   ├── agent_runtime.py                # Main AgentRuntime class
+│   ├── file_processor.py               # File type detection & content decoding
+│   ├── tool_converter.py               # Tool configuration merging & provider conversion
+│   ├── metrics_extractor.py            # Token extraction & provider profile detection
+│   ├── structured_output_detector.py   # 4‑path detection & state writeback
+│   └── utils.py                        # Utility functions (safe_format, etc.)
+├── shared/                             # Shared utilities between engine and runtime
+│   ├── __init__.py
+│   ├── instrumentation.py              # Helper functions for metrics/instrumentation extraction
+│   ├── provider_capabilities.py        # Static capability mapping for advisory use
+│   ├── runtime_hooks.py                # Runtime hooks for agent execution
+│   └── structured_schemas.py           # JSON schema resolution for structured output
+├── llm_client/                         # Modular LLM provider integration subpackage
+│   ├── __init__.py
+│   ├── chat_model_factory.py
+│   ├── core.py                         # Main LLMClient class
+│   ├── instrumentation.py
+│   ├── multimodal/                     # Multimodal file handling
+│   │   ├── __init__.py
+│   │   └── multimodal_handler.py
+│   ├── provider_adapters.py
+│   ├── response_normalizer.py
+│   ├── structured_output.py
+│   ├── tool_binder.py
+│   └── wrappers.py
+├── models.py                           # Data classes (AgentSpec, PipelineSpec) – pure dataclasses
+├── tool_integration/                   # Tool registry and provider-specific tool adapter
+│   ├── __init__.py
+│   ├── provider_tool_adapter.py
+│   ├── registry.py
+│   ├── web_fetch_tool.py
+│   └── search/                         # Web search tools
+│       ├── __init__.py
+│       ├── duckduckgo_base.py
+│       └── duckduckgo_tool.py
+├── ui/                                 # Streamlit UI components
+│   ├── app.py                          # Main Streamlit application
+│   ├── bootstrap.py                    # UI initialization
 │   ├── agent_editor_mode.py
 │   ├── history_mode.py
 │   ├── run_mode.py
 │   └── ...
-└── db/                    # Database layer
-    ├── infra/             # Low-level DB infrastructure
-    │   ├── schema.py      # Canonical SQL schema
+└── db/                                 # Database layer
+    ├── infra/                          # Low-level DB infrastructure
+    │   ├── schema.py                   # Canonical SQL schema
     │   ├── generate_migration.py
     │   ├── sqlite_rebuild.py
     │   ├── migrations.py
     │   └── ...
-    ├── agents.py          # Agent DAO
-    ├── pipelines.py       # Pipeline DAO
-    ├── runs.py            # Run DAO
-    └── services.py        # High-level transactional APIs
+    ├── db.py                           # Low-level DB connection and re‑exports
+    ├── agents.py                       # Agent DAO
+    ├── pipelines.py                    # Pipeline DAO
+    ├── runs.py                         # Run DAO
+    └── services.py                     # High-level transactional APIs
 
-data/                      # Runtime data (created on first run)
-├── db/                    # SQLite database files
-├── migrations/            # Generated migration SQL files
-└── logs/                  # Application logs
+data/                                   # Runtime data (created on first run)
+├── db/                                 # SQLite database files
+├── migrations/                         # Generated migration SQL files
+└── logs/                               # Application logs
 
-tests/                     # Unit tests (pytest)
-docs/                      # Project documentation
+tests/                                  # Unit tests (pytest)
+docs/                                   # Project documentation
 ```
 
 ## Code Patterns & Conventions
