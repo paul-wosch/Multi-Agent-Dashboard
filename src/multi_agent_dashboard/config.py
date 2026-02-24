@@ -121,6 +121,14 @@ DEEPSEEK_PRICING = {
     },
 }
 
+# Dynamic pricing & capabilities configuration
+PROVIDER_DATA_DIR = "data/provider_models"
+PROVIDER_MODELS_ALL_FILE = "provider_models_all.json"
+PROVIDER_MODELS_FILE = "provider_models.json"
+TEMPLATE_OLLAMA_MODELS_FILE = "template_ollama_models.json"
+LOCAL_OLLAMA_MODELS_FILE = "local_ollama_models.json"
+MODELS_DEV_URL = "https://models.dev/api.json"
+
 # Toggle whether the UI file uploader restricts selectable file extensions.
 # If True, the uploader will only allow extensions listed in ATTACHMENT_FILE_TYPES.
 # If False, the uploader will accept any file extension (Streamlit default: None).

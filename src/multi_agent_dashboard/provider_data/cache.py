@@ -1,0 +1,1 @@
+# Caching for provider model data
