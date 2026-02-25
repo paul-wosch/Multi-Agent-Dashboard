@@ -1,3 +1,8 @@
+# Downlaoded / user created provider data
+data/**/local_ollama_models.json
+data/**/provider_models.json
+data/**/provider_models_all.json
+
 # Diff patches
 *.patch
 
