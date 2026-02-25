@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 from typing import List, Optional, Tuple
 
-from multi_agent_dashboard.config import OPENAI_PRICING, DEEPSEEK_PRICING
+from multi_agent_dashboard.provider_data.loader import get_pricing_for_provider
 from .types import RunMetrics
 
 logger = logging.getLogger(__name__)
@@ -31,10 +31,9 @@ class MetricsAggregator:
 
         Prices are per 1M tokens.
 
-        This helper is provider-aware: for OpenAI-family providers
-        (provider_id is None/'' or 'openai' or 'azure_openai') it uses
-        OPENAI_PRICING. For other providers we currently return zero so that
-        non-OpenAI calls do not get mis-attributed OpenAI prices.
+        This helper is provider-aware: pricing data is loaded dynamically from
+        provider data files. Missing provider_id is treated as OpenAI.
+        Unknown provider/model combinations return zero pricing.
         """
         if input_tokens is None and output_tokens is None:
             return 0.0, 0.0, 0.0
@@ -57,23 +56,16 @@ class MetricsAggregator:
                 provider_id = maybe_provider
 
         provider = (provider_id or "").strip().lower()
-
-        # Backwards-compatible default: treat missing provider_id as OpenAI.
-        is_openai_family = (not provider) or provider in ("openai", "azure_openai")
-
-        pricing = None
-        if is_openai_family:
-            pricing = OPENAI_PRICING.get(model_for_pricing)
-        elif provider == "deepseek":
-            pricing = DEEPSEEK_PRICING.get(model_for_pricing)
-        if not pricing:
-            return 0.0, 0.0, 0.0
-
+        
+        input_price, output_price = get_pricing_for_provider(
+            provider, model_for_pricing
+        )
+        
         inp = input_tokens or 0
         out = output_tokens or 0
-
-        input_cost = inp / 1_000_000.0 * pricing.get("input", 0.0)
-        output_cost = out / 1_000_000.0 * pricing.get("output", 0.0)
+        
+        input_cost = inp / 1_000_000.0 * input_price
+        output_cost = out / 1_000_000.0 * output_price
         return input_cost + output_cost, input_cost, output_cost
 
     @staticmethod
