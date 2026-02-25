@@ -40,8 +40,6 @@ DEEPSEEK_API_KEY = _env.get("DEEPSEEK_API_KEY", None)
 
 LOG_LEVEL = _env.get("LOG_LEVEL", "INFO").upper()
 
-
-
 LOG_FILE = Path("application.log")
 LOG_FILE_PATH = (LOGS_PATH / LOG_FILE).resolve()
 
@@ -60,66 +58,6 @@ AGENT_SNAPSHOT_PRUNE_AUTO = False
 # Default number of snapshots to keep per agent when pruning.
 # You can override this value when calling the prune helper from the UI.
 AGENT_SNAPSHOT_PRUNE_KEEP = 100
-
-OPENAI_PRICING = {
-    # https://platform.openai.com/docs/pricing
-    # latest update: 251230
-    # price per 1M tokens
-    "gpt-3.5-turbo": {
-        "input": 0.50,
-        "output": 1.50,
-    },
-    "gpt-4o-mini": {
-        "input": 0.15,
-        "output": 0.60,
-    },
-    "gpt-4.1-mini": {
-        "input": 0.40,
-        "output": 1.60,
-    },
-    "gpt-4.1-nano": {
-        "input": 0.10,
-        "output": 0.40,
-    },
-    "gpt-5-mini": {
-        "input": 0.25,
-        "output": 2.00,
-    },
-    "gpt-5-nano": {
-        "input": 0.05,
-        "output": 0.40,
-    },
-    "gpt-5-search-api": {
-        "input": 1.25,
-        "output": 10.00,
-    },
-    "gpt-5.1": {
-        "input": 1.25,
-        "output": 10.00,
-    },
-    "gpt-5.1-codex-mini": {
-        "input": 0.25,
-        "output": 2.00,
-    },
-    "text-embedding-3-small": {
-        "input": 0.02,
-        "output": 0.00,
-    },
-    # Add more models as needed
-}
-
-# DeepSeek pricing (USD per 1M tokens)
-# Sources: https://api-docs.deepseek.com/quick_start/pricing (accessed 2026-01)
-DEEPSEEK_PRICING = {
-    "deepseek-chat": {
-        "input": 0.28,
-        "output": 0.42,
-    },
-    "deepseek-reasoner": {
-        "input": 0.28,
-        "output": 0.42,
-    },
-}
 
 # Dynamic pricing & capabilities configuration
 PROVIDER_DATA_DIR = "data/provider_models"
