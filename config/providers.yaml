@@ -1,0 +1,8 @@
+# Provider‑data file names
+provider_models_all_file: "provider_models_all.json"
+provider_models_file: "provider_models.json"
+template_ollama_models_file: "template_ollama_models.json"
+local_ollama_models_file: "local_ollama_models.json"
+
+# External data source
+models_dev_url: "https://models.dev/api.json"

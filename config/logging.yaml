@@ -1,0 +1,2 @@
+# Default log level (can still be overridden by LOG_LEVEL env)
+default_log_level: "INFO"

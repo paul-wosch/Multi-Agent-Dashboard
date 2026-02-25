@@ -1,0 +1,8 @@
+# Token caps per agent
+agent_input_cap: 40000
+agent_output_cap: 50000
+
+# Snapshot behavior
+agent_snapshots_auto: false
+agent_snapshot_prune_auto: false
+agent_snapshot_prune_keep: 100

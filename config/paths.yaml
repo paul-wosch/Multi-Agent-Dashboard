@@ -1,0 +1,11 @@
+# Directory names (relative to PROJECT_ROOT)
+data_dir: "data"
+db_dir: "db"
+migrations_dir: "migrations"
+logs_dir: "logs"
+
+# Default file names
+dotenv_file: ".env"
+log_file: "application.log"
+db_file: "multi_agent_runs.db"          # can be overridden by DB_FILE env
+provider_data_dir: "data/provider_models"
