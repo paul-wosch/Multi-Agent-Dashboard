@@ -40,6 +40,7 @@ def get_capabilities(
             f"No capability data for provider '{provider_id}'"
             + (f" model '{model}'" if model else "")
         )
+        return {}
     
     # Add derived keys for backward compatibility
     # vision maps to image_inputs

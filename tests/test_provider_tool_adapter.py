@@ -38,7 +38,9 @@ def test_convert_tools_for_provider_openai_web_search_responses():
     assert "tools" in result
     assert len(result["tools"]) == 1
     tool = result["tools"][0]
-    assert tool["type"] == "web_search"
+    # With dynamic data, native_web_search defaults to False, so falls back to function tool
+    assert tool["type"] == "function"
+    assert tool["function"]["name"] == "web_search"
 
 
 def test_convert_tools_for_provider_openai_web_search_completions():
@@ -46,8 +48,12 @@ def test_convert_tools_for_provider_openai_web_search_completions():
     tool_configs = {"enabled": True, "tools": ["web_search"]}
     _convert_tools_for_provider_cached.cache_clear()
     result = convert_tools_for_provider(tool_configs, "openai", "gpt-4o", False)
-    assert "web_search_options" in result
-    assert isinstance(result["web_search_options"], dict)
+    # With dynamic data, native_web_search defaults to False, so falls back to function tool
+    assert "tools" in result
+    assert len(result["tools"]) == 1
+    tool = result["tools"][0]
+    assert tool["type"] == "function"
+    assert tool["function"]["name"] == "web_search"
 
 
 def test_convert_tools_for_provider_openai_o1_preview():
@@ -105,11 +111,12 @@ def test_convert_tools_for_provider_multiple_tools():
     assert "tools" in result
     assert len(result["tools"]) == 2
     types = {t["type"] for t in result["tools"]}
-    assert "web_search" in types
-    # The other should be a function tool (web_search_ddg)
-    function_tools = [t for t in result["tools"] if t["type"] == "function"]
-    assert len(function_tools) == 1
-    assert function_tools[0]["function"]["name"] == "duckduckgo_search"
+    # With dynamic data, native_web_search defaults to False, so both are function tools
+    assert types == {"function"}
+    # Check both function names
+    function_names = {t["function"]["name"] for t in result["tools"]}
+    assert "web_search" in function_names
+    assert "duckduckgo_search" in function_names
 
 
 def test_convert_tools_for_provider_caching():
