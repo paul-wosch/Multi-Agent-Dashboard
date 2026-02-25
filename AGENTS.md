@@ -288,10 +288,6 @@ A database is considered “fresh” if no user‑created tables exist or existi
 | `DB_FILE` | Optional | Override default database filename |
 | `LOG_LEVEL` | Optional | Logging level (INFO, DEBUG, etc.) |
 
-### Pricing Tables
-
-Pricing per 1M tokens is loaded from external provider data (`provider_models.json`). The `_compute_cost` function uses these dynamic tables based on `provider_id` and model name. Local Ollama models default to `0.0` pricing.
-
 ### Agent Caps
 
 - `AGENT_INPUT_CAP = 40_000` – maximum input token count per agent
@@ -303,9 +299,11 @@ Color themes and emoji symbols are centralized in `config.UI_COLORS`. Avoid hard
 
 ## Dynamic Pricing & Capabilities
 
-The dashboard now loads provider model capabilities and pricing from external data (`provider_models.json`) with optional local overrides for Ollama models. This replaces the previous static capability mapping while maintaining advisory usage.
+- Provider model capabilities and pricing per 1M tokens are loaded from external data (`provider_models.json`) with optional local overrides for Ollama models.
+- The `_compute_cost` function uses these dynamic tables based on `provider_id` and model name.
+- Local Ollama models default to `0.0` pricing.
 
-### Customizing Local Ollama Models
+### Customizing Local Ollama Models Data (Capabilities & pricing)
 
 1. Copy the template file to create your local configuration:
    ```bash
@@ -324,6 +322,34 @@ To refresh the external provider data (OpenAI, DeepSeek, etc.):
 - Delete `data/provider_models/provider_models.json` to re‑extract the canonical data from the downloaded file.
 
 Local Ollama models remain unaffected by these updates.
+
+### File‑State Management
+
+The system maintains two primary JSON files in `data/provider_models/`:
+
+- `provider_models_all.json` – raw downloaded data from the upstream source (`https://models.dev/api.json`)
+- `provider_models.json` – filtered copy containing only the supported providers (`openai`, `deepseek`) with all fields preserved
+- **Composite cache keys**: Internal lookups use `"provider|model"` as unique identifier to disambiguate duplicate model IDs across providers.
+
+**Initialization flow** (first run):
+1. Both files missing → download `api.json`, save as `provider_models_all.json`
+2. Extract filtered copy → `provider_models.json`
+3. Load `provider_models.json` into memory cache
+
+**Update flow** (manual):
+- Delete `provider_models_all.json` → re‑download on next run
+- Delete `provider_models.json` → re‑extract from `provider_models_all.json`
+- Modify `provider_models.json` manually → changes persist (file never overwritten)
+
+**Local Ollama files**:
+- `template_ollama_models.json` – static template (git‑tracked)
+- `local_ollama_models.json` – user‑customizable (git‑ignored)
+Local entries take precedence over external definitions for the same `ollama|model` composite keys.
+
+**Error recovery**:
+- Network failure → log ERROR, keep existing files
+- Malformed JSON → log ERROR, fallback to existing `provider_models.json` if present
+- Missing fields → log WARNING, treat missing capability as `False`, missing pricing as `0.0`
 
 ### Advisory Usage
 
