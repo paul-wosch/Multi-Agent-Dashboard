@@ -10,7 +10,7 @@ The Multi-Agent Dashboard is a Streamlit-based Python application for building, 
 - **Persistent SQLite storage** with automatic migrations
 - **Rich observability** (cost, latency, logs, history)
 - **Tool calling** with per-agent controls
-- **Provider-agnostic LLM integration** (OpenAI, DeepSeek, Ollama) via provider-specific LangChain implementations with static capability mapping
+- **Provider-agnostic LLM integration** (OpenAI, DeepSeek, Ollama) via provider-specific LangChain implementations with dynamic capability data
 - **Structured output** with JSON schema validation
 
 The codebase follows a clean separation between UI (`src/multi_agent_dashboard/ui/`) and engine (`src/multi_agent_dashboard/`). Database access is layered with low-level infra (`db/infra/`), DAOs (`db/*.py`), and high-level services (`db/services.py`).
@@ -120,7 +120,7 @@ src/multi_agent_dashboard/
 ├── shared/                             # Shared utilities between engine and runtime
 │   ├── __init__.py
 │   ├── instrumentation.py              # Helper functions for metrics/instrumentation extraction
-│   ├── provider_capabilities.py        # Static capability mapping for advisory use
+│   ├── provider_capabilities.py        # Legacy module (deprecated) - capabilities now loaded from dynamic data
 │   ├── runtime_hooks.py                # Runtime hooks for agent execution
 │   └── structured_schemas.py           # JSON schema resolution for structured output
 ├── llm_client/                         # Modular LLM provider integration subpackage
@@ -169,6 +169,7 @@ src/multi_agent_dashboard/
 data/                                   # Runtime data (created on first run)
 ├── db/                                 # SQLite database files
 ├── migrations/                         # Generated migration SQL files
+├── provider_models/                    # Dynamic provider capabilities & pricing data
 └── logs/                               # Application logs
 
 tests/                                  # Unit tests (pytest)
@@ -197,14 +198,14 @@ docs/                                   # Project documentation
 - Supported providers: `openai`, `deepseek`, `ollama`
 - Provider‑specific logic is encapsulated in `_build_structured_output_adapter`, `_build_input_with_files`, and `_compute_cost`
 - Structured output uses provider‑specific methods: OpenAI JSON Schema, DeepSeek function‑calling/json‑mode, Ollama raw schema
-- Tool calling integration uses provider‑specific tool adapter with static capability mapping (see `provider_capabilities.py`)
+- Tool calling integration uses provider‑specific tool adapter with dynamic capability data (loaded from `provider_models.json` and local Ollama overrides)
 - File handling uses provider‑specific message building for multimodal inputs (images, PDFs, text)
 - Token accounting and pricing are preserved across all providers
 
 **Key provider‑aware functions:**
 - `LLMClient._build_structured_output_adapter()` – creates provider‑specific response format
 - `LLMClient._build_input_with_files()` – constructs provider‑specific message parts for file uploads
-- `engine._compute_cost()` – uses `OPENAI_PRICING`/`DEEPSEEK_PRICING` from config
+- `engine._compute_cost()` – uses dynamic pricing data from provider models
 
 ### Database Access Pattern
 
@@ -289,7 +290,7 @@ A database is considered “fresh” if no user‑created tables exist or existi
 
 ### Pricing Tables
 
-Pricing per 1M tokens is defined in `config.py` (`OPENAI_PRICING`, `DEEPSEEK_PRICING`). The `_compute_cost` function uses these tables based on `provider_id`.
+Pricing per 1M tokens is loaded from external provider data (`provider_models.json`). The `_compute_cost` function uses these dynamic tables based on `provider_id` and model name. Local Ollama models default to `0.0` pricing.
 
 ### Agent Caps
 
@@ -299,6 +300,34 @@ Pricing per 1M tokens is defined in `config.py` (`OPENAI_PRICING`, `DEEPSEEK_PRI
 ### UI Colors & Symbols
 
 Color themes and emoji symbols are centralized in `config.UI_COLORS`. Avoid hardcoding colors/symbols in UI components.
+
+## Dynamic Pricing & Capabilities
+
+The dashboard now loads provider model capabilities and pricing from external data (`provider_models.json`) with optional local overrides for Ollama models. This replaces the previous static capability mapping while maintaining advisory usage.
+
+### Customizing Local Ollama Models
+
+1. Copy the template file to create your local configuration:
+   ```bash
+   cp data/provider_models/template_ollama_models.json data/provider_models/local_ollama_models.json
+   ```
+2. Edit `local_ollama_models.json` to add, remove, or modify Ollama model entries.
+3. Restart the application – local models are automatically loaded and take precedence over external definitions for the same `ollama|model` composite keys.
+
+**Note**: The local file is git‑ignored; your customizations persist across updates.
+
+### Manual Data Updates
+
+To refresh the external provider data (OpenAI, DeepSeek, etc.):
+
+- Delete `data/provider_models/provider_models_all.json` to trigger a fresh download from the upstream source.
+- Delete `data/provider_models/provider_models.json` to re‑extract the canonical data from the downloaded file.
+
+Local Ollama models remain unaffected by these updates.
+
+### Advisory Usage
+
+Capability data is used **advisory only** – the primary source of truth for agent features is the actual agent configuration. The dynamic data provides up‑to‑date defaults and warnings but never overrides user configuration.
 
 ## Gotchas & Known Issues
 
@@ -322,24 +351,24 @@ Color themes and emoji symbols are centralized in `config.UI_COLORS`. Avoid hard
 
 10. **Provider features normalization** – Provider features (`provider_features`) are normalized to keys `tool_calling`, `structured_output`, `reasoning`, `image_inputs`, `max_input_tokens`. The engine also accepts variations (`tool_calls`, `toolcalling`, `toolCalling`, etc.) but stores them normalized.
 
-11. **Provider capability mapping** – Provider capabilities (tool calling, structured output, vision, etc.) are defined statically in `provider_capabilities.py` for each provider/model combination as an advisory reference; agent configuration (`provider_features`) remains the primary source of truth.
+11. **Provider capability mapping** – Provider capabilities (tool calling, structured output, vision, etc.) are loaded dynamically from `provider_models.json` and local Ollama overrides for each provider/model combination as an advisory reference; agent configuration (`provider_features`) remains the primary source of truth.
 
-12. **Multimodal file handling** – File uploads are processed by provider‑specific message building in `LLMClient._build_input_with_files()`. Images are base64‑encoded for vision‑capable providers (OpenAI). Text files are decoded as UTF‑8 text parts. PDFs are extracted as text if `pypdf` is installed. If provider does not support vision, files are concatenated as plain text with headers. **Vision/tool support detection uses static capability mapping as advisory; actual feature binding respects agent configuration.**
+12. **Multimodal file handling** – File uploads are processed by provider‑specific message building in `LLMClient._build_input_with_files()`. Images are base64‑encoded for vision‑capable providers (OpenAI). Text files are decoded as UTF‑8 text parts. PDFs are extracted as text if `pypdf` is installed. If provider does not support vision, files are concatenated as plain text with headers. **Vision/tool support detection uses dynamic capability data as advisory; actual feature binding respects agent configuration.**
 
-13. **Tool calling adapter** – Tool integration uses provider‑specific tool adapter (`provider_tool_adapter.py`) that respects exact tool configuration from `AgentSpec.tools`; static capability mapping is used only for warnings and UI defaults (no automatic conversions).
+13. **Tool calling adapter** – Tool integration uses provider‑specific tool adapter (`provider_tool_adapter.py`) that respects exact tool configuration from `AgentSpec.tools`; dynamic capability data is used only for warnings and UI defaults (no automatic conversions).
 
 14. **Structured output methods** – Structured output uses provider‑specific methods: OpenAI JSON Schema, DeepSeek function‑calling/json‑mode, Ollama raw schema. The appropriate method is selected via provider detection; capability mapping provides advisory hints.
 
 ## Provider-Specific LangChain Architecture
 
-**Architecture**: The codebase uses provider‑specific LangChain implementations with **advisory** capability mapping. This simplifies the codebase, eliminates dynamic detection issues, and provides full control over supported providers (OpenAI, DeepSeek, Ollama).
+**Architecture**: The codebase uses provider‑specific LangChain implementations with **advisory** capability data loaded from external sources and local overrides. This simplifies the codebase, eliminates static mapping maintenance, and provides full control over supported providers (OpenAI, DeepSeek, Ollama).
 
 **High‑Level Directives**:
 
-1. **Advisory Capability Mapping**:
-   - Provider capabilities (tool calling, structured output, vision, etc.) are defined statically in `provider_capabilities.py` for each provider/model combination as an advisory reference.
+1. **Advisory Capability Data**:
+   - Provider capabilities (tool calling, structured output, vision, etc.) are loaded from `provider_models.json` (external data) with optional local Ollama overrides in `local_ollama_models.json`.
    - Use `get_capabilities(provider_id, model)` and `supports_feature(provider_id, feature, model)` for advisory detection (warnings, UI defaults).
-   - Agent configuration (`provider_features`) remains the primary source of truth; static mapping does not override user choices.
+   - Agent configuration (`provider_features`) remains the primary source of truth; dynamic data does not override user choices.
 
 2. **Provider‑Specific Implementations**:
    - Use LangChain’s native provider libraries (`langchain‑openai`, `langchain‑deepseek`, `langchain‑ollama`) directly.
@@ -352,13 +381,13 @@ Color themes and emoji symbols are centralized in `config.UI_COLORS`. Avoid hard
    - All code paths use provider‑specific LangChain implementations.
 
 4. **Advisory Capability Detection**:
-   - Feature detection uses static mapping for advisory purposes (warnings, UI defaults); actual feature binding respects agent configuration.
-   - Model‑specific capabilities (e.g., Ollama `llava` vs `llama3`) are explicitly defined in the capability map for advisory guidance.
+   - Feature detection uses dynamic capability data for advisory purposes (warnings, UI defaults); actual feature binding respects agent configuration.
+   - Model‑specific capabilities (e.g., Ollama `llava` vs `llama3`) are loaded from external data or local overrides for advisory guidance.
    - Any dynamic capability detection must be based on provider APIs, not heuristics or hardcoded model names.
    - Never implement prompt‑based tool‑calling emulation; tool invocation via prompts remains the user's responsibility via manual agent prompt configuration.
 
 5. **Adding New Providers**:
-   - To add a new provider, define its capabilities in `provider_capabilities.py` and implement provider‑specific adapters for tools, structured output, and file handling.
+   - To add a new provider, ensure its capabilities are included in the external provider data (`provider_models.json`) and implement provider‑specific adapters for tools, structured output, and file handling.
    - New providers integrate directly with LangChain’s native libraries.
 
 6. **Modular Design Approach**:
@@ -366,7 +395,7 @@ Color themes and emoji symbols are centralized in `config.UI_COLORS`. Avoid hard
    - Avoid deep nesting of provider‑specific branches; create focused modules (e.g., `tool_integration/provider_tool_adapter.py`, `multimodal_handler.py`).
    - Keep modules focused on single responsibility and preserve existing interfaces while refactoring internals.
 
-**Key Benefit**: Adding a new provider requires defining capabilities and implementing provider‑specific adapters, providing full control over provider integration.
+**Key Benefit**: Adding a new provider requires ensuring its capabilities are included in the external data and implementing provider‑specific adapters, providing full control over provider integration without maintaining static maps.
 
 ## Further Reading
 
