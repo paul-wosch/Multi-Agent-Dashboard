@@ -3,8 +3,6 @@
 from .provider_capabilities import (
     get_capabilities,
     supports_feature,
-    PROVIDER_DEFAULT_CAPABILITIES,
-    MODEL_CAPABILITIES,
 )
 
 from .runtime_hooks import (
@@ -24,8 +22,6 @@ from .structured_schemas import (
 __all__ = [
     "get_capabilities",
     "supports_feature",
-    "PROVIDER_DEFAULT_CAPABILITIES",
-    "MODEL_CAPABILITIES",
     "register_agent_change_handlers",
     "clear_agent_change_handlers",
     "on_agent_change",
