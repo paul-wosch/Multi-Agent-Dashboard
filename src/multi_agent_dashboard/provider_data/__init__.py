@@ -8,6 +8,8 @@ from .loader import (
     get_all_models,
     get_capabilities,
     get_pricing,
+    get_capabilities_for_provider,
+    get_pricing_for_provider,
 )
 
 __all__ = [
@@ -17,4 +19,6 @@ __all__ = [
     "get_all_models",
     "get_capabilities",
     "get_pricing",
+    "get_capabilities_for_provider",
+    "get_pricing_for_provider",
 ]

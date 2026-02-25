@@ -8,7 +8,7 @@ import logging
 import threading
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Tuple, Any, Optional
 
 from multi_agent_dashboard.config import (
     DATA_PATH,
@@ -83,7 +83,7 @@ def _ensure_data_files() -> Path:
 def load_provider_models() -> Dict[str, ProviderModel]:
     """
     Load provider_models.json, parse each model into a ProviderModel,
-    and return a dictionary mapping model_id → ProviderModel.
+    and return a dictionary mapping composite key 'provider|model_id' → ProviderModel.
 
     This function does not cache; the caller is responsible for caching.
     """
@@ -120,7 +120,7 @@ def load_provider_models() -> Dict[str, ProviderModel]:
                     model_id=model_id,
                     raw=raw_model,
                 )
-                cache[model_id] = provider_model
+                cache[f"{provider_key}|{model_id}"] = provider_model
             except Exception as e:
                 logger.error(
                     f"Failed to parse model '{model_id}' from provider "
@@ -137,11 +137,42 @@ def get_all_models() -> List[str]:
     """
     Return a list of all known model IDs.
 
-    The list is sorted alphabetically.
+    The list is sorted alphabetically. Duplicate model IDs across providers
+    are deduplicated (only the first occurrence is kept).
     """
     from .cache import get_model_cache
     cache = get_model_cache()
-    return sorted(cache.keys())
+    model_ids = set()
+    for composite_key in cache.keys():
+        # Split 'provider|model_id', keep the model_id part
+        if "|" in composite_key:
+            _, model_id = composite_key.split("|", 1)
+        else:
+            # fallback for backward compatibility (should not happen)
+            model_id = composite_key
+        model_ids.add(model_id)
+    return sorted(model_ids)
+
+
+def _find_provider_models(model_id: str) -> List["ProviderModel"]:
+    """
+    Find all ProviderModel instances matching a given model_id.
+
+    Returns a (possibly empty) list of ProviderModel objects.
+    """
+    from .cache import get_model_cache
+    from .schemas import ProviderModel
+    cache = get_model_cache()
+    matches = []
+    for composite_key, provider_model in cache.items():
+        # Split composite key 'provider|model_id'
+        if "|" in composite_key:
+            _, key_model_id = composite_key.split("|", 1)
+        else:
+            key_model_id = composite_key
+        if key_model_id == model_id:
+            matches.append(provider_model)
+    return matches
 
 
 @lru_cache(maxsize=None)  # unlimited cache per model
@@ -152,13 +183,16 @@ def get_capabilities(model_id: str) -> Dict[str, Any]:
     If the model is unknown, logs a WARNING and returns an empty dictionary
     (all capabilities default to False, no token limits, empty knowledge).
     """
-    from .cache import get_model_cache
-    cache = get_model_cache()
-    provider_model = cache.get(model_id)
-    if provider_model is None:
+    matches = _find_provider_models(model_id)
+    if not matches:
         logger.warning(f"Unknown model '{model_id}', returning empty capabilities")
         return {}
-    return provider_model.to_capability_dict()
+    if len(matches) > 1:
+        logger.warning(
+            f"Ambiguous model ID '{model_id}' matches {len(matches)} providers: "
+            f"{[m.provider for m in matches]}. Using first match."
+        )
+    return matches[0].to_capability_dict()
 
 
 @lru_cache(maxsize=None)
@@ -168,11 +202,58 @@ def get_pricing(model_id: str) -> Tuple[float, float]:
 
     If the model is unknown, logs a WARNING and returns (0.0, 0.0).
     """
+    matches = _find_provider_models(model_id)
+    if not matches:
+        logger.warning(f"Unknown model '{model_id}', returning zero pricing")
+        return (0.0, 0.0)
+    if len(matches) > 1:
+        logger.warning(
+            f"Ambiguous model ID '{model_id}' matches {len(matches)} providers: "
+            f"{[m.provider for m in matches]}. Using first match."
+        )
+    return (matches[0].input_price, matches[0].output_price)
+
+
+def get_capabilities_for_provider(provider_id: str, model: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Return capability dictionary for a specific provider and model.
+
+    If model is None, returns an empty dictionary (no provider‑level defaults).
+    If the provider/model combination is unknown, logs a WARNING and returns empty dict.
+    """
+    if model is None:
+        return {}
+    composite_key = f"{provider_id}|{model}"
     from .cache import get_model_cache
     cache = get_model_cache()
-    provider_model = cache.get(model_id)
+    provider_model = cache.get(composite_key)
     if provider_model is None:
-        logger.warning(f"Unknown model '{model_id}', returning zero pricing")
+        logger.warning(
+            f"Unknown provider|model combination '{provider_id}|{model}', "
+            "returning empty capabilities"
+        )
+        return {}
+    return provider_model.to_capability_dict()
+
+
+def get_pricing_for_provider(provider_id: str, model: Optional[str] = None) -> Tuple[float, float]:
+    """
+    Return (input_price, output_price) for a specific provider and model.
+
+    If model is None, returns (0.0, 0.0) (no provider‑level defaults).
+    If the provider/model combination is unknown, logs a WARNING and returns (0.0, 0.0).
+    """
+    if model is None:
+        return (0.0, 0.0)
+    composite_key = f"{provider_id}|{model}"
+    from .cache import get_model_cache
+    cache = get_model_cache()
+    provider_model = cache.get(composite_key)
+    if provider_model is None:
+        logger.warning(
+            f"Unknown provider|model combination '{provider_id}|{model}', "
+            "returning zero pricing"
+        )
         return (0.0, 0.0)
     return (provider_model.input_price, provider_model.output_price)
 
@@ -185,4 +266,6 @@ __all__ = [
     "get_all_models",
     "get_capabilities",
     "get_pricing",
+    "get_capabilities_for_provider",
+    "get_pricing_for_provider",
 ]

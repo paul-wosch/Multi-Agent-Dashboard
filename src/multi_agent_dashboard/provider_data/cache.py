@@ -15,13 +15,16 @@ logger = logging.getLogger(__name__)
 # Module‑level lock for thread‑safe cache initialization
 _cache_lock = threading.Lock()
 
-# In‑memory cache of model_id → ProviderModel instances
+# In‑memory cache of composite key 'provider|model_id' → ProviderModel instances
 _model_cache: Optional[Dict[str, ProviderModel]] = None
 
 
 def get_model_cache() -> Dict[str, ProviderModel]:
     """
     Return the model cache, initializing it if necessary.
+
+    The cache keys are composite strings 'provider|model_id' to disambiguate
+    duplicate model IDs across providers.
 
     Thread‑safe: uses double‑checked locking with _cache_lock.
     """
