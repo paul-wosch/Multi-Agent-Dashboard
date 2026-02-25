@@ -15,6 +15,8 @@ from multi_agent_dashboard.config import (
     PROVIDER_DATA_DIR,
     PROVIDER_MODELS_ALL_FILE,
     PROVIDER_MODELS_FILE,
+    LOCAL_OLLAMA_MODELS_FILE,
+    TEMPLATE_OLLAMA_MODELS_FILE,
 )
 from .downloader import download_provider_models_all
 from .extractor import extract_provider_models
@@ -38,6 +40,11 @@ def _get_provider_models_all_path() -> Path:
 def _get_provider_models_path() -> Path:
     """Return absolute path of provider_models.json."""
     return _get_provider_data_dir() / PROVIDER_MODELS_FILE
+
+
+def _get_local_ollama_path() -> Path:
+    """Return absolute path of local_ollama_models.json."""
+    return _get_provider_data_dir() / LOCAL_OLLAMA_MODELS_FILE
 
 
 def _ensure_data_files() -> Path:
@@ -128,7 +135,50 @@ def load_provider_models() -> Dict[str, ProviderModel]:
                 )
                 # Continue with other models
 
-    logger.info(f"Loaded {len(cache)} models")
+    # Load local Ollama models if the file exists (local entries take precedence)
+    local_ollama_path = _get_local_ollama_path()
+    if local_ollama_path.exists():
+        logger.debug(f"Loading local Ollama models from {local_ollama_path}")
+        try:
+            with open(local_ollama_path, "r", encoding="utf-8") as f:
+                local_data = json.load(f)
+        except Exception as e:
+            logger.error(f"Failed to load local Ollama models: {e}")
+            local_data = {}
+        
+        # Expect top-level key "ollama"
+        ollama_entry = local_data.get("ollama")
+        if isinstance(ollama_entry, dict):
+            models_dict = ollama_entry.get("models")
+            if isinstance(models_dict, dict):
+                for model_id, raw_model in models_dict.items():
+                    if not isinstance(raw_model, dict):
+                        logger.warning(
+                            f"Local Ollama model '{model_id}' is not a dictionary, skipping"
+                        )
+                        continue
+                    try:
+                        provider_model = ProviderModel.from_raw_json(
+                            provider="ollama",
+                            model_id=model_id,
+                            raw=raw_model,
+                        )
+                        cache[f"ollama|{model_id}"] = provider_model
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to parse local Ollama model '{model_id}': {e}"
+                        )
+                logger.info(f"Loaded {len(models_dict)} local Ollama models")
+            else:
+                logger.warning(
+                    "Local Ollama data missing 'models' dictionary, skipping"
+                )
+        else:
+            logger.warning(
+                "Local Ollama data missing top-level 'ollama' key, skipping"
+            )
+
+    logger.info(f"Loaded {len(cache)} models total")
     return cache
 
 
