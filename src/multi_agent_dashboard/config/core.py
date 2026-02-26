@@ -59,6 +59,7 @@ DB_FILE_PATH = (DATA_PATH / DB_DIR / DB_FILE).resolve()
 OPENAI_API_KEY = _env.get("OPENAI_API_KEY", None)
 DEEPSEEK_API_KEY = _env.get("DEEPSEEK_API_KEY", None)
 LOG_LEVEL = _env.get("LOG_LEVEL", _logging['default_log_level']).upper()
+RAISE_ON_AGENT_FAIL = _env.get("RAISE_ON_AGENT_FAIL", "true").lower() == "true"
 
 LOG_FILE_PATH = (LOGS_PATH / LOG_FILE).resolve()
 

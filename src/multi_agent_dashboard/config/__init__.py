@@ -12,6 +12,7 @@ from .core import (
     OPENAI_API_KEY,
     DEEPSEEK_API_KEY,
     LOG_LEVEL,
+    RAISE_ON_AGENT_FAIL,
     configure_logging,
     # Path constants
     DATA_DIR,
@@ -50,6 +51,7 @@ __all__ = [
     "OPENAI_API_KEY",
     "DEEPSEEK_API_KEY",
     "LOG_LEVEL",
+    "RAISE_ON_AGENT_FAIL",
     "configure_logging",
     "DATA_DIR",
     "DB_DIR",

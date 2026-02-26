@@ -13,6 +13,7 @@ from jsonschema import validate as jsonschema_validate, ValidationError  # type:
 from multi_agent_dashboard.llm_client import LLMClient
 from multi_agent_dashboard.runtime import AgentRuntime
 from multi_agent_dashboard.shared.structured_schemas import resolve_schema_json
+from multi_agent_dashboard.config import RAISE_ON_AGENT_FAIL
 
 from ..shared.instrumentation import (
     _extract_instrumentation_events,
@@ -119,8 +120,12 @@ class AgentExecutor:
                 run_kwargs["files"] = pipeline_state.state.get("files")
             raw_output = agent.run(pipeline_state.state, **run_kwargs)
         except Exception as e:
-            logger.exception("Agent '%s' failed with real error:", agent_name)
-            raise
+            if RAISE_ON_AGENT_FAIL:
+                logger.exception("Agent '%s' failed: %s", agent_name, e)
+                raise
+            else:
+                logger.error("Agent '%s' failed: %s", agent_name, e)
+                raw_output = f"Agent failed: {e}"
 
         # Retrieve metrics from AgentRuntime.last_metrics
         metrics = getattr(agent, "last_metrics", {}) or {}
