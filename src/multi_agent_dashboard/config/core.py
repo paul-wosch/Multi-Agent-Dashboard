@@ -20,7 +20,7 @@ _paths = _yaml_config['paths']
 _agents = _yaml_config['agents']
 _providers = _yaml_config['providers']
 _ui = _yaml_config['ui']
-_logging = _yaml_config.get('logging', {})
+_logging = _yaml_config['logging']
 
 # --- Directory & file names from YAML ---
 DATA_DIR = Path(_paths['data_dir'])
