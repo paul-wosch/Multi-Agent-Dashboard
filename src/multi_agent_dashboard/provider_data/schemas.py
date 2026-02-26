@@ -75,10 +75,10 @@ class ProviderModel:
         reasoning = raw.get("reasoning", False)
         temperature = raw.get("temperature", False)
 
-        # Determine image_inputs from both attachment and modalities.input
+        # Determine image_inputs from modalities.input
         modalities = raw.get("modalities", {})
         input_modalities = modalities.get("input", [])
-        image_inputs = attachment or ("image" in input_modalities)
+        image_inputs = "image" in input_modalities
 
         # Knowledge cutoff
         knowledge = raw.get("knowledge", "")
