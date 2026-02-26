@@ -19,6 +19,7 @@ class PathsConfig(BaseModel):
 class AgentsConfig(BaseModel):
     agent_input_char_cap: int
     agent_output_char_cap: int
+    agent_output_token_cap: int
     agent_snapshots_auto: bool
     agent_snapshot_prune_auto: bool
     agent_snapshot_prune_keep: int

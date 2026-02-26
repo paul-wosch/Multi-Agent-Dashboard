@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from multi_agent_dashboard.shared.structured_schemas import resolve_schema_json
 from multi_agent_dashboard.tool_integration.provider_tool_adapter import convert_tools_for_provider
 from multi_agent_dashboard.tool_integration.registry import get_registry
+from multi_agent_dashboard import config
 from .provider_adapters import get_adapter
 from .chat_model_factory import ChatModelFactory
 from .instrumentation import INSTRUMENTATION_MIDDLEWARE, InstrumentationManager
@@ -106,6 +107,8 @@ class AgentCreationFacade:
         # Prepare middleware
         middleware_list, instrumentation_attached, instrumentation_attach_error = InstrumentationManager.prepare(middleware, spec)
 
+        # Determine max_tokens from config (0 means no limit)
+        max_tokens_val = config.AGENT_OUTPUT_TOKEN_CAP if config.AGENT_OUTPUT_TOKEN_CAP > 0 else None
         # Get model instance
         model_instance = self._client._model_factory.get_model(
             spec.model,
@@ -116,6 +119,7 @@ class AgentCreationFacade:
             provider_features=getattr(spec, "provider_features", None),
             timeout=timeout or self._client._timeout,
             temperature=getattr(spec, "temperature", None),
+            max_tokens=max_tokens_val,
         )
 
         try:

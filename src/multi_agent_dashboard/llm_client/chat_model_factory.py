@@ -32,7 +32,7 @@ class ChatModelFactory:
         self._init_fn = init_fn or _init_chat_model
         # include timeout as final component in key tuple (Optional[float])
         self._cache: Dict[
-            Tuple[str, str, Optional[str], bool, Optional[str], str, Optional[float], Optional[float]], Any] = {}
+            Tuple[str, str, Optional[str], bool, Optional[str], str, Optional[float], Optional[float], Optional[int]], Any] = {}
 
     def _key(
             self,
@@ -44,7 +44,8 @@ class ChatModelFactory:
             provider_features: Optional[Dict[str, Any]] = None,
             timeout: Optional[float] = None,
             temperature: Optional[float] = None,
-    ) -> Tuple[str, str, Optional[str], bool, Optional[str], str, Optional[float], Optional[float]]:
+            max_tokens: Optional[int] = None,
+    ) -> Tuple[str, str, Optional[str], bool, Optional[str], str, Optional[float], Optional[float], Optional[int]]:
         """
         Build a stable cache key for a chat model, including a fingerprint of provider_features
         and the timeout so that changes to capability hints or per-call timeout cause a fresh
@@ -80,6 +81,13 @@ class ChatModelFactory:
             except Exception:
                 temp_val = None
 
+        max_tokens_val: Optional[int] = None
+        if max_tokens is not None:
+            try:
+                max_tokens_val = int(max_tokens)
+            except Exception:
+                max_tokens_val = None
+
         return (
             model or "",
             provider_id or "",
@@ -89,6 +97,7 @@ class ChatModelFactory:
             features_key,
             timeout_val,
             temp_val,
+            max_tokens_val,
         )
 
     def get_model(
@@ -102,6 +111,7 @@ class ChatModelFactory:
             provider_features: Optional[Dict[str, Any]] = None,
             timeout: Optional[float] = None,
             temperature: Optional[float] = None,
+            max_tokens: Optional[int] = None,
     ):
         """
         Return a LangChain chat model instance for the provided metadata.
@@ -123,6 +133,7 @@ class ChatModelFactory:
             provider_features,
             timeout=timeout,
             temperature=temperature,
+            max_tokens=max_tokens,
         )
         if key in self._cache:
             return self._cache[key]
@@ -166,6 +177,12 @@ class ChatModelFactory:
                 init_kwargs["temperature"] = float(temperature)
             except Exception:
                 init_kwargs["temperature"] = temperature
+
+        if max_tokens is not None:
+            try:
+                init_kwargs["max_tokens"] = int(max_tokens)
+            except Exception:
+                init_kwargs["max_tokens"] = max_tokens
 
         model_provider = provider_id or None
 
