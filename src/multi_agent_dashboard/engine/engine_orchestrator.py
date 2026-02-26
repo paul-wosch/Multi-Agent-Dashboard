@@ -44,6 +44,7 @@ class EngineResult:
     state: Dict[str, Any]
     memory: Dict[str, Any]
     warnings: List[str] = field(default_factory=list)
+    errors: List[str] = field(default_factory=list)
     final_agent: Optional[str] = None  # runtime-only
     # per-agent metrics
     agent_metrics: Dict[str, Dict[str, Any]] = field(default_factory=dict)
@@ -91,6 +92,7 @@ class MultiAgentEngine:
         self.state = self.state_manager.state
         self.memory = self.state_manager.memory
         self._warnings = self.state_manager.warnings
+        self._errors = self.state_manager.errors
         self.agent_metrics = self.state_manager.agent_metrics
 
     # -------------------------
@@ -249,6 +251,7 @@ class MultiAgentEngine:
             state=dict(self.state),
             memory=dict(self.memory),
             warnings=list(self._warnings),
+            errors=list(self._errors),
             final_agent=(
                                 "final" in self.state and last_agent
                         ) or last_agent,

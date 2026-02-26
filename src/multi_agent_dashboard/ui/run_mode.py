@@ -754,7 +754,12 @@ def render_run_mode(strict_mode: bool = False, strict_schema_validation: bool = 
             st.error("Run completed but failed to save to database")
         invalidate_runs()
 
-        st.success("Pipeline completed!")
+        if result.errors:
+            st.error("Pipeline completed with errors!", icon=":material/error:")
+        elif result.warnings:
+            st.success("Pipeline completed with warnings!", icon=":material/check:")
+        else:
+            st.success("Pipeline completed!", icon=":material/check:")
 
         if result.strict_schema_exit:
             st.error("Pipeline exited early due to strict schema validation failure.", icon=":material/error:")

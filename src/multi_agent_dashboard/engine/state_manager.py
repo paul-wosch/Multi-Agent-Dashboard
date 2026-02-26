@@ -27,6 +27,7 @@ class StateManager:
         self.state: Dict[str, Any] = {}
         self.memory: Dict[str, Any] = {}
         self.warnings: List[str] = []
+        self.errors: List[str] = []
         # Per‑agent metrics from the last run, stored as dict of dict
         # (compatible with the original engine.agent_metrics format)
         self.agent_metrics: Dict[str, Dict[str, Any]] = {}
@@ -36,6 +37,7 @@ class StateManager:
         self.state.clear()
         self.memory.clear()
         self.warnings.clear()
+        self.errors.clear()
         self.agent_metrics.clear()
 
     def update_from_pipeline_state(self, pipeline_state: PipelineState) -> None:
@@ -51,6 +53,8 @@ class StateManager:
         self.memory.update(pipeline_state.memory)
         self.warnings.clear()
         self.warnings.extend(pipeline_state.warnings)
+        self.errors.clear()
+        self.errors.extend(pipeline_state.errors)
 
         # Convert RunMetrics to dict format for backward compatibility
         self.agent_metrics.clear()
@@ -68,3 +72,7 @@ class StateManager:
     def add_warning(self, message: str) -> None:
         """Append a warning message to the internal list."""
         self.warnings.append(message)
+
+    def add_error(self, message: str) -> None:
+        """Append an error message to the internal list."""
+        self.errors.append(message)

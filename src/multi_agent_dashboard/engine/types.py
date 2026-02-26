@@ -38,6 +38,7 @@ class PipelineState:
     state: Dict[str, Any] = field(default_factory=dict)
     memory: Dict[str, Any] = field(default_factory=dict)
     warnings: List[str] = field(default_factory=list)
+    errors: List[str] = field(default_factory=list)
     tool_usages: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
     agent_configs: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     strict_schema_exit: bool = False

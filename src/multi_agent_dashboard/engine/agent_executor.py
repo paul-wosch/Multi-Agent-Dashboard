@@ -73,6 +73,11 @@ class AgentExecutor:
         else:
             logger.warning(message)
 
+    def _error(self, message: str, pipeline_state: PipelineState) -> None:
+        """Add an error to pipeline state."""
+        pipeline_state.errors.append(message)
+        logger.error(message)
+
     def execute_agent(
         self,
         agent_name: str,
@@ -125,6 +130,7 @@ class AgentExecutor:
                 raise
             else:
                 logger.error("Agent '%s' failed: %s", agent_name, e)
+                self._error(f"Agent '{agent_name}' failed: {e}", pipeline_state)
                 raw_output = f"Agent failed: {e}"
 
         # Retrieve metrics from AgentRuntime.last_metrics
