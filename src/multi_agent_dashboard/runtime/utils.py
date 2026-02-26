@@ -42,7 +42,7 @@ def safe_format(
 
     for k, v in mapping.items():
         s = "" if v is None else str(v)
-        if len(s) > max_value_len:
+        if max_value_len > 0 and len(s) > max_value_len:
             logger.warning(
                 "safe_format: value for key '%s' truncated (%d → %d chars)",
                 k,
@@ -54,7 +54,7 @@ def safe_format(
 
     rendered = SafeTemplate(template).safe_substitute(clean)
 
-    if len(rendered) > max_prompt_len:
+    if max_prompt_len > 0 and len(rendered) > max_prompt_len:
         logger.warning(
             "safe_format: prompt truncated (%d → %d chars)",
             len(rendered),
