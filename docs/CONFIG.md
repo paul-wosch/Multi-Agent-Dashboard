@@ -35,8 +35,8 @@ If `OPENAI_API_KEY` is missing or invalid, LLM calls will fail at runtime; the U
 | `DB_FILE_PATH`     | `data/db/multi_agent_runs.db` | Main SQLite DB file (auto-created)          |
 | `MIGRATIONS_PATH`  | `data/migrations`             | Ordered SQL migrations                      |
 | `LOGS_PATH`        | `data/logs`                   | Log directory for rotating app logs         |
-| `AGENT_INPUT_CAP`  | defined in `config.py`        | Max characters per formatted input segment  |
-| `AGENT_OUTPUT_CAP` | defined in `config.py`        | Max characters per rendered prompt / output |
+| `AGENT_INPUT_CHAR_CAP`  | defined in `config.py`        | Max characters per formatted input segment  |
+| `AGENT_OUTPUT_CHAR_CAP` | defined in `config.py`        | Max characters per rendered prompt / output |
 
 Prompt formatting and outputs are passed through `utils.safe_format` using these caps to avoid unbounded prompt sizes.
 

@@ -1,6 +1,6 @@
-# Token caps per agent
-agent_input_cap: 40000
-agent_output_cap: 50000
+# Character caps per agent
+agent_input_char_cap: 40000
+agent_output_char_cap: 50000
 
 # Snapshot behavior
 agent_snapshots_auto: false

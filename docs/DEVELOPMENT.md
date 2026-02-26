@@ -21,7 +21,7 @@ This document expands developer-focused guidance present in the README.
 - 🔐 **Prompt safety & caps**:
   
   - Use `utils.safe_format` for prompt formatting
-  - Respect centralized caps (`AGENT_INPUT_CAP`, `AGENT_OUTPUT_CAP`) to avoid unbounded prompts
+  - Respect centralized caps (`AGENT_INPUT_CHAR_CAP`, `AGENT_OUTPUT_CHAR_CAP`) to avoid unbounded prompts
 
 - 🎨 **UI theming & symbols**:
   

@@ -64,8 +64,8 @@ RAISE_ON_AGENT_FAIL = _env.get("RAISE_ON_AGENT_FAIL", "true").lower() == "true"
 LOG_FILE_PATH = (LOGS_PATH / LOG_FILE).resolve()
 
 # --- Agent configuration from YAML ---
-AGENT_INPUT_CAP = _agents['agent_input_cap']
-AGENT_OUTPUT_CAP = _agents['agent_output_cap']
+AGENT_INPUT_CHAR_CAP = _agents['agent_input_char_cap']
+AGENT_OUTPUT_CHAR_CAP = _agents['agent_output_char_cap']
 AGENT_SNAPSHOTS_AUTO = _agents['agent_snapshots_auto']
 AGENT_SNAPSHOT_PRUNE_AUTO = _agents['agent_snapshot_prune_auto']
 AGENT_SNAPSHOT_PRUNE_KEEP = _agents['agent_snapshot_prune_keep']

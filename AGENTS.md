@@ -256,8 +256,8 @@ Refer to **APPENDIX A: Database Migrations** for schema changes, fresh DB heuris
 
 ### Agent Caps
 
-- `AGENT_INPUT_CAP = 40_000` – maximum input character count per agent
-- `AGENT_OUTPUT_CAP = 50_000` – maximum output character count per agent
+- `AGENT_INPUT_CHAR_CAP = 40_000` – maximum input character count per agent
+- `AGENT_OUTPUT_CHAR_CAP = 50_000` – maximum output character count per agent
 
 ### UI Colors & Symbols
 
@@ -294,7 +294,7 @@ All other constants are defined in YAML and cannot be overridden by environment 
 The import pattern for consumers stays unchanged:
 
 ```python
-from multi_agent_dashboard.config import AGENT_INPUT_CAP, UI_COLORS, ...
+from multi_agent_dashboard.config import AGENT_INPUT_CHAR_CAP, UI_COLORS, ...
 ```
 
 ## Dynamic Pricing & Capabilities
