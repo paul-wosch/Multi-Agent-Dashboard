@@ -14,6 +14,7 @@ from .core import (
     DEEPSEEK_API_KEY,
     LOG_LEVEL,
     RAISE_ON_AGENT_FAIL,
+    STRICT_OUTPUT_TOKEN_CAP_OVERRIDE,
     configure_logging,
     # Path constants
     DATA_DIR,
@@ -54,6 +55,7 @@ __all__ = [
     "DEEPSEEK_API_KEY",
     "LOG_LEVEL",
     "RAISE_ON_AGENT_FAIL",
+    "STRICT_OUTPUT_TOKEN_CAP_OVERRIDE",
     "configure_logging",
     "DATA_DIR",
     "DB_DIR",

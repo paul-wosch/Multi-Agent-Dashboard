@@ -60,6 +60,7 @@ OPENAI_API_KEY = _env.get("OPENAI_API_KEY", None)
 DEEPSEEK_API_KEY = _env.get("DEEPSEEK_API_KEY", None)
 LOG_LEVEL = _env.get("LOG_LEVEL", _logging['default_log_level']).upper()
 RAISE_ON_AGENT_FAIL = _env.get("RAISE_ON_AGENT_FAIL", "true").lower() == "true"
+STRICT_OUTPUT_TOKEN_CAP_OVERRIDE = _env.get("STRICT_OUTPUT_TOKEN_CAP_OVERRIDE", "false").lower() == "true"
 
 LOG_FILE_PATH = (LOGS_PATH / LOG_FILE).resolve()
 
