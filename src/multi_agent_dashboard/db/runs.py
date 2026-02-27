@@ -206,6 +206,8 @@ class RunDAO:
                            schema_json,
                            schema_name,
                            temperature,
+                           max_output,
+                           max_output_effective,
                            strict_schema_validation
                     FROM agent_run_configs
                     WHERE run_id = ?
@@ -506,8 +508,10 @@ class RunDAO:
                              reasoning_summary,
                              reasoning_config_json,
                              extra_config_json,
-                             system_prompt_template)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                             system_prompt_template,
+                             max_output,
+                             max_output_effective)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             run_id,
@@ -535,6 +539,8 @@ class RunDAO:
                             # Reserved for future options such as temperature
                             json.dumps(cfg.get("extra") or {}),
                             cfg.get("system_prompt_template"),
+                            cfg.get("max_output"),
+                            cfg.get("max_output_effective"),
                         ),
                     )
 

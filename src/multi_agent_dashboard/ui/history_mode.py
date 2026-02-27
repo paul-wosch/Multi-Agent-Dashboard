@@ -273,6 +273,9 @@ def render_history_mode():
         agent_config = {
             "model": cfg.get("model") or a.get("model") or "unknown",
             "role": cfg.get("role") or "–",
+            "temperature": cfg.get("temperature"),
+            "max_output": cfg.get("max_output"),
+            "max_output_effective": cfg.get("max_output_effective"),
             "tools": tools_snapshot,
             "reasoning": {
                 "effort": cfg.get("reasoning_effort") or "default",

@@ -268,6 +268,7 @@ class AgentService:
                     "endpoint": endpoint,
                     "use_responses_api": use_responses_api,
                     "provider_features": provider_features,
+                    "temperature": temperature,
                     "max_output": max_output,
                 }
                 try:

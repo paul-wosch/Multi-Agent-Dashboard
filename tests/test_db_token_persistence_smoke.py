@@ -74,6 +74,8 @@ def test_db_persists_agent_token_counts(tmp_path: Path) -> None:
         schema_name TEXT,
         temperature REAL,
         strict_schema_validation BOOLEAN DEFAULT 0,
+        max_output INTEGER DEFAULT 0,
+        max_output_effective INTEGER DEFAULT 0,
         FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE
     );
 

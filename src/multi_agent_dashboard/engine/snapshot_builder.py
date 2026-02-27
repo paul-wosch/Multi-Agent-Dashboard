@@ -160,6 +160,8 @@ class RunSnapshotBuilder:
             "schema_json": getattr(agent.spec, "schema_json", None),
             "schema_name": getattr(agent.spec, "schema_name", None),
             "temperature": getattr(agent.spec, "temperature", None),
+            "max_output": agent.spec.max_output,
+            "max_output_effective": agent.spec.effective_max_output(),
             "strict_schema_validation": bool(strict_schema_validation),
         }
         return agent_config

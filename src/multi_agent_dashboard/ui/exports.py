@@ -272,6 +272,10 @@ def build_export_from_engine_result(
             # Schema validation flags
             "schema_validation_failed": bool((result.agent_schema_validation_failed or {}).get(name)),
             "strict_schema_validation": bool(run_cfg.get("strict_schema_validation")),
+            # Token limits and temperature
+            "temperature": run_cfg.get("temperature"),
+            "max_output": run_cfg.get("max_output"),
+            "max_output_effective": run_cfg.get("max_output_effective"),
         }
 
         export_agents[name] = {

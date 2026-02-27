@@ -468,6 +468,7 @@ def render_agent_editor():
                 "endpoint": state.get("endpoint"),
                 "use_responses_api": state.get("use_responses_api"),
                 "provider_features": state.get("provider_features"),
+                "temperature": state.get("temperature"),
                 "max_output": state.get("max_output"),
             }
             note = st.session_state.get(snapshot_note_key) or ""
