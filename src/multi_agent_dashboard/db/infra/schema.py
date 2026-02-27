@@ -162,7 +162,7 @@ SCHEMA = {
             # Snapshot of the system prompt used for this agent/run
             "system_prompt_template": "TEXT",
             "max_output": "INTEGER DEFAULT 0",
-            "max_output_effective": "INTEGER DEFAULT 0",
+            "max_output_effective": "INTEGER",
         },
         "constraints": {
             "foreign_keys": [
