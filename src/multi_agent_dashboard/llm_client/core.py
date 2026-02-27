@@ -108,8 +108,8 @@ class AgentCreationFacade:
         # Prepare middleware
         middleware_list, instrumentation_attached, instrumentation_attach_error = InstrumentationManager.prepare(middleware, spec)
 
-        # Determine max_tokens from config (0 means no limit)
-        max_tokens_val = config.AGENT_OUTPUT_TOKEN_CAP if config.AGENT_OUTPUT_TOKEN_CAP > 0 else None
+        # Determine max_tokens from precedence rules (None means no limit)
+        max_tokens_val = spec.effective_max_output()
         # Get model instance
         model_instance = self._client._model_factory.get_model(
             spec.model,
