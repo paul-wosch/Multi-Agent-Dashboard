@@ -10,7 +10,7 @@ from multi_agent_dashboard import config
 
 class MockSpec:
     """Minimal AgentSpec-like object for testing."""
-    def __init__(self, structured_output_enabled=False, schema_json=None, schema_name=None, model="gpt-4o", provider_id="openai", endpoint=None, use_responses_api=False, model_class=None, provider_features=None, temperature=None):
+    def __init__(self, structured_output_enabled=False, schema_json=None, schema_name=None, model="gpt-4o", provider_id="openai", endpoint=None, use_responses_api=False, model_class=None, provider_features=None, temperature=None, max_output=0):
         self.structured_output_enabled = structured_output_enabled
         self.schema_json = schema_json
         self.schema_name = schema_name
@@ -21,7 +21,12 @@ class MockSpec:
         self.model_class = model_class
         self.provider_features = provider_features
         self.temperature = temperature
+        self.max_output = max_output
         self.system_prompt_template = None
+
+    def effective_max_output(self) -> int | None:
+        """Mock implementation returning None (no limit)."""
+        return None
 
 
 
