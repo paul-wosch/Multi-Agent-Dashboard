@@ -100,6 +100,7 @@ def render_agent_editor():
             "schema_json": a.get("schema_json") or "",
             "schema_name": a.get("schema_name") or "",
             "temperature": a.get("temperature"),
+            "max_output": a.get("max_output") or 0,
         }
         for a in agents_raw
     ]
@@ -159,6 +160,7 @@ def render_agent_editor():
             "schema_json": "",
             "schema_name": "",
             "temperature": None,
+            "max_output": 0,
         }
     state = st.session_state.agent_editor_state
 
@@ -249,6 +251,7 @@ def render_agent_editor():
                 "schema_json": base_agent.get("schema_json") or "",
                 "schema_name": base_agent.get("schema_name") or "",
                 "temperature": base_agent.get("temperature"),
+                "max_output": base_agent.get("max_output") or 0,
             }
         )
 
@@ -465,6 +468,7 @@ def render_agent_editor():
                 "endpoint": state.get("endpoint"),
                 "use_responses_api": state.get("use_responses_api"),
                 "provider_features": state.get("provider_features"),
+                "max_output": state.get("max_output"),
             }
             note = st.session_state.get(snapshot_note_key) or ""
             try:
@@ -564,6 +568,7 @@ def render_agent_editor():
                                 "endpoint_port": str(port_s) if port_s is not None else None,
                                 "use_responses_api": s.get("use_responses_api", True),
                                 "provider_features": s.get("provider_features") or {},
+                                "max_output": s.get("max_output") or 0,
                             }
                         )
                         st.session_state.agent_editor_state_changed_this_run = True
@@ -638,10 +643,19 @@ def render_agent_editor():
             help="Lower values (e.g., 0) improve structured output reliability.",
         )
 
+        max_output_val = st.number_input(
+            "Max output tokens (0 = no limit)",
+            min_value=0,
+            value=int(state.get("max_output") or 0),
+            step=1,
+            help="Maximum tokens the agent can generate. 0 means no limit.",
+        )
+
         state["structured_output_enabled"] = bool(structured_enabled)
         state["schema_name"] = schema_name_val or ""
         state["schema_json"] = schema_json_val or ""
         state["temperature"] = float(temperature_val)
+        state["max_output"] = int(max_output_val)
 
         # --- Ollama endpoint health check indicator ---
         # Only show when provider_choice indicates local Ollama and some endpoint info is present
@@ -871,6 +885,7 @@ def render_agent_editor():
                     schema_json=state.get("schema_json") or None,
                     schema_name=state.get("schema_name") or None,
                     temperature=state.get("temperature"),
+                    max_output=state.get("max_output"),
                 )
             except Exception:
                 logger.exception("Failed to save agent")
@@ -911,6 +926,7 @@ def render_agent_editor():
                     schema_json=state.get("schema_json") or None,
                     schema_name=state.get("schema_name") or None,
                     temperature=state.get("temperature"),
+                    max_output=state.get("max_output"),
                 )
             except Exception:
                 logger.exception("Failed to duplicate agent")

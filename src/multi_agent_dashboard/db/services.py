@@ -106,6 +106,7 @@ class AgentService:
             schema_json: Optional[str] = None,
             schema_name: Optional[str] = None,
             temperature: Optional[float] = None,
+            max_output: int = 0,
     ) -> None:
         """
         Save an agent non-atomically. Detect provider metadata changes and, if
@@ -136,6 +137,7 @@ class AgentService:
             schema_json=schema_json,
             schema_name=schema_name,
             temperature=temperature,
+            max_output=max_output,
         )
 
         # Decide whether provider metadata changed (or a new agent created).
@@ -211,6 +213,7 @@ class AgentService:
             schema_json: Optional[str] = None,
             schema_name: Optional[str] = None,
             temperature: Optional[float] = None,
+            max_output: Optional[int] = None,
     ) -> None:
         """Atomically save agent metadata. The legacy 'prompt version' system
         has been removed in favour of agent snapshots. The `save_prompt_version`
@@ -243,6 +246,7 @@ class AgentService:
             schema_json=schema_json,
             schema_name=schema_name,
             temperature=temperature,
+            max_output=max_output,
         )
 
             # Optional automatic snapshot (configurable)
@@ -264,6 +268,7 @@ class AgentService:
                     "endpoint": endpoint,
                     "use_responses_api": use_responses_api,
                     "provider_features": provider_features,
+                    "max_output": max_output,
                 }
                 try:
                     dao.save_snapshot(name, snapshot, metadata={"event": "auto_save"}, is_auto=True)
