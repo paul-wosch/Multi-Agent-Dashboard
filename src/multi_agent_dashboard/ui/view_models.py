@@ -32,10 +32,26 @@ class AgentConfigView(NamedTuple):
     # prompt_template and optional system_prompt_template (developer role).
     prompt_template: Optional[str] = None
     system_prompt_template: Optional[str] = None
+    # Provider metadata captured for this run (derived or explicit)
+    provider_features: Optional[dict] = None
+    # Provider identity fields (enable explicit "OpenAI" / "Ollama" display)
+    provider_id: Optional[str] = None
+    model_class: Optional[str] = None
+    endpoint: Optional[str] = None
+    use_responses_api: Optional[bool] = None
     # Raw stored JSON blobs (historic runs)
     raw_tools_config: Optional[dict] = None
     raw_reasoning_config: Optional[dict] = None
     raw_extra_config: Optional[dict] = None
+    # Schema validation flags (observability)
+    schema_validation_failed: bool = False
+    strict_schema_validation: bool = False
+    structured_output_enabled: bool = False
+    schema_json: Optional[str] = None
+    schema_name: Optional[str] = None
+    temperature: Optional[float] = None
+    max_output: int = 0
+    max_output_effective: Optional[int] = None
 
 
 def summarize_agent_metrics(
@@ -190,6 +206,7 @@ def parse_agent_run_config_row(cfg: dict) -> dict:
     tools_cfg_json = parse_json_field(cfg.get("tools_config_json"), {})
     reasoning_cfg_json = parse_json_field(cfg.get("reasoning_config_json"), {})
     extra_cfg_json = parse_json_field(cfg.get("extra_config_json"), {})
+    provider_features = parse_json_field(cfg.get("provider_features_json"), {})
 
     tools_enabled = bool(tools_json.get("enabled"))
     enabled_tools = tools_json.get("tools") or []
@@ -203,6 +220,7 @@ def parse_agent_run_config_row(cfg: dict) -> dict:
         "tools_config_json": tools_cfg_json,
         "reasoning_config_json": reasoning_cfg_json,
         "extra_config_json": extra_cfg_json,
+        "provider_features": provider_features,
         "reasoning_effort": cfg.get("reasoning_effort") or "default",
         "reasoning_summary": cfg.get("reasoning_summary") or "none",
     }
@@ -225,14 +243,27 @@ def extract_web_search_allowed_domains_from_tools_cfg(
     for tcfg in tools_low:
         if not isinstance(tcfg, dict):
             continue
-        if tcfg.get("type") != "web_search":
-            continue
-        filters = tcfg.get("filters") or {}
-        if isinstance(filters, dict) and "allowed_domains" in filters:
-            allowed = filters["allowed_domains"]
-            if isinstance(allowed, list):
-                return [str(d) for d in allowed]
-            return [str(allowed)]
+        
+        # Check for native web_search tool
+        if tcfg.get("type") == "web_search":
+            filters = tcfg.get("filters") or {}
+            if isinstance(filters, dict) and "allowed_domains" in filters:
+                allowed = filters["allowed_domains"]
+                if isinstance(allowed, list):
+                    return [str(d) for d in allowed]
+                return [str(allowed)]
+        
+        # Check for DuckDuckGo search tool (function-calling)
+        if tcfg.get("type") == "function":
+            func = tcfg.get("function")
+            if isinstance(func, dict) and func.get("name") in ("duckduckgo_search", "web_search_ddg"):
+                filters = tcfg.get("filters") or {}
+                if isinstance(filters, dict) and "allowed_domains" in filters:
+                    allowed = filters["allowed_domains"]
+                    if isinstance(allowed, list):
+                        return [str(d) for d in allowed]
+                    return [str(allowed)]
+    
     return None
 
 
@@ -269,9 +300,23 @@ def config_view_from_db_rows(
                 reasoning_summary=parsed["reasoning_summary"],
                 prompt_template=prompt_template,
                 system_prompt_template=system_prompt_template,
+                provider_features=parsed.get("provider_features") or None,
+                # Provider identity snapshot (historic)
+                provider_id=cfg.get("provider_id") or None,
+                model_class=cfg.get("model_class") or None,
+                endpoint=cfg.get("endpoint") or None,
+                use_responses_api=bool(cfg.get("use_responses_api")),
+                temperature=cfg.get("temperature"),
+                max_output=cfg.get("max_output", 0),
+                max_output_effective=cfg.get("max_output_effective"),
                 raw_tools_config=parsed["tools_config_json"] or None,
                 raw_reasoning_config=parsed["reasoning_config_json"] or None,
                 raw_extra_config=parsed["extra_config_json"] or None,
+                schema_validation_failed=bool(a.get("schema_validation_failed")),
+                strict_schema_validation=bool(cfg.get("strict_schema_validation")),
+                structured_output_enabled=bool(cfg.get("structured_output_enabled")),
+                schema_json=cfg.get("schema_json"),
+                schema_name=cfg.get("schema_name"),
             )
         )
     return views

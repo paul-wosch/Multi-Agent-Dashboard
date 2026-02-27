@@ -57,7 +57,7 @@ class AgentDAO:
     # READ operations
     # -----------------------
 
-    def list(self) -> list[dict]:
+    def list(self) -> List[dict]:
         logger.debug("Loading agents from DB")
         try:
             with self._connection() as conn:
@@ -74,7 +74,17 @@ class AgentDAO:
                            tools_json,
                            reasoning_effort,
                            reasoning_summary,
-                           system_prompt_template
+                           system_prompt_template,
+                           provider_id,
+                           model_class,
+                           endpoint,
+                           use_responses_api,
+                           provider_features_json,
+                           structured_output_enabled,
+                           schema_json,
+                           schema_name,
+                           temperature,
+                           max_output
                     FROM agents
                     """
                 ).fetchall()
@@ -100,9 +110,90 @@ class AgentDAO:
                     "reasoning_effort": row["reasoning_effort"],
                     "reasoning_summary": row["reasoning_summary"],
                     "system_prompt_template": row["system_prompt_template"],
+                    "provider_id": row["provider_id"],
+                    "model_class": row["model_class"],
+                    "endpoint": row["endpoint"],
+                    "use_responses_api": bool(row["use_responses_api"]) if row["use_responses_api"] is not None else False,
+                    "provider_features": safe_json_loads(row["provider_features_json"], {}),
+                    "structured_output_enabled": bool(row["structured_output_enabled"]) if row["structured_output_enabled"] is not None else False,
+                    "schema_json": row["schema_json"],
+                    "schema_name": row["schema_name"],
+                    "temperature": row["temperature"],
+                    "max_output": row["max_output"] or 0,
                 }
             )
         return agents
+
+    def get(self, agent_name: str) -> Optional[dict]:
+        """
+        Fetch a single agent by name, returning the same dict shape as list() for one agent.
+        Returns None if agent not found.
+        """
+        logger.debug("Fetching single agent '%s' from DB", agent_name)
+        try:
+            with self._connection() as conn:
+                row = conn.execute(
+                    """
+                    SELECT agent_name,
+                           model,
+                           prompt_template,
+                           role,
+                           input_vars,
+                           output_vars,
+                           color,
+                           symbol,
+                           tools_json,
+                           reasoning_effort,
+                           reasoning_summary,
+                           system_prompt_template,
+                           provider_id,
+                           model_class,
+                           endpoint,
+                           use_responses_api,
+                           provider_features_json,
+                           structured_output_enabled,
+                           schema_json,
+                           schema_name,
+                           temperature,
+                           max_output
+                    FROM agents
+                    WHERE agent_name = ?
+                    """,
+                    (agent_name,),
+                ).fetchone()
+        except Exception:
+            logger.exception("Failed to fetch agent '%s' from DB", agent_name)
+            raise
+
+        if not row:
+            return None
+
+        color = row["color"] or DEFAULT_COLOR
+        symbol = row["symbol"] or DEFAULT_SYMBOL
+        return {
+            "agent_name": row["agent_name"],
+            "model": row["model"],
+            "prompt_template": row["prompt_template"],
+            "role": row["role"],
+            "input_vars": safe_json_loads(row["input_vars"], []),
+            "output_vars": safe_json_loads(row["output_vars"], []),
+            "color": color,
+            "symbol": symbol,
+            "tools": safe_json_loads(row["tools_json"], {}),
+            "reasoning_effort": row["reasoning_effort"],
+            "reasoning_summary": row["reasoning_summary"],
+            "system_prompt_template": row["system_prompt_template"],
+            "provider_id": row["provider_id"],
+            "model_class": row["model_class"],
+            "endpoint": row["endpoint"],
+            "use_responses_api": bool(row["use_responses_api"]) if row["use_responses_api"] is not None else False,
+            "provider_features": safe_json_loads(row["provider_features_json"], {}),
+            "structured_output_enabled": bool(row["structured_output_enabled"]) if row["structured_output_enabled"] is not None else False,
+            "schema_json": row["schema_json"],
+            "schema_name": row["schema_name"],
+            "temperature": row["temperature"],
+            "max_output": row["max_output"] or 0,
+        }
 
     # -----------------------
     # Snapshot operations
@@ -150,7 +241,7 @@ class AgentDAO:
             logger.exception("Failed to save snapshot for %s to DB", agent_name)
             raise
 
-    def list_snapshots(self, agent_name: str) -> list[dict]:
+    def list_snapshots(self, agent_name: str) -> List[dict]:
         """
         List snapshots for an agent ordered by version DESC.
         """
@@ -243,6 +334,18 @@ class AgentDAO:
             reasoning_effort: Optional[str] = None,
             reasoning_summary: Optional[str] = None,
             system_prompt_template: Optional[str] = None,
+            # New provider fields - optional
+            provider_id: Optional[str] = None,
+            model_class: Optional[str] = None,
+            endpoint: Optional[str] = None,
+            use_responses_api: bool = False,
+            provider_features: Optional[dict] = None,
+            # Structured output config
+            structured_output_enabled: bool = False,
+            schema_json: Optional[str] = None,
+            schema_name: Optional[str] = None,
+            temperature: Optional[float] = None,
+            max_output: Optional[int] = None,
     ) -> None:
         input_json = json.dumps(input_vars or [])
         output_json = json.dumps(output_vars or [])
@@ -252,6 +355,7 @@ class AgentDAO:
         symbol = symbol or DEFAULT_SYMBOL
 
         tools_json = json.dumps(tools or {})
+        provider_features_json = json.dumps(provider_features or {})
 
         logger.info("Saving agent %s to DB", agent_name)
         try:
@@ -267,11 +371,21 @@ class AgentDAO:
                          output_vars,
                          color,
                          symbol,
+                         provider_id,
+                         model_class,
+                         endpoint,
+                         use_responses_api,
+                         provider_features_json,
+                         structured_output_enabled,
+                         schema_json,
+                         schema_name,
+                         temperature,
+                         max_output,
                          tools_json,
                          reasoning_effort,
                          reasoning_summary,
                          system_prompt_template)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         agent_name,
@@ -282,6 +396,16 @@ class AgentDAO:
                         output_json,
                         color,
                         symbol,
+                        provider_id,
+                        model_class,
+                        endpoint,
+                        1 if use_responses_api else 0,
+                        provider_features_json,
+                        1 if structured_output_enabled else 0,
+                        schema_json,
+                        schema_name,
+                        temperature,
+                        max_output,
                         tools_json,
                         reasoning_effort,
                         reasoning_summary,
@@ -400,7 +524,7 @@ def agent_dao(db_path: str):
 # Compatibility wrappers
 # -----------------------
 
-def load_agents_from_db(db_path: str) -> list[dict]:
+def load_agents_from_db(db_path: str) -> List[dict]:
     warnings.warn(
         "load_agents_from_db is deprecated; use AgentDAO.list",
         DeprecationWarning,

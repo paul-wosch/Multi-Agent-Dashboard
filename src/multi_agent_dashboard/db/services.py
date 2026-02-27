@@ -1,10 +1,14 @@
 # src/multi_agent_dashboard/db/services.py
 from typing import Dict, Any, List, Optional, Tuple
+import json
 
 from multi_agent_dashboard.db.runs import RunDAO, run_dao
 from multi_agent_dashboard.db.agents import AgentDAO, agent_dao
 from multi_agent_dashboard.db.pipelines import PipelineDAO, pipeline_dao
 from multi_agent_dashboard.config import AGENT_SNAPSHOTS_AUTO, AGENT_SNAPSHOT_PRUNE_KEEP
+
+# Runtime hooks (UI registers handlers; services call on changes)
+from multi_agent_dashboard.shared import runtime_hooks
 
 # -----------------------
 # Run Service
@@ -24,6 +28,8 @@ class RunService:
             agent_configs: Optional[Dict[str, Dict[str, Any]]] = None,
             agent_metrics: Optional[Dict[str, Dict[str, Any]]] = None,
             tool_usages: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+            strict_schema_exit: bool = False,
+            agent_schema_validation_failed: Optional[Dict[str, bool]] = None,
     ) -> int:
         with run_dao(self.db_path) as dao:
             run_id = dao.save(
@@ -35,6 +41,8 @@ class RunService:
                 agent_configs=agent_configs,
                 agent_metrics=agent_metrics,
                 tool_usages=tool_usages,
+                strict_schema_exit=strict_schema_exit,
+                agent_schema_validation_failed=agent_schema_validation_failed,
             )
             return run_id
 
@@ -87,8 +95,27 @@ class AgentService:
             reasoning_effort: Optional[str] = None,
             reasoning_summary: Optional[str] = None,
             system_prompt: Optional[str] = None,
+            # Provider metadata
+            provider_id: Optional[str] = None,
+            model_class: Optional[str] = None,
+            endpoint: Optional[str] = None,
+            use_responses_api: bool = False,
+            provider_features: Optional[dict] = None,
+            # Structured output config
+            structured_output_enabled: bool = False,
+            schema_json: Optional[str] = None,
+            schema_name: Optional[str] = None,
+            temperature: Optional[float] = None,
+            max_output: int = 0,
     ) -> None:
-        AgentDAO(self.db_path).save(
+        """
+        Save an agent non-atomically. Detect provider metadata changes and, if
+        changed, notify the runtime hooks so the UI/engine can reload runtimes.
+        """
+        dao = AgentDAO(self.db_path)
+        prev = dao.get(name)
+
+        dao.save(
             name,
             model,
             prompt_template,
@@ -101,7 +128,53 @@ class AgentService:
             reasoning_effort=reasoning_effort,
             reasoning_summary=reasoning_summary,
             system_prompt_template=system_prompt,
+            provider_id=provider_id,
+            model_class=model_class,
+            endpoint=endpoint,
+            use_responses_api=use_responses_api,
+            provider_features=provider_features,
+            structured_output_enabled=structured_output_enabled,
+            schema_json=schema_json,
+            schema_name=schema_name,
+            temperature=temperature,
+            max_output=max_output,
         )
+
+        # Decide whether provider metadata changed (or a new agent created).
+        def _provider_key_from_row(row: Optional[dict]) -> Optional[tuple]:
+            if not row:
+                return None
+            pf = row.get("provider_features") or {}
+            try:
+                pf_s = json.dumps(pf, sort_keys=True, separators=(",", ":"))
+            except Exception:
+                pf_s = repr(pf)
+            return (
+                row.get("provider_id"),
+                row.get("model_class"),
+                row.get("endpoint"),
+                bool(row.get("use_responses_api")),
+                pf_s,
+            )
+
+        new_row_like = {
+            "provider_id": provider_id,
+            "model_class": model_class,
+            "endpoint": endpoint,
+            "use_responses_api": bool(use_responses_api),
+            "provider_features": provider_features or {},
+        }
+
+        prev_key = _provider_key_from_row(prev)
+        new_key = _provider_key_from_row(new_row_like)
+
+        if prev_key != new_key:
+            # Notify runtime: provider metadata changed (or new agent).
+            try:
+                runtime_hooks.on_agent_change()
+            except Exception:
+                # Avoid bubbling into business logic on hook failures
+                pass
 
     # Note: old prompt-versioning has been removed. If external code calls
     # save_prompt_version/load_prompt_versions, adapt to use snapshots instead.
@@ -129,12 +202,28 @@ class AgentService:
             reasoning_effort: Optional[str] = None,
             reasoning_summary: Optional[str] = None,
             system_prompt: Optional[str] = None,
+            # Provider metadata
+            provider_id: Optional[str] = None,
+            model_class: Optional[str] = None,
+            endpoint: Optional[str] = None,
+            use_responses_api: bool = False,
+            provider_features: Optional[dict] = None,
+            # Structured output config
+            structured_output_enabled: bool = False,
+            schema_json: Optional[str] = None,
+            schema_name: Optional[str] = None,
+            temperature: Optional[float] = None,
+            max_output: Optional[int] = None,
     ) -> None:
         """Atomically save agent metadata. The legacy 'prompt version' system
         has been removed in favour of agent snapshots. The `save_prompt_version`
         parameter is retained for API compatibility but is ignored.
         """
+        # Use transaction-scoped DAO so callers get atomicity
         with agent_dao(self.db_path) as dao:
+            # Fetch previous row (if any) to detect changes
+            prev = dao.get(name)
+
             dao.save(
                 name,
                 model,
@@ -148,7 +237,17 @@ class AgentService:
                 reasoning_effort=reasoning_effort,
                 reasoning_summary=reasoning_summary,
                 system_prompt_template=system_prompt,
-            )
+            provider_id=provider_id,
+            model_class=model_class,
+            endpoint=endpoint,
+            use_responses_api=use_responses_api,
+            provider_features=provider_features,
+            structured_output_enabled=structured_output_enabled,
+            schema_json=schema_json,
+            schema_name=schema_name,
+            temperature=temperature,
+            max_output=max_output,
+        )
 
             # Optional automatic snapshot (configurable)
             if AGENT_SNAPSHOTS_AUTO:
@@ -164,6 +263,13 @@ class AgentService:
                     "tools": tools,
                     "reasoning_effort": reasoning_effort,
                     "reasoning_summary": reasoning_summary,
+                    "provider_id": provider_id,
+                    "model_class": model_class,
+                    "endpoint": endpoint,
+                    "use_responses_api": use_responses_api,
+                    "provider_features": provider_features,
+                    "temperature": temperature,
+                    "max_output": max_output,
                 }
                 try:
                     dao.save_snapshot(name, snapshot, metadata={"event": "auto_save"}, is_auto=True)
@@ -171,6 +277,41 @@ class AgentService:
                     # Non-fatal; transaction will still commit the agent save.
                     logger = __import__("logging").getLogger(__name__)
                     logger.exception("Failed to create automatic snapshot for %s", name)
+
+        # Decide whether provider metadata changed (or new agent).
+        def _provider_key_from_row(row: Optional[dict]) -> Optional[tuple]:
+            if not row:
+                return None
+            pf = row.get("provider_features") or {}
+            try:
+                pf_s = json.dumps(pf, sort_keys=True, separators=(",", ":"))
+            except Exception:
+                pf_s = repr(pf)
+            return (
+                row.get("provider_id"),
+                row.get("model_class"),
+                row.get("endpoint"),
+                bool(row.get("use_responses_api")),
+                pf_s,
+            )
+
+        prev_key = _provider_key_from_row(prev)
+
+        new_like = {
+            "provider_id": provider_id,
+            "model_class": model_class,
+            "endpoint": endpoint,
+            "use_responses_api": bool(use_responses_api),
+            "provider_features": provider_features or {},
+        }
+        new_key = _provider_key_from_row(new_like)
+
+        if prev_key != new_key:
+            # Notify runtime: provider metadata changed (or new agent).
+            try:
+                runtime_hooks.on_agent_change()
+            except Exception:
+                pass
 
     def rename_agent_atomic(self, old_name: str, new_name: str) -> None:
         """Atomically rename an agent."""

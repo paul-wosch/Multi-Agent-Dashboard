@@ -13,9 +13,40 @@ from multi_agent_dashboard.ui.utils import parse_json_field
 
 logger = __import__("logging").getLogger(__name__)
 
+from urllib.parse import urlparse
+
+
+def _provider_friendly_name(provider_id: str | None) -> str:
+    mapping = {
+        "openai": "OpenAI",
+        "azure_openai": "Azure OpenAI",
+        "ollama": "Ollama (local)",
+        "anthropic": "Anthropic",
+        "deepseek": "DeepSeek",
+        "custom": "Custom",
+        None: "OpenAI",
+        "": "OpenAI",
+    }
+    pid = (provider_id or "").strip().lower()
+    return mapping.get(pid, pid or "Unknown")
+
+
+def _parse_endpoint_host(endpoint: str | None) -> str | None:
+    if not endpoint:
+        return None
+    try:
+        p = urlparse(endpoint if "://" in endpoint else f"http://{endpoint}")
+        host = p.hostname
+        port = p.port
+        if host is None:
+            return None
+        return f"{host}:{port}" if port else host
+    except Exception:
+        return None
+
 
 def render_history_mode():
-    st.header("📜 Past Runs")
+    st.header(":material/description: Past Runs")
 
     runs = cached_load_runs()
 
@@ -86,6 +117,10 @@ def render_history_mode():
     final = run["final_output"]
     final_is_json = run["final_is_json"]
     final_model = run["final_model"]
+
+    # Run-level badge for strict schema exit
+    if run.get("strict_schema_exit"):
+        st.error("This run exited early due to strict schema validation.", icon=":material/error:")
 
     # Shared cost & latency rendering for stored metrics
     # Pass agent_run_configs so we can populate the Model column for historic runs.
@@ -199,14 +234,49 @@ def render_history_mode():
         extra_cfg_json = parse_json_field(
             cfg.get("extra_config_json"), {}
         )
+        provider_feats = parse_json_field(cfg.get("provider_features_json"), {})
+
+        # Extract allowed domains from the low-level stored tools_config_json (if present)
+        allowed_domains = None
+        try:
+            # helper from view_models normally does this; inline here for export completeness
+            if isinstance(tools_cfg_json, dict):
+                tools_low = tools_cfg_json.get("tools")
+                if isinstance(tools_low, list):
+                    for tcfg in tools_low:
+                        if not isinstance(tcfg, dict):
+                            continue
+                        if tcfg.get("type") != "web_search":
+                            continue
+                        filters = tcfg.get("filters") or {}
+                        if isinstance(filters, dict) and "allowed_domains" in filters:
+                            allowed = filters["allowed_domains"]
+                            if isinstance(allowed, list):
+                                allowed_domains = [str(d) for d in allowed]
+                            else:
+                                allowed_domains = [str(allowed)]
+                            break
+        except Exception:
+            allowed_domains = None
+
+        tools_snapshot = {
+            "enabled": bool(tools_json.get("enabled")),
+            "tools": tools_json.get("tools") or [],
+        }
+        if allowed_domains:
+            tools_snapshot["allowed_domains"] = allowed_domains
+
+        # Provider host/name convenience fields (explicit)
+        endpoint = cfg.get("endpoint") or None
+        provider_id = cfg.get("provider_id") or None
 
         agent_config = {
             "model": cfg.get("model") or a.get("model") or "unknown",
             "role": cfg.get("role") or "–",
-            "tools": {
-                "enabled": bool(tools_json.get("enabled")),
-                "tools": tools_json.get("tools") or [],
-            },
+            "temperature": cfg.get("temperature"),
+            "max_output": cfg.get("max_output"),
+            "max_output_effective": cfg.get("max_output_effective"),
+            "tools": tools_snapshot,
             "reasoning": {
                 "effort": cfg.get("reasoning_effort") or "default",
                 "summary": cfg.get("reasoning_summary") or "none",
@@ -220,7 +290,32 @@ def render_history_mode():
                 "reasoning_config_json": reasoning_cfg_json or None,
                 "extra_config_json": extra_cfg_json or None,
             },
+            # Provider snapshot (captured at run time) including friendly name and host
+            "provider": {
+                "provider_id": provider_id or None,
+                "provider_name": _provider_friendly_name(provider_id),
+                "model_class": cfg.get("model_class") or None,
+                "endpoint": endpoint or None,
+                "host": _parse_endpoint_host(endpoint),
+                "use_responses_api": bool(cfg.get("use_responses_api")),
+                "provider_features": provider_feats or None,
+            },
+            "schema_validation_failed": bool(a.get("schema_validation_failed")),
+            "strict_schema_validation": bool(cfg.get("strict_schema_validation")),
         }
+
+        # Also explicitly expose content_blocks and instrumentation events if present in extra_config_json:
+        try:
+            if isinstance(extra_cfg_json, dict):
+                if "content_blocks" in extra_cfg_json:
+                    agent_config["content_blocks"] = extra_cfg_json.get("content_blocks")
+                if "instrumentation_events" in extra_cfg_json:
+                    agent_config["instrumentation_events"] = extra_cfg_json.get("instrumentation_events")
+                if "structured_response" in extra_cfg_json:
+                    agent_config["structured_response"] = extra_cfg_json.get("structured_response")
+        except Exception:
+            # Non-fatal: leave as-is if parsing/extraction fails
+            pass
 
         export_agents[name] = {
             "output": agent_output,
@@ -244,6 +339,7 @@ def render_history_mode():
             "total_output_cost": round(total_output_cost, 6),
             "total_cost": round(total_cost, 6),
         },
+        "strict_schema_exit": bool(run.get("strict_schema_exit")),
         "task_input": task,
         "final_output": {
             "output": final,
@@ -255,6 +351,7 @@ def render_history_mode():
 
     st.download_button(
         "Download Run as JSON",
+        icon=":material/download:",
         data=__import__("json").dumps(export, indent=2),
         file_name=f"run_{run_id}.json",
         mime="application/json",

@@ -4,7 +4,9 @@ from __future__ import annotations
 from datetime import datetime
 import json
 import logging
+import time
 from typing import List, Dict, Any
+from urllib.parse import urlparse
 
 import streamlit as st
 
@@ -23,8 +25,52 @@ DEFAULT_COLOR = UI_COLORS["default"]["value"]
 DEFAULT_SYMBOL = UI_COLORS["default"]["symbol"]
 
 
+def _parse_endpoint_to_host_port(endpoint: str) -> tuple[str | None, int | None]:
+    """
+    Parse an endpoint to extract host and port if present.
+    Returns (host, port) or (None, None) when not parseable.
+    """
+    if not endpoint:
+        return None, None
+    try:
+        p = urlparse(endpoint if "://" in endpoint else f"http://{endpoint}")
+        host = p.hostname
+        port = p.port
+        return host, port
+    except Exception:
+        return None, None
+
+
+def _compose_endpoint_from_host_port(host: str | None, port: str | None) -> str | None:
+    """
+    Build an endpoint string from host and port values.
+    If host already includes a scheme, preserve it; otherwise default to http://.
+    """
+    if not host:
+        return None
+    host = host.strip().rstrip("/")
+    if not host:
+        return None
+
+    # If host contains scheme, keep it
+    if host.startswith("http://") or host.startswith("https://"):
+        base = host
+    else:
+        base = f"http://{host}"
+
+    if port:
+        port = port.strip()
+        if port:
+            # Avoid double port if user included it
+            h, existing_port = _parse_endpoint_to_host_port(base)
+            if existing_port is None:
+                # append port
+                base = base.rstrip("/") + f":{port}"
+    return base
+
+
 def render_agent_editor():
-    st.header("🧠 Agent Editor")
+    st.header(":material/psychology: Agent Editor")
 
     # -------------------------
     # Load agents from DB
@@ -44,6 +90,17 @@ def render_agent_editor():
             "reasoning_effort": a.get("reasoning_effort"),
             "reasoning_summary": a.get("reasoning_summary"),
             "system_prompt": a.get("system_prompt_template"),
+            # Provider metadata
+            "provider_id": a.get("provider_id"),
+            "model_class": a.get("model_class"),
+            "endpoint": a.get("endpoint"),
+            "use_responses_api": a.get("use_responses_api"),
+            "provider_features": a.get("provider_features") or {},
+            "structured_output_enabled": bool(a.get("structured_output_enabled")),
+            "schema_json": a.get("schema_json") or "",
+            "schema_name": a.get("schema_name") or "",
+            "temperature": a.get("temperature"),
+            "max_output": a.get("max_output") or 0,
         }
         for a in agents_raw
     ]
@@ -91,6 +148,19 @@ def render_agent_editor():
             "tools": {"enabled": False, "tools": []},
             "reasoning_effort": None,
             "reasoning_summary": None,
+            # provider defaults
+            "provider_id": "openai",
+            "model_class": None,
+            "endpoint": None,
+            "endpoint_host": None,
+            "endpoint_port": None,
+            "use_responses_api": True,
+            "provider_features": {},
+            "structured_output_enabled": False,
+            "schema_json": "",
+            "schema_name": "",
+            "temperature": None,
+            "max_output": 0,
         }
     state = st.session_state.agent_editor_state
 
@@ -135,9 +205,24 @@ def render_agent_editor():
                 "tools": {"enabled": False, "tools": []},
                 "reasoning_effort": None,
                 "reasoning_summary": None,
+                "provider_id": "openai",
+                "model_class": None,
+                "endpoint": None,
+                "endpoint_host": None,
+                "endpoint_port": None,
+                "use_responses_api": True,
+                "provider_features": {},
+                "structured_output_enabled": False,
+                "schema_json": "",
+                "schema_name": "",
+                "temperature": None,
             }
         else:
             base_agent = next(a for a in agents if a["name"] == selected)
+
+        # Parse endpoint to host/port for convenience in the editor
+        endpoint_val = base_agent.get("endpoint")
+        host, port = _parse_endpoint_to_host_port(endpoint_val or "")
 
         state.update(
             {
@@ -155,6 +240,18 @@ def render_agent_editor():
                 or {"enabled": False, "tools": []},
                 "reasoning_effort": base_agent.get("reasoning_effort"),
                 "reasoning_summary": base_agent.get("reasoning_summary"),
+                "provider_id": base_agent.get("provider_id") or "openai",
+                "model_class": base_agent.get("model_class"),
+                "endpoint": endpoint_val,
+                "endpoint_host": host,
+                "endpoint_port": str(port) if port is not None else None,
+                "use_responses_api": bool(base_agent.get("use_responses_api")),
+                "provider_features": base_agent.get("provider_features") or {},
+                "structured_output_enabled": bool(base_agent.get("structured_output_enabled")),
+                "schema_json": base_agent.get("schema_json") or "",
+                "schema_name": base_agent.get("schema_name") or "",
+                "temperature": base_agent.get("temperature"),
+                "max_output": base_agent.get("max_output") or 0,
             }
         )
 
@@ -168,11 +265,11 @@ def render_agent_editor():
     # -------------------------
     tabs = st.tabs(
         [
-            "1️⃣ Basics",
-            "2️⃣ Prompt",
-            "3️⃣ Inputs / Outputs",
-            "⚙️ Advanced",
-            "📚 Snapshots",
+            ":material/looks_one: Basics",
+            ":material/looks_two: Prompt",
+            ":material/looks_3: Inputs / Outputs",
+            ":material/settings: Advanced",
+            ":material/library_books: Snapshots",
         ]
     )
 
@@ -191,6 +288,57 @@ def render_agent_editor():
         role_val = st.text_input(
             "Role",
             value=state["role"],
+        )
+
+        # Provider selection
+        st.markdown("### Provider (per-agent)")
+        provider_options = ["openai", "ollama", "deepseek", "custom"]
+        provider_display = {
+            "openai": "OpenAI",
+            "ollama": "Ollama (local)",
+            "deepseek": "DeepSeek",
+            "custom": "Custom",
+        }
+        provider_index = provider_options.index(state.get("provider_id") or "openai") if (state.get("provider_id") or "openai") in provider_options else 0
+        provider_choice = st.selectbox(
+            "Provider",
+            provider_options,
+            index=provider_index,
+            format_func=lambda v: provider_display.get(v, v),
+            help="Select which provider this agent should use. This only records metadata for later runtime wiring.",
+        )
+
+        # Endpoint / host override for custom or local hosts
+        endpoint_val = st.text_input(
+            "Endpoint / Host (optional)",
+            value=state.get("endpoint") or "",
+            help="Optional host or endpoint used to reach the model provider (e.g., http://localhost:11434 for a local Ollama)."
+        )
+
+        # Show Host / Port fields when provider is local / custom to make it convenient
+        show_host_port = provider_choice in ("ollama", "custom")
+        host_val = state.get("endpoint_host") or ""
+        port_val = state.get("endpoint_port") or ""
+
+        if show_host_port:
+            col_h, col_p = st.columns([3, 1])
+            with col_h:
+                host_val = st.text_input(
+                    "Host (e.g., localhost)",
+                    value=host_val,
+                    help="Host part of endpoint. If left empty, the 'Endpoint' text above is used as-is.",
+                )
+            with col_p:
+                port_val = st.text_input(
+                    "Port (e.g., 11434)",
+                    value=port_val or "",
+                    help="Optional port. If provided, will be combined with Host when saving.",
+                )
+
+        use_responses_api_val = st.checkbox(
+            "Use provider Responses-style API when available",
+            value=bool(state.get("use_responses_api")),
+            help="Enable when provider supports a Responses-style structured API (e.g., OpenAI Responses).",
         )
 
         st.markdown("### Appearance")
@@ -301,7 +449,7 @@ def render_agent_editor():
             placeholder="Short note about this snapshot",
         )
 
-        if st.button("📸 Create Snapshot", key=f"create_snapshot_{state['name']}"):
+        if st.button("Create Snapshot", icon=":material/photo_camera:", key=f"create_snapshot_{state['name']}"):
             # Build snapshot dict based on current editor state
             snapshot = {
                 "model": state["model"],
@@ -315,6 +463,13 @@ def render_agent_editor():
                 "tools": state["tools"],
                 "reasoning_effort": state.get("reasoning_effort"),
                 "reasoning_summary": state.get("reasoning_summary"),
+                "provider_id": state.get("provider_id"),
+                "model_class": state.get("model_class"),
+                "endpoint": state.get("endpoint"),
+                "use_responses_api": state.get("use_responses_api"),
+                "provider_features": state.get("provider_features"),
+                "temperature": state.get("temperature"),
+                "max_output": state.get("max_output"),
             }
             note = st.session_state.get(snapshot_note_key) or ""
             try:
@@ -354,7 +509,7 @@ def render_agent_editor():
 
         col_prune_a, col_prune_b = st.columns(2)
         with col_prune_a:
-            if st.button("🧹 Prune snapshots for this agent", key=f"prune_agent_{state['name']}"):
+            if st.button("Prune snapshots for this agent", icon=":material/delete_sweep:", key=f"prune_agent_{state['name']}"):
                 try:
                     deleted = get_agent_service().prune_snapshots(agent_name=state["name"], keep=int(keep_val))
                     invalidate_agents()
@@ -364,7 +519,7 @@ def render_agent_editor():
                     logger.exception("Failed to prune snapshots for %s", state["name"])
                     st.error("Failed to prune snapshots; check logs for details")
         with col_prune_b:
-            if st.button("🧹 Prune snapshots for all agents", key=f"prune_all_{state['name']}"):
+            if st.button("Prune snapshots for all agents", icon=":material/delete_sweep:", key=f"prune_all_{state['name']}"):
                 try:
                     deleted = get_agent_service().prune_snapshots(agent_name=None, keep=int(keep_val))
                     invalidate_agents()
@@ -391,6 +546,8 @@ def render_agent_editor():
                         # Load snapshot into editor state (do not auto-save)
                         s = snap.get("snapshot") or {}
                         # Update the editor state before widgets are re-created on rerun
+                        # Parse endpoint into host/port again for convenience
+                        host_s, port_s = _parse_endpoint_to_host_port(s.get("endpoint") or "")
                         st.session_state.agent_editor_state.update(
                             {
                                 "name": state.get("name", "") or "",
@@ -405,6 +562,14 @@ def render_agent_editor():
                                 "tools": s.get("tools") or {"enabled": False, "tools": []},
                                 "reasoning_effort": s.get("reasoning_effort"),
                                 "reasoning_summary": s.get("reasoning_summary"),
+                                "provider_id": s.get("provider_id", "openai"),
+                                "model_class": s.get("model_class"),
+                                "endpoint": s.get("endpoint"),
+                                "endpoint_host": host_s,
+                                "endpoint_port": str(port_s) if port_s is not None else None,
+                                "use_responses_api": s.get("use_responses_api", True),
+                                "provider_features": s.get("provider_features") or {},
+                                "max_output": s.get("max_output") or 0,
                             }
                         )
                         st.session_state.agent_editor_state_changed_this_run = True
@@ -422,19 +587,147 @@ def render_agent_editor():
 
     # ----- Advanced tab -----
     with adv_tab:
+        # Parse current provider_features JSON into pf_val for use in the UI
+        pf_default = json.dumps(state.get("provider_features") or {}, indent=2)
+        # Use a unique session key so editing multiple agents in the same session doesn't collide badly
+        pf_session_key = f"agent_editor_pf_text_{state.get('name','__unknown')}"
+        if pf_session_key not in st.session_state:
+            st.session_state[pf_session_key] = pf_default
+
+        # Provider Features (JSON)
+        pf_val = {}
+        # Capability toggles currently not used (consider dynamic capability detection)
+        default_structured = True
+        default_tool_calling = True
+        default_reasoning = True
+
+        structured_checked = default_structured
+        tool_calling_checked = default_tool_calling
+        reasoning_checked  = default_reasoning
+
+        provider_feats = dict(pf_val or {})
+
+        # Merge the checkbox preferences
+        # Checkboxes are authoritative in the UI; they will be persisted into provider_features on Save
+        provider_feats["structured_output"] = bool(structured_checked)
+        provider_feats["tool_calling"] = bool(tool_calling_checked)
+        provider_feats["reasoning"] = bool(reasoning_checked)
+
+        st.markdown("#### Structured output settings")
+        st.caption("Provider-agnostic controls for schema-based output enforcement.")
+
+        structured_enabled = st.checkbox(
+            "Enable structured output enforcement",
+            value=bool(state.get("structured_output_enabled")),
+            help="When enabled, the runtime will attempt provider-specific structured output enforcement.",
+        )
+
+        schema_name_val = st.text_input(
+            "Schema name (optional)",
+            value=state.get("schema_name") or "",
+            help="Optional registry key for a reusable schema (Pydantic/Zod).",
+        )
+
+        schema_json_val = st.text_area(
+            "Schema JSON (optional)",
+            value=state.get("schema_json") or "",
+            height=140,
+            help="JSON Schema used to validate/enforce structured output.",
+        )
+
+        temperature_val = st.number_input(
+            "Temperature",
+            min_value=0.0,
+            max_value=2.0,
+            value=float(state.get("temperature") or 0.0),
+            step=0.1,
+            help="Lower values (e.g., 0) improve structured output reliability.",
+        )
+
+        max_output_val = st.number_input(
+            "Max output tokens (0 = no limit)",
+            min_value=0,
+            value=int(state.get("max_output") or 0),
+            step=1,
+            help="Maximum tokens the agent can generate. 0 means no limit.",
+        )
+
+        state["structured_output_enabled"] = bool(structured_enabled)
+        state["schema_name"] = schema_name_val or ""
+        state["schema_json"] = schema_json_val or ""
+        state["temperature"] = float(temperature_val)
+        state["max_output"] = int(max_output_val)
+
+        # --- Ollama endpoint health check indicator ---
+        # Only show when provider_choice indicates local Ollama and some endpoint info is present
+        try:
+            endpoint_candidate = None
+            # prefer Endpoint field if present
+            if endpoint_val and endpoint_val.strip():
+                endpoint_candidate = endpoint_val.strip()
+            # else consider host+port composition
+            elif show_host_port and host_val:
+                endpoint_candidate = _compose_endpoint_from_host_port(host_val, port_val)
+
+            if provider_choice == "ollama" and endpoint_candidate:
+                # If an LLM client was initialized at app bootstrap, prefer its cached check
+                llm_client = st.session_state.get("llm_client")
+                health = None
+                try:
+                    if llm_client and hasattr(llm_client, "check_ollama_endpoint"):
+                        # Use a small timeout for UI snappiness; the check is cached on the factory if present.
+                        health = llm_client.check_ollama_endpoint(endpoint_candidate, timeout=0.9)
+                    else:
+                        # Fallback: attempt a minimal probe (very short timeout)
+                        import urllib.request, urllib.error
+                        try:
+                            req = urllib.request.Request(endpoint_candidate, method="GET",
+                                                         headers={"User-Agent": "multi-agent-dashboard/0.1"})
+                            with urllib.request.urlopen(req, timeout=0.9) as resp:
+                                code = getattr(resp, "status", None) or getattr(resp, "getcode", lambda: None)()
+                                health = {"endpoint": endpoint_candidate, "reachable": True,
+                                          "status": int(code) if code else None,
+                                          "message": f"HTTP {code} @ {endpoint_candidate}", "checked_at": time.time()}
+                        except urllib.error.HTTPError as he:
+                            health = {"endpoint": endpoint_candidate, "reachable": True,
+                                      "status": int(getattr(he, "code", None)),
+                                      "message": f"HTTP {getattr(he, 'code', None)} @ {endpoint_candidate}",
+                                      "checked_at": time.time()}
+                        except Exception as e:
+                            health = {"endpoint": endpoint_candidate, "reachable": False, "status": None,
+                                      "message": str(e), "checked_at": time.time()}
+                except Exception:
+                    health = {"endpoint": endpoint_candidate, "reachable": False, "status": None,
+                              "message": "health check failed", "checked_at": time.time()}
+
+                # Display a succinct status hint
+                if health:
+                    if health.get("reachable"):
+                        st.success(f"Ollama reachable ({health.get('message')})")
+                    else:
+                        st.error(f"Ollama unreachable: {health.get('message')}")
+        except Exception:
+            # Keep the editor resilient: ignore health-check failures
+            logger.debug("Agent editor endpoint health check failed", exc_info=True)
+
+        # Tools section (respects provider_feat.tool_calling)
         st.markdown("### Tools")
 
         tools_state = state.get("tools") or {}
         tools_enabled_default = bool(tools_state.get("enabled"))
         selected_tools_default = tools_state.get("tools") or []
 
+        # Disable tools enabling if provider clearly doesn't support tool_calling
+        tools_supported = bool(provider_feats.get("tool_calling", False))
+
         tools_enabled = st.checkbox(
             "Enable tool calling",
             value=tools_enabled_default,
             help="Allow this agent to call tools such as web search.",
+            disabled=not tools_supported,
         )
 
-        available_tools = ["web_search"]
+        available_tools = ["web_search", "web_search_ddg", "web_fetch"]
         selected_tools: List[str] = []
         if tools_enabled:
             selected_tools = st.multiselect(
@@ -443,13 +736,17 @@ def render_agent_editor():
                 default=[
                     t for t in selected_tools_default if t in available_tools
                 ],
-                help="For now only web_search is available.",
+                help="web_search (OpenAI native), web_search_ddg (DuckDuckGo via function calling), or web_fetch (fetch webpage content)",
             )
 
         st.markdown("### Reasoning")
 
         effort_options = ["none", "low", "medium", "high", "xhigh"]
         current_effort = state.get("reasoning_effort") or "medium"
+
+        # Reasoning support derived above in provider_feats
+        reasoning_supported = bool(provider_feats.get("reasoning", True))
+
         reasoning_effort_val = st.selectbox(
             "Reasoning Effort",
             options=effort_options,
@@ -457,6 +754,7 @@ def render_agent_editor():
             if current_effort in effort_options
             else effort_options.index("medium"),
             help="Controls depth & cost. 'none' disables special reasoning behavior.",
+            disabled=not reasoning_supported,
         )
 
         summary_options = ["auto", "concise", "detailed", "none"]
@@ -468,6 +766,7 @@ def render_agent_editor():
             if current_summary in summary_options
             else summary_options.index("none"),
             help="Configure reasoning summaries returned by reasoning models.",
+            disabled=not reasoning_supported,
         )
 
     st.divider()
@@ -476,6 +775,19 @@ def render_agent_editor():
     # Reflect edits into state
     # -------------------------
     if not state_changed_this_run:
+        # Decide which endpoint value to persist:
+        # 1) If Endpoint text input provided, use it.
+        # 2) Else if Host provided, compose host[:port] into endpoint.
+        endpoint_final = endpoint_val.strip() if endpoint_val and endpoint_val.strip() else None
+        if not endpoint_final and show_host_port and host_val:
+            endpoint_final = _compose_endpoint_from_host_port(host_val, port_val)
+
+        # Merged provider_features for state: prefer pf_val (parsed JSON), then overlay checkbox toggles
+        merged_pf = dict(pf_val or {})
+        merged_pf["structured_output"] = bool(structured_checked)
+        merged_pf["tool_calling"] = bool(tool_calling_checked)
+        merged_pf["reasoning"] = bool(reasoning_checked)
+
         state.update(
             {
                 "name": name_val.strip(),
@@ -497,6 +809,12 @@ def render_agent_editor():
                 },
                 "reasoning_effort": reasoning_effort_val,
                 "reasoning_summary": reasoning_summary_val,
+                "provider_id": provider_choice,
+                "endpoint": endpoint_final,
+                "endpoint_host": host_val or None,
+                "endpoint_port": port_val or None,
+                "use_responses_api": bool(use_responses_api_val),
+                "provider_features": merged_pf or {},
             }
         )
 
@@ -509,7 +827,7 @@ def render_agent_editor():
     # Save button
     # -------------------------
     with col_a:
-        if st.button("💾 Save"):
+        if st.button("Save", icon=":material/save:"):
             old_name = state["selected_name"] if not is_new else ""
             new_name = state["name"].strip()
 
@@ -531,23 +849,49 @@ def render_agent_editor():
                 previous_agent = next(a for a in agents if a["name"] == old_name)
                 previous_prompt = previous_agent["prompt"]
 
-            get_agent_service().save_agent_atomic(
-                new_name,
-                state["model"],
-                state["prompt"],
-                state["role"],
-                state["input_vars"],
-                state["output_vars"],
-                color=state.get("color") or DEFAULT_COLOR,
-                symbol=state.get("symbol") or DEFAULT_SYMBOL,
-                save_prompt_version=(state["prompt"] != previous_prompt),
-                metadata={},
-                tools=state.get("tools")
-                or {"enabled": False, "tools": []},
-                reasoning_effort=state.get("reasoning_effort"),
-                reasoning_summary=state.get("reasoning_summary"),
-                system_prompt=state.get("system_prompt") or None,
-            )
+            # Persist provider_features: ensure the checkboxes are merged into JSON
+            provider_features_to_save = state.get("provider_features") or {}
+            # (The state was already updated above, but merge again to be safe)
+            provider_features_to_save["structured_output"] = bool(st.session_state.get(f"agent_editor_pf_structured_{state.get('name','__unknown')}", provider_features_to_save.get("structured_output", False)))
+            provider_features_to_save["tool_calling"] = bool(st.session_state.get(f"agent_editor_pf_tool_calling_{state.get('name','__unknown')}", provider_features_to_save.get("tool_calling", False)))
+            provider_features_to_save["reasoning"] = bool(st.session_state.get(f"agent_editor_pf_reasoning_{state.get('name','__unknown')}", provider_features_to_save.get("reasoning", False)))
+
+            # If host/port were provided and endpoint empty, ensure endpoint stored from host/port (last-resort)
+            ep = state.get("endpoint")
+            if not ep and show_host_port and state.get("endpoint_host"):
+                ep = _compose_endpoint_from_host_port(state.get("endpoint_host"), state.get("endpoint_port"))
+            try:
+                get_agent_service().save_agent_atomic(
+                    new_name,
+                    state["model"],
+                    state["prompt"],
+                    state["role"],
+                    state["input_vars"],
+                    state["output_vars"],
+                    color=state.get("color") or DEFAULT_COLOR,
+                    symbol=state.get("symbol") or DEFAULT_SYMBOL,
+                    save_prompt_version=(state["prompt"] != previous_prompt),
+                    metadata={},
+                    tools=state.get("tools")
+                    or {"enabled": False, "tools": []},
+                    reasoning_effort=state.get("reasoning_effort"),
+                    reasoning_summary=state.get("reasoning_summary"),
+                    system_prompt=state.get("system_prompt") or None,
+                    provider_id=state.get("provider_id"),
+                    model_class=state.get("model_class"),
+                    endpoint=ep,
+                    use_responses_api=bool(state.get("use_responses_api")),
+                    provider_features=provider_features_to_save,
+                    structured_output_enabled=bool(state.get("structured_output_enabled")),
+                    schema_json=state.get("schema_json") or None,
+                    schema_name=state.get("schema_name") or None,
+                    temperature=state.get("temperature"),
+                    max_output=state.get("max_output"),
+                )
+            except Exception:
+                logger.exception("Failed to save agent")
+                st.error("Failed to save agent to database")
+                return
 
             invalidate_agents()
             reload_agents_into_engine()
@@ -558,7 +902,7 @@ def render_agent_editor():
     # Duplicate button
     # -------------------------
     with col_b:
-        if not is_new and st.button("📄 Duplicate"):
+        if not is_new and st.button("Duplicate", icon=":material/content_copy:"):
             try:
                 get_agent_service().save_agent(
                     f"{state['name']}_copy",
@@ -574,6 +918,16 @@ def render_agent_editor():
                     reasoning_effort=state.get("reasoning_effort"),
                     reasoning_summary=state.get("reasoning_summary"),
                     system_prompt=state.get("system_prompt") or None,
+                    provider_id=state.get("provider_id"),
+                    model_class=state.get("model_class"),
+                    endpoint=state.get("endpoint"),
+                    use_responses_api=bool(state.get("use_responses_api")),
+                    provider_features=state.get("provider_features"),
+                    structured_output_enabled=bool(state.get("structured_output_enabled")),
+                    schema_json=state.get("schema_json") or None,
+                    schema_name=state.get("schema_name") or None,
+                    temperature=state.get("temperature"),
+                    max_output=state.get("max_output"),
                 )
             except Exception:
                 logger.exception("Failed to duplicate agent")
@@ -587,7 +941,7 @@ def render_agent_editor():
     # Delete button
     # -------------------------
     with col_c:
-        if not is_new and st.button("🗑 Delete"):
+        if not is_new and st.button("Delete", icon=":material/delete:"):
             try:
                 get_agent_service().delete_agent_atomic(state["name"])
             except Exception:
@@ -670,6 +1024,10 @@ def render_agent_editor():
 
                 state["selected_name"] = "<New Agent>"
 
+                # Parse endpoint if template provided
+                tpl_endpoint = chosen_agent.get("endpoint")
+                host_tpl, port_tpl = _parse_endpoint_to_host_port(tpl_endpoint or "")
+
                 state.update(
                     {
                         "name": imported_name,
@@ -681,6 +1039,13 @@ def render_agent_editor():
                         "output_vars": chosen_agent.get("output_vars", []),
                         "color": DEFAULT_COLOR,
                         "symbol": DEFAULT_SYMBOL,
+                        "provider_id": chosen_agent.get("provider_id", "openai"),
+                        "model_class": chosen_agent.get("model_class"),
+                        "endpoint": tpl_endpoint,
+                        "endpoint_host": host_tpl,
+                        "endpoint_port": str(port_tpl) if port_tpl is not None else None,
+                        "use_responses_api": chosen_agent.get("use_responses_api", True),
+                        "provider_features": chosen_agent.get("provider_features") or {},
                     }
                 )
 

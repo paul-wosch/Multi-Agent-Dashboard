@@ -11,12 +11,19 @@ Most configuration is centralized in `config.py` and `.env`.
 
 ## 🌱 Environment Variables (`.env` at project root)
 
-| Name             | Required | Default | Description                                                |
-| ---------------- | -------- | ------- | ---------------------------------------------------------- |
-| `OPENAI_API_KEY` | ✅        | None    | OpenAI API key used by the LLM client                      |
-| `LOG_LEVEL`      | ❌        | `INFO`  | Global logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
+| Name              | Required | Default | Description                                                |
+| ----------------- | -------- | ------- | ---------------------------------------------------------- |
+| `OPENAI_API_KEY`  | ✅        | None    | OpenAI API key used by the LLM client                      |
+| `DEEPSEEK_API_KEY`| ❌        | None    | DeepSeek API key for DeepSeek provider                     |
+| `USE_LITELLM`     | ❌        | `false` | Enable unified provider access via LiteLLM (true/false)    |
+| `LOG_LEVEL`       | ❌        | `INFO`  | Global logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
+| `DB_FILE`         | ❌        | `multi_agent_runs.db` | Custom SQLite database filename          |
 
 If `OPENAI_API_KEY` is missing or invalid, LLM calls will fail at runtime; the UI may load but requests to the model will error.
+
+- `DEEPSEEK_API_KEY` is required when using the DeepSeek provider
+- `USE_LITELLM` enables unified provider access via LiteLLM (default `false` during phased rollout). When enabled, structured output uses LiteLLM's JSON Schema format for all providers.
+- `DB_FILE` can be used to specify a custom SQLite database filename
 
 ## 🧱 Core Paths & Caps (from `config.py`)
 
@@ -28,8 +35,8 @@ If `OPENAI_API_KEY` is missing or invalid, LLM calls will fail at runtime; the U
 | `DB_FILE_PATH`     | `data/db/multi_agent_runs.db` | Main SQLite DB file (auto-created)          |
 | `MIGRATIONS_PATH`  | `data/migrations`             | Ordered SQL migrations                      |
 | `LOGS_PATH`        | `data/logs`                   | Log directory for rotating app logs         |
-| `AGENT_INPUT_CAP`  | defined in `config.py`        | Max characters per formatted input segment  |
-| `AGENT_OUTPUT_CAP` | defined in `config.py`        | Max characters per rendered prompt / output |
+| `AGENT_INPUT_CHAR_CAP`  | defined in `config.py`        | Max characters per formatted input segment  |
+| `AGENT_OUTPUT_CHAR_CAP` | defined in `config.py`        | Max characters per rendered prompt / output |
 
 Prompt formatting and outputs are passed through `utils.safe_format` using these caps to avoid unbounded prompt sizes.
 

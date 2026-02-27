@@ -127,13 +127,13 @@ st.markdown(
 # Heading and Metrics columns
 col_main, col_right = st.columns([7, 2])
 with col_main:
-    st.title("🧠 Multi-Agent Pipeline Dashboard")
+    st.title(":material/neurology: Multi Agent Dashboard")
     st.caption("Design pipelines, run tasks, inspect agent behavior, and manage agent snapshots.")
 
-    MODE_RUN = "▶️ Run Pipeline"
-    MODE_AGENTS = "🧠 Manage Agents"
-    MODE_HISTORY = "📜 History"
-    MODE_LOGS = "🪵 Logs"
+    MODE_RUN = ":material/play_arrow: Run Pipeline"
+    MODE_AGENTS = ":material/psychology: Manage Agents"
+    MODE_HISTORY = ":material/description: History"
+    MODE_LOGS = ":material/list: Logs"
 
     mode = st.radio(
         "Mode",
@@ -244,6 +244,12 @@ strict_mode = st.sidebar.checkbox(
     help="Fail fast on agent output mismatches",
 )
 
+strict_schema_validation = st.sidebar.checkbox(
+    "Strict schema validation",
+    value=False,
+    help="Fail fast when structured output JSON does not match schema (skips remaining agents).",
+)
+
 st.divider()
 
 # Import per-mode renderers (extracted into dedicated modules in Phase 4)
@@ -257,7 +263,7 @@ from multi_agent_dashboard.ui.logging_ui import render_logs_mode
 # ======================================================
 
 if mode == MODE_RUN:
-    render_run_mode(strict_mode=strict_mode)
+    render_run_mode(strict_mode=strict_mode, strict_schema_validation=strict_schema_validation)
 elif mode == MODE_AGENTS:
     render_agent_editor()
 elif mode == MODE_HISTORY:

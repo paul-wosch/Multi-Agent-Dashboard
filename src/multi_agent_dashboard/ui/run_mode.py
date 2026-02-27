@@ -161,7 +161,7 @@ def render_run_sidebar() -> Tuple[
     file_error = False
 
     if requires_files:
-        with st.sidebar.expander("📎 Attach files", expanded=True):
+        with st.sidebar.expander(":material/attach_file: Attach files", expanded=True):
             # Determine the 'type' parameter for Streamlit's file_uploader:
             # - If ATTACHMENT_FILE_TYPES_RESTRICTED is True, pass the allowed extensions list.
             # - If False, pass None to allow any file extension.
@@ -208,7 +208,7 @@ def render_run_sidebar() -> Tuple[
         if not tools_cfg.get("enabled"):
             return False
         tools = tools_cfg.get("tools") or []
-        return "web_search" in tools
+        return any(tool.startswith("web_search") for tool in tools)
 
     any_web_search = any(agent_uses_web_search(a) for a in selected_steps)
 
@@ -218,7 +218,7 @@ def render_run_sidebar() -> Tuple[
     allowed_domains_by_agent: Dict[str, List[str]] = {}
 
     if any_web_search:
-        st.sidebar.markdown("### 🔎 Web Search Domains")
+        st.sidebar.markdown("### :material/search: Web Search Domains")
         st.sidebar.caption(
             "Optionally limit web search to specific domains for each agent "
             "(one domain per line). Leave empty to allow any domain."
@@ -250,7 +250,8 @@ def render_run_sidebar() -> Tuple[
     # Run button
     # -------------------------
     run_clicked = st.sidebar.button(
-        "🚀 Run Pipeline",
+        "Run Pipeline",
+        icon=":material/rocket_launch:",
         width="stretch",
     )
 
@@ -260,7 +261,7 @@ def render_run_sidebar() -> Tuple[
     with st.sidebar.expander("Advanced", expanded=False):
         name = st.text_input("Save as Pipeline")
 
-        if st.button("💾 Save Pipeline"):
+        if st.button("Save Pipeline", icon=":material/save:"):
             pipeline_name = name.strip()
             if not pipeline_name:
                 st.error("Pipeline name cannot be empty.")
@@ -286,7 +287,8 @@ def render_run_sidebar() -> Tuple[
             )
 
             st.download_button(
-                label="⬇️ Download Pipeline Agents (JSON)",
+                label="Download Pipeline Agents (JSON)",
+                icon=":material/download:",
                 data=agents_json,
                 file_name=f"{selected_pipeline}_agents.json",
                 mime="application/json",
@@ -311,7 +313,7 @@ def render_warnings(result: EngineResult):
     if not result.warnings:
         return
 
-    st.warning("⚠️ Pipeline Warnings")
+    st.warning("Pipeline Warnings", icon=":material/warning:")
     for w in result.warnings:
         st.markdown(f"- {w}")
 
@@ -350,7 +352,7 @@ def render_output_block(
                     st.json(parsed)
                     return
             except Exception:
-                st.warning("⚠️ Marked as JSON but failed to parse; falling back to text view.")
+                st.warning("Marked as JSON but failed to parse; falling back to text view.", icon=":material/warning:")
 
         # Try a best-effort parse: if the stored text looks like JSON, render it
         if isinstance(text, str):
@@ -392,7 +394,8 @@ def render_final_output(
     # Download button for the current run JSON export (if provided)
     if current_run_export is not None:
         st.download_button(
-            "⬇️ Download This Run as JSON",
+            "Download This Run as JSON",
+            icon=":material/download:",
             data=json.dumps(current_run_export, indent=2),
             file_name="current_run.json",
             mime="application/json",
@@ -404,7 +407,7 @@ def render_agent_outputs(result: EngineResult, steps: List[str]):
     for agent in steps:
         out = result.memory.get(agent, "")
         render_output_block(
-            f"🔹 {agent}",
+            f":material/circle: {agent}",
             out,
             key_prefix=f"run_agent_{agent}",
         )
@@ -512,6 +515,13 @@ def config_view_from_engine_result(
 
         from multi_agent_dashboard.ui.view_models import AgentConfigView
 
+        # Pull any runtime snapshot produced by engine.run_seq if available
+        run_cfg = (result.agent_configs or {}).get(name) or {}
+
+        raw_tools_config = run_cfg.get("tools_config") or None
+        raw_reasoning_config = run_cfg.get("reasoning_config") or None
+        raw_extra_config = run_cfg.get("extra") or None
+
         views.append(
             AgentConfigView(
                 agent_name=name,
@@ -525,6 +535,24 @@ def config_view_from_engine_result(
                 # Expose both prompt templates from the live AgentSpec
                 prompt_template=getattr(spec, "prompt_template", None),
                 system_prompt_template=getattr(spec, "system_prompt_template", None),
+                # Include provider features and provider identity from the spec for live view
+                provider_features=getattr(spec, "provider_features", None),
+                provider_id=getattr(spec, "provider_id", None),
+                model_class=getattr(spec, "model_class", None),
+                endpoint=getattr(spec, "endpoint", None),
+                use_responses_api=getattr(spec, "use_responses_api", False),
+                temperature=getattr(spec, "temperature", None),
+                max_output=getattr(spec, "max_output", 0),
+                max_output_effective=spec.effective_max_output() or 0,
+                # Include runtime raw configs (so the tools view can display content_blocks, instrumentation, etc.)
+                raw_tools_config=raw_tools_config or None,
+                raw_reasoning_config=raw_reasoning_config or None,
+                raw_extra_config=raw_extra_config or None,
+                schema_validation_failed=bool((result.agent_schema_validation_failed or {}).get(name)),
+                strict_schema_validation=bool((result.agent_configs or {}).get(name, {}).get("strict_schema_validation")),
+                structured_output_enabled=bool((result.agent_configs or {}).get(name, {}).get("structured_output_enabled")),
+                schema_json=(result.agent_configs or {}).get(name, {}).get("schema_json"),
+                schema_name=(result.agent_configs or {}).get(name, {}).get("schema_name"),
             )
         )
     return views
@@ -537,13 +565,13 @@ def render_run_results(
 ):
     tabs = st.tabs(
         [
-            "🟢 Final Output",
-            "⚠️ Warnings",
-            "📁 Agent Outputs",
-            "🧩 Graph",
-            "🔍 Compare",
-            "💲 Cost & Latency",
-            "🛠 Tools & Advanced",
+            ":material/check_circle: Final Output",
+            ":material/warning: Warnings",
+            ":material/folder: Agent Outputs",
+            ":material/polyline: Graph",
+            ":material/search: Compare",
+            ":material/attach_money: Cost & Latency",
+            ":material/build: Tools & Advanced",
         ]
     )
 
@@ -569,7 +597,7 @@ def render_run_results(
         render_tools_advanced_tab(result, steps)
 
 
-def render_run_mode(strict_mode: bool = False):
+def render_run_mode(strict_mode: bool = False, strict_schema_validation: bool = False):
     (
         pipeline,
         steps,
@@ -641,6 +669,7 @@ def render_run_mode(strict_mode: bool = False):
                     steps=steps,
                     initial_input=task,
                     strict=strict_mode,
+                    strict_schema_validation=strict_schema_validation,
                     files=files_payload if files_payload else None,
                     allowed_domains=allowed_domains_by_agent,
                 )
@@ -683,7 +712,7 @@ def render_run_mode(strict_mode: bool = False):
 
         # One final update when done
         progress_bar.progress(100)
-        progress_text.caption("Pipeline completed ✅")
+        progress_text.caption("Pipeline completed :material/check:")
         _update_timer()
 
         # -----------------------
@@ -720,13 +749,23 @@ def render_run_mode(strict_mode: bool = False):
                 agent_configs=result.agent_configs,
                 agent_metrics=result.agent_metrics,
                 tool_usages=result.tool_usages,
+                strict_schema_exit=result.strict_schema_exit,
+                agent_schema_validation_failed=result.agent_schema_validation_failed,
             )
         except Exception:
             logger.exception("Failed to persist run")
             st.error("Run completed but failed to save to database")
         invalidate_runs()
 
-        st.success("Pipeline completed!")
+        if result.errors:
+            st.error("Pipeline completed with errors!", icon=":material/error:")
+        elif result.warnings:
+            st.success("Pipeline completed with warnings!", icon=":material/check:")
+        else:
+            st.success("Pipeline completed!", icon=":material/check:")
+
+        if result.strict_schema_exit:
+            st.error("Pipeline exited early due to strict schema validation failure.", icon=":material/error:")
 
         # Inline warning banner
         if "__warnings__" in st.session_state.engine.memory:

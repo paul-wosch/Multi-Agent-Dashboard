@@ -15,6 +15,9 @@ from multi_agent_dashboard.models import AgentSpec
 from multi_agent_dashboard.ui.cache import cached_load_agents, get_agent_service, invalidate_agents
 from multi_agent_dashboard.ui.logging_ui import attach_streamlit_log_handler
 
+# Runtime hooks registration
+from multi_agent_dashboard.shared import runtime_hooks
+
 
 # Default agent templates (moved from app.py for bootstrap)
 # Each agent now has an explicit system_prompt_template (developer/system role)
@@ -90,12 +93,6 @@ Return the improved final answer only.
 }
 
 
-def create_openai_client(api_key: str):
-    """Factory to create an OpenAI client. Allows tests to replace this factory or pass fake client."""
-    # Import here to keep optional dependency local to factory
-    from openai import OpenAI  # type: ignore
-
-    return OpenAI(api_key=api_key)
 
 
 def bootstrap_default_agents(defaults: Dict[str, dict]):
@@ -153,6 +150,17 @@ def reload_agents_into_engine():
             reasoning_effort=a.get("reasoning_effort"),
             reasoning_summary=a.get("reasoning_summary"),
             system_prompt_template=a.get("system_prompt_template"),
+            # Provider metadata (Phase 1)
+            provider_id=a.get("provider_id"),
+            model_class=a.get("model_class"),
+            endpoint=a.get("endpoint"),
+            use_responses_api=bool(a.get("use_responses_api")),
+            provider_features=a.get("provider_features") or {},
+            structured_output_enabled=bool(a.get("structured_output_enabled")),
+            schema_json=a.get("schema_json"),
+            schema_name=a.get("schema_name"),
+            temperature=a.get("temperature"),
+            max_output=a.get("max_output", 0),
         )
         engine.add_agent(spec)
 
@@ -161,8 +169,7 @@ def app_start():
     """
     Explicit application bootstrap. Call this once when running the Streamlit app.
     - initializes DB and migrations
-    - creates an OpenAI client via factory
-    - creates the MultiAgentEngine with the injected client
+    - creates the MultiAgentEngine with the LangChain-only client
     - bootstraps default agents if DB empty
     - loads agents from DB into the engine
     - stores engine into st.session_state
@@ -173,13 +180,22 @@ def app_start():
     # Initialize DB and apply migrations
     init_db(DB_FILE_PATH)
 
-    # create OpenAI client (factory)
-    openai_client = create_openai_client(OPENAI_API_KEY)
-    llm_client = LLMClient(openai_client)
+    # create LangChain-only client
+    llm_client = LLMClient()
 
     # create engine with injected client
     engine = MultiAgentEngine(llm_client=llm_client)
     st.session_state.engine = engine
+
+    # Register runtime handlers so DB/service layer can notify the UI to reload.
+    # These are best-effort; the runtime_hooks module is safe to import from non-UI contexts.
+    try:
+        runtime_hooks.register_agent_change_handlers(
+            invalidate_agents,
+            reload_agents_into_engine,
+        )
+    except Exception:
+        logging.getLogger(__name__).exception("Failed to register runtime hooks")
 
     # Ensure default agents exist in DB (only if table empty)
     bootstrap_default_agents(default_agents)

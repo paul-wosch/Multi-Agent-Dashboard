@@ -16,6 +16,8 @@ SCHEMA = {
             "final_output": "TEXT",
             "final_is_json": "INTEGER DEFAULT 0",
             "final_model": "TEXT",
+            # Set when pipeline exited early due to strict schema validation
+            "strict_schema_exit": "INTEGER DEFAULT 0",
         },
     },
 
@@ -27,6 +29,8 @@ SCHEMA = {
             "output": "TEXT",
             "is_json": "INTEGER DEFAULT 0",
             "model": "TEXT",
+            # Flag that schema validation failed for this agent output
+            "schema_validation_failed": "INTEGER DEFAULT 0",
         },
 
         "constraints": {
@@ -64,6 +68,17 @@ SCHEMA = {
             "output_vars": "TEXT",
             "color": "TEXT",
             "symbol": "TEXT",
+            # provider metadata
+            "provider_id": "TEXT",                    # e.g., 'openai', 'ollama', 'custom'
+            "model_class": "TEXT",                    # provider-specific class / family hint
+            "endpoint": "TEXT",                       # optional host/URL override
+            "use_responses_api": "INTEGER DEFAULT 0", # boolean flag (0/1)
+            "provider_features_json": "TEXT",         # JSON-encoded capability hints (structured_output, tool_calling, etc.)
+            # structured output configuration
+            "structured_output_enabled": "INTEGER DEFAULT 0",  # boolean flag (0/1)
+            "schema_json": "TEXT",                   # JSON Schema for structured outputs
+            "schema_name": "TEXT",                   # Optional schema registry name
+            "temperature": "REAL",                   # Optional temperature override
             # tool & reasoning config (backward compatible: all nullable/text)
             "tools_json": "TEXT",
             # Reasoning effort: none|low|medium|high|xhigh
@@ -72,6 +87,7 @@ SCHEMA = {
             "reasoning_summary": "TEXT",
             # Explicit system / developer prompt (nullable)
             "system_prompt_template": "TEXT",
+            "max_output": "INTEGER DEFAULT 0",
         },
     },
 
@@ -116,6 +132,18 @@ SCHEMA = {
             "run_id": "INTEGER",
             "agent_name": "TEXT",
             "model": "TEXT",
+            # Provider metadata captured at run time for reproducibility
+            "provider_id": "TEXT",
+            "model_class": "TEXT",
+            "endpoint": "TEXT",
+            "use_responses_api": "INTEGER DEFAULT 1",
+            "provider_features_json": "TEXT",
+            # structured output configuration captured at run time
+            "structured_output_enabled": "INTEGER DEFAULT 0",
+            "schema_json": "TEXT",
+            "schema_name": "TEXT",
+            "temperature": "REAL",
+            "strict_schema_validation": "INTEGER DEFAULT 0",
             "prompt_template": "TEXT",
             "role": "TEXT",
             # JSON-encoded lists of variable names at the time of the run
@@ -133,6 +161,8 @@ SCHEMA = {
             "extra_config_json": "TEXT",
             # Snapshot of the system prompt used for this agent/run
             "system_prompt_template": "TEXT",
+            "max_output": "INTEGER DEFAULT 0",
+            "max_output_effective": "INTEGER",
         },
         "constraints": {
             "foreign_keys": [
@@ -146,6 +176,7 @@ SCHEMA = {
                 {
                     "column": "agent_name",
                     "references": "agents(agent_name)",
+                    "on_update": "CASCADE",
                 },
             ],
         },

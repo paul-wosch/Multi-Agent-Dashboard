@@ -17,6 +17,7 @@ def _extract_allowed_domains_from_tool_entry(
     """
     Normalize extraction of allowed_domains from a tool usage entry.
     Handles both live (action dict) and historic (args_json) forms.
+    Supports web_search (filters.allowed_domains) and web_search_ddg (domain_filter).
     """
     domains: List[str] = []
 
@@ -26,21 +27,53 @@ def _extract_allowed_domains_from_tool_entry(
             return domains
     else:
         args = parse_json_field(entry.get("args_json"), {})
+        # For web_search, args contains {"action": {...}}; for web_search_ddg, args is the tool call directly
         action = args.get("action") if isinstance(args, dict) else None
+        if not isinstance(action, dict):
+            # If no action key, treat args as the action (for function-calling tools)
+            action = args if isinstance(args, dict) else {}
         if not isinstance(action, dict):
             return domains
 
+    # Extract from filters.allowed_domains (web_search)
     filters = action.get("filters") or {}
-    if not isinstance(filters, dict):
-        return domains
-
-    allowed = filters.get("allowed_domains")
-    if isinstance(allowed, list):
-        domains.extend(str(d) for d in allowed)
-    elif allowed:
-        domains.append(str(allowed))
-
+    if isinstance(filters, dict):
+        allowed = filters.get("allowed_domains")
+        if isinstance(allowed, list):
+            domains.extend(str(d) for d in allowed)
+        elif allowed:
+            domains.append(str(allowed))
+    
+    # Extract from domain_filter parameter (web_search_ddg)
+    domain_filter = action.get("domain_filter")
+    if isinstance(domain_filter, list):
+        domains.extend(str(d) for d in domain_filter)
+    elif domain_filter:
+        domains.append(str(domain_filter))
+    
     return domains
+
+
+def _content_blocks_summary(blocks: list | None) -> List[str]:
+    """
+    Return a compact summary list for content blocks: type/name/id where available.
+    """
+    if not isinstance(blocks, list):
+        return []
+    summary = []
+    for b in blocks:
+        if not isinstance(b, dict):
+            continue
+        btype = b.get("type") or b.get("name") or b.get("block_type") or "unknown"
+        bid = b.get("id") or b.get("tool_call_id") or b.get("tool_use_id")
+        name = b.get("name") or b.get("tool") or None
+        parts = [str(btype)]
+        if name:
+            parts.append(str(name))
+        if bid:
+            parts.append(str(bid))
+        summary.append(" / ".join(parts))
+    return summary
 
 
 def render_agent_config_section(
@@ -56,6 +89,13 @@ def render_agent_config_section(
     Differences between live vs historic data (e.g. raw JSON configs)
     are handled via the is_historic flag and the presence of raw_* fields.
     """
+    def _format_token_limit(value: Optional[int]) -> str:
+        """Format token limit for display: None → '–', 0 → 'no limit', else formatted number."""
+        if value is None:
+            return "–"
+        if value == 0:
+            return "no limit"
+        return f"{value:,}"
     if not config_view:
         st.info("No agent configuration available.")
         return
@@ -72,11 +112,73 @@ def render_agent_config_section(
     }
 
     for cfg in config_view:
-        with st.expander(f"{cfg.agent_name} — Configuration", expanded=False):
+        title_badges = []
+        if cfg.strict_schema_validation:
+            title_badges.append("[strict schema]")
+        if cfg.schema_validation_failed:
+            title_badges.append("[schema failed]")
+        badge_suffix = f" {' '.join(title_badges)}" if title_badges else ""
+
+        with st.expander(f"{cfg.agent_name} — Configuration{badge_suffix}", expanded=False):
+            # Structured output & validation status
+            st.subheader("Structured output & validation status")
+            st.markdown(f"Strict schema validation: `{'on' if cfg.strict_schema_validation else 'off'}`")
+            st.markdown(f"Structured output: `{'on' if cfg.structured_output_enabled else 'off'}`")
+
+            if cfg.structured_output_enabled:
+                if cfg.schema_validation_failed:
+                    st.warning("Schema validation failed", icon=":material/warning:")
+                else:
+                    st.success("Schema validation passed", icon=":material/check:")
+
+                # Show configured schema (and note if malformed)
+                schema_display = "Not configured"
+                schema_malformed = False
+                parsed_schema = None
+                if cfg.schema_json:
+                    schema_display = cfg.schema_json
+                    try:
+                        import json
+                        parsed_schema = json.loads(cfg.schema_json)
+                        if not isinstance(parsed_schema, dict) or len(parsed_schema) == 0:
+                            schema_malformed = True
+                    except Exception:
+                        schema_malformed = True
+
+                st.markdown("**Configured schema:**")
+                if parsed_schema and not schema_malformed:
+                    st.json(parsed_schema)
+                else:
+                    st.code(schema_display or "Not configured", language="json")
+                    if schema_malformed:
+                        st.caption(":warning: Schema appears malformed or empty.")
+            st.divider()
+
+            st.subheader("Model and Provider settings")
             # Model & role
             st.markdown(f"**Model:** `{cfg.model}`")
             st.markdown(f"**Role:** {cfg.role}")
 
+            # Provider snapshot (explicit)
+            # st.markdown("**Provider snapshot:**")
+            st.markdown(f"**Provider:** `{cfg.provider_id or '–'}`")
+            st.markdown(f"**Provider model class:** `{cfg.model_class or '–'}`")
+            st.markdown(f"**Endpoint:** `{cfg.endpoint or '–'}`")
+            st.markdown(f"**Use Responses API:** `{'Yes' if cfg.use_responses_api else 'No'}`")
+            # Temperature and output token limits
+            temp_display = f"`{cfg.temperature:.2f}`" if cfg.temperature is not None else "–"
+            st.markdown(f"**Temperature:** {temp_display}")
+            # Max output tokens
+            max_output_display = _format_token_limit(cfg.max_output)
+            has_effective = cfg.max_output_effective is not None and cfg.max_output_effective != cfg.max_output
+            if has_effective:
+                suffix = f" (effective: `{_format_token_limit(cfg.max_output_effective)}`)"
+            else:
+                suffix = ""
+            st.markdown(f"**Max output tokens:** `{max_output_display}`{suffix}")
+            st.divider()
+
+            st.subheader("Prompt templates")
             st.markdown("**System prompt (system/developer role):**")
             if cfg.system_prompt_template:
                 st.code(cfg.system_prompt_template, language=None)
@@ -90,13 +192,15 @@ def render_agent_config_section(
                 st.code(cfg.prompt_template, language=None)
             else:
                 st.markdown("–")
+            st.divider()
 
+            st.subheader("Advanced configuration")
             # Tools summary
             st.markdown(
-                f"**Tool calling enabled:** {'Yes' if cfg.tools_enabled else 'No'}"
+                f"**Tool calling enabled:** `{'Yes' if cfg.tools_enabled else 'No'}`"
             )
             st.markdown(
-                f"**Tools:** {', '.join(cfg.tools) if cfg.tools else '–'}"
+                f"**Tools:** `{', '.join(cfg.tools) if cfg.tools else '–'}`"
             )
 
             if "web_search" in cfg.tools:
@@ -108,12 +212,63 @@ def render_agent_config_section(
                         "**Allowed domains for `web_search`:** not restricted (any domain)"
                     )
 
+            if "web_search_ddg" in cfg.tools:
+                if cfg.web_search_allowed_domains:
+                    st.markdown("**Allowed domains for `web_search_ddg`:**")
+                    st.code("\n".join(cfg.web_search_allowed_domains))
+                else:
+                    st.markdown(
+                        "**Allowed domains for `web_search_ddg`:** not restricted (any domain)"
+                    )
+
+
             st.markdown(
-                f"**Reasoning effort:** {cfg.reasoning_effort}"
+                f"**Reasoning effort:** `{cfg.reasoning_effort}`"
             )
             st.markdown(
-                f"**Reasoning summary:** {cfg.reasoning_summary}"
+                f"**Reasoning summary:** `{cfg.reasoning_summary}`"
             )
+
+            # Provider features (derived or explicit)
+            if cfg.provider_features:
+                # Temporarily disabled: Enable when dynamic capability detection is implemented
+                if not True:
+                    st.markdown("**Provider features (derived / snapshot):** ")
+                    try:
+                        st.json(cfg.provider_features)
+                    except Exception:
+                        st.markdown(str(cfg.provider_features))
+
+            # Show content_blocks when present (historic or live)
+            cb = cfg.raw_extra_config if hasattr(cfg, "raw_extra_config") else None
+            if cb and isinstance(cb, dict):
+                content_blocks = cb.get("content_blocks")
+            else:
+                content_blocks = None
+
+            # For some live flows, AgentConfigView may carry provider_features but not raw_extra_config.
+            # Attempt to detect content blocks via other fields if present.
+            if not content_blocks and getattr(cfg, "provider_features", None):
+                # Nothing more to do here; provider_features is separate.
+                content_blocks = None
+
+            if content_blocks:
+                st.markdown("**Content blocks (captured during run):**")
+                try:
+                    # compact summary inline
+                    summary = _content_blocks_summary(content_blocks)
+                    if summary:
+                        for s in summary[:10]:
+                            st.markdown(f"- `{s}`")
+                        if len(summary) > 10:
+                            st.markdown(f"- ... and {len(summary) - 10} more blocks")
+                    # Full JSON in an expander for deep inspection
+                    with st.expander("Full content_blocks JSON (expand)"):
+                        st.json(content_blocks)
+                except Exception:
+                    # fallback: print raw
+                    st.markdown("Could not render content_blocks cleanly; raw JSON follows.")
+                    st.json(content_blocks)
 
             # Historic runs can expose stored raw JSON configs
             if is_historic:
@@ -184,6 +339,21 @@ def render_agent_config_section(
                             if allowed_domains:
                                 st.markdown("  - Allowed domains for this call:")
                                 st.code("\n".join(allowed_domains))
+                                st.caption(
+                                    "Historic note: stored tool call args are displayed as-is; provider enforcement may differ."
+                                )
+                        st.json(args, expanded=False)
+                    if args:
+                        if tool_type == "web_search_ddg":
+                            allowed_domains = _extract_allowed_domains_from_tool_entry(
+                                u, is_historic=True
+                            )
+                            if allowed_domains:
+                                st.markdown("  - Allowed domains for this call:")
+                                st.code("\n".join(allowed_domains))
+                                st.caption(
+                                    "Historic note: stored tool call args are displayed as-is; provider enforcement may differ."
+                                )
                         st.json(args, expanded=False)
 
     # Compact overview
@@ -205,7 +375,7 @@ def render_agent_config_section(
         for e in entries:
             ttype = e.get("tool_type") or "unknown"
             counts[ttype] = counts.get(ttype, 0) + 1
-            if ttype == "web_search":
+            if ttype in ("web_search", "web_search_ddg"):
                 has_web_search = True
 
         row: Dict[str, Any] = {
@@ -216,7 +386,7 @@ def render_agent_config_section(
         if has_web_search:
             domains: set = set()
             for e in entries:
-                if e.get("tool_type") != "web_search":
+                if e.get("tool_type") not in ("web_search", "web_search_ddg"):
                     continue
                 for d in _extract_allowed_domains_from_tool_entry(
                     e, is_historic=is_historic
@@ -225,14 +395,14 @@ def render_agent_config_section(
 
             if domains:
                 # We found allowed domains directly on the tool calls
-                row["Allowed Domains (web_search)"] = ", ".join(sorted(domains))
+                row["Allowed Domains (web search)"] = ", ".join(sorted(domains))
             else:
                 # fall back to configured per-agent allowed domains
                 cfg_domains = configured_domains_by_agent.get(agent_name) or []
                 if cfg_domains:
-                    row["Allowed Domains (web_search)"] = ", ".join(cfg_domains)
+                    row["Allowed Domains (web search)"] = ", ".join(cfg_domains)
                 else:
-                    row["Allowed Domains (web_search)"] = "–"
+                    row["Allowed Domains (web search)"] = "–"
 
         rows_overview.append(row)
 
