@@ -9,6 +9,7 @@ from multi_agent_dashboard.shared.structured_schemas import resolve_schema_json
 from multi_agent_dashboard.tool_integration.provider_tool_adapter import convert_tools_for_provider
 from multi_agent_dashboard.tool_integration.registry import get_registry
 from multi_agent_dashboard import config
+from multi_agent_dashboard.models import AgentSpec
 from .provider_adapters import get_adapter
 from .chat_model_factory import ChatModelFactory
 from .instrumentation import INSTRUMENTATION_MIDDLEWARE, InstrumentationManager

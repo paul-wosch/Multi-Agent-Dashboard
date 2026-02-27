@@ -49,6 +49,9 @@ class AgentConfigView(NamedTuple):
     structured_output_enabled: bool = False
     schema_json: Optional[str] = None
     schema_name: Optional[str] = None
+    temperature: Optional[float] = None
+    max_output: int = 0
+    max_output_effective: Optional[int] = None
 
 
 def summarize_agent_metrics(
@@ -303,6 +306,9 @@ def config_view_from_db_rows(
                 model_class=cfg.get("model_class") or None,
                 endpoint=cfg.get("endpoint") or None,
                 use_responses_api=bool(cfg.get("use_responses_api")),
+                temperature=cfg.get("temperature"),
+                max_output=cfg.get("max_output", 0),
+                max_output_effective=cfg.get("max_output_effective"),
                 raw_tools_config=parsed["tools_config_json"] or None,
                 raw_reasoning_config=parsed["reasoning_config_json"] or None,
                 raw_extra_config=parsed["extra_config_json"] or None,

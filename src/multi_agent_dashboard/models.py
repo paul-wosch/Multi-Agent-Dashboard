@@ -43,6 +43,25 @@ class AgentSpec:
     temperature: Optional[float] = None
     max_output: int = 0
 
+    def effective_max_output(self) -> int | None:
+        """
+        Compute the effective max output token limit following precedence rules:
+        - If STRICT_OUTPUT_TOKEN_CAP_OVERRIDE is True: use AGENT_OUTPUT_TOKEN_CAP if > 0 else None
+        - Otherwise: smallest non-zero among AGENT_OUTPUT_TOKEN_CAP and self.max_output
+        - 0 means no limit → treat as None
+        """
+        from multi_agent_dashboard import config
+        env_cap = config.AGENT_OUTPUT_TOKEN_CAP
+        agent_cap = self.max_output
+        
+        if config.STRICT_OUTPUT_TOKEN_CAP_OVERRIDE:
+            return env_cap if env_cap > 0 else None
+        
+        candidates = [c for c in (env_cap, agent_cap) if c > 0]
+        if not candidates:
+            return None
+        return min(candidates)
+
 @dataclass(frozen=True)
 class PipelineSpec:
     name: str

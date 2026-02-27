@@ -89,6 +89,13 @@ def render_agent_config_section(
     Differences between live vs historic data (e.g. raw JSON configs)
     are handled via the is_historic flag and the presence of raw_* fields.
     """
+    def _format_token_limit(value: Optional[int]) -> str:
+        """Format token limit for display: None → '–', 0 → 'no limit', else formatted number."""
+        if value is None:
+            return "–"
+        if value == 0:
+            return "no limit"
+        return f"{value:,}"
     if not config_view:
         st.info("No agent configuration available.")
         return
@@ -153,11 +160,22 @@ def render_agent_config_section(
             st.markdown(f"**Role:** {cfg.role}")
 
             # Provider snapshot (explicit)
-            st.markdown("**Provider snapshot:**")
-            st.markdown(f"- **Provider:** `{cfg.provider_id or '–'}`")
-            st.markdown(f"- **Provider model class:** `{cfg.model_class or '–'}`")
-            st.markdown(f"- **Endpoint:** `{cfg.endpoint or '–'}`")
-            st.markdown(f"- **Use Responses API:** `{'Yes' if cfg.use_responses_api else 'No'}`")
+            # st.markdown("**Provider snapshot:**")
+            st.markdown(f"**Provider:** `{cfg.provider_id or '–'}`")
+            st.markdown(f"**Provider model class:** `{cfg.model_class or '–'}`")
+            st.markdown(f"**Endpoint:** `{cfg.endpoint or '–'}`")
+            st.markdown(f"**Use Responses API:** `{'Yes' if cfg.use_responses_api else 'No'}`")
+            # Temperature and output token limits
+            temp_display = f"`{cfg.temperature:.2f}`" if cfg.temperature is not None else "–"
+            st.markdown(f"**Temperature:** {temp_display}")
+            # Max output tokens
+            max_output_display = _format_token_limit(cfg.max_output)
+            has_effective = cfg.max_output_effective is not None and cfg.max_output_effective != cfg.max_output
+            if has_effective:
+                suffix = f" (effective: `{_format_token_limit(cfg.max_output_effective)}`)"
+            else:
+                suffix = ""
+            st.markdown(f"**Max output tokens:** `{max_output_display}`{suffix}")
             st.divider()
 
             st.subheader("Prompt templates")

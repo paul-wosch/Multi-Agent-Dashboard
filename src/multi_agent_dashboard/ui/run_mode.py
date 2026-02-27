@@ -541,6 +541,9 @@ def config_view_from_engine_result(
                 model_class=getattr(spec, "model_class", None),
                 endpoint=getattr(spec, "endpoint", None),
                 use_responses_api=getattr(spec, "use_responses_api", False),
+                temperature=getattr(spec, "temperature", None),
+                max_output=getattr(spec, "max_output", 0),
+                max_output_effective=spec.effective_max_output(),
                 # Include runtime raw configs (so the tools view can display content_blocks, instrumentation, etc.)
                 raw_tools_config=raw_tools_config or None,
                 raw_reasoning_config=raw_reasoning_config or None,
