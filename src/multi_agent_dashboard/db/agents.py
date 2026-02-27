@@ -83,7 +83,8 @@ class AgentDAO:
                            structured_output_enabled,
                            schema_json,
                            schema_name,
-                           temperature
+                           temperature,
+                           max_output
                     FROM agents
                     """
                 ).fetchall()
@@ -118,6 +119,7 @@ class AgentDAO:
                     "schema_json": row["schema_json"],
                     "schema_name": row["schema_name"],
                     "temperature": row["temperature"],
+                    "max_output": row["max_output"] or 0,
                 }
             )
         return agents
@@ -152,7 +154,8 @@ class AgentDAO:
                            structured_output_enabled,
                            schema_json,
                            schema_name,
-                           temperature
+                           temperature,
+                           max_output
                     FROM agents
                     WHERE agent_name = ?
                     """,
@@ -189,6 +192,7 @@ class AgentDAO:
             "schema_json": row["schema_json"],
             "schema_name": row["schema_name"],
             "temperature": row["temperature"],
+            "max_output": row["max_output"] or 0,
         }
 
     # -----------------------
@@ -341,6 +345,7 @@ class AgentDAO:
             schema_json: Optional[str] = None,
             schema_name: Optional[str] = None,
             temperature: Optional[float] = None,
+            max_output: Optional[int] = None,
     ) -> None:
         input_json = json.dumps(input_vars or [])
         output_json = json.dumps(output_vars or [])
@@ -375,11 +380,12 @@ class AgentDAO:
                          schema_json,
                          schema_name,
                          temperature,
+                         max_output,
                          tools_json,
                          reasoning_effort,
                          reasoning_summary,
                          system_prompt_template)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         agent_name,
@@ -399,6 +405,7 @@ class AgentDAO:
                         schema_json,
                         schema_name,
                         temperature,
+                        max_output,
                         tools_json,
                         reasoning_effort,
                         reasoning_summary,
