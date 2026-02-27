@@ -27,6 +27,7 @@ def test_tool_conversion_openai():
         provider_features={"tool_calling": True, "structured_output": True},
         prompt_template="Hello",
         temperature=0.7,
+        max_output=0,
     )
     llm_client = Mock(spec=LLMClient)
     llm_client._langchain_available = True
@@ -59,6 +60,7 @@ def test_tool_conversion_deepseek():
         use_responses_api=False,
         prompt_template="Hello",
         temperature=0.7,
+        max_output=0,
     )
     print("DeepSeek test setup complete")
 
@@ -72,6 +74,7 @@ def test_tool_conversion_ollama():
         use_responses_api=False,
         prompt_template="Hello",
         temperature=0.7,
+        max_output=0,
     )
     print("Ollama test setup complete")
 
@@ -91,6 +94,7 @@ def test_filters_merging():
         use_responses_api=True,
         prompt_template="",
         temperature=0.7,
+        max_output=0,
     )
     runtime = AgentRuntime(spec=spec, llm_client=Mock())
     

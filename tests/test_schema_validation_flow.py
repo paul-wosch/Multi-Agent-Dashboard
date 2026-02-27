@@ -33,7 +33,7 @@ def _make_engine_with_response(text, structured=None):
 
 def test_schema_missing_sets_flag_and_warning():
     engine = _make_engine_with_response('{"answer":"ok"}')
-    spec = AgentSpec(name="a", model="m", prompt_template="Do {task}", output_vars=["answer"], structured_output_enabled=True)
+    spec = AgentSpec(name="a", model="m", prompt_template="Do {task}", output_vars=["answer"], structured_output_enabled=True, max_output=0)
     engine.add_agent(spec)
     res = engine.run_seq(steps=["a"], initial_input="hi", strict_schema_validation=True)
     assert res.agent_schema_validation_failed.get("a") is True
@@ -42,7 +42,7 @@ def test_schema_missing_sets_flag_and_warning():
 
 def test_schema_empty_sets_flag_and_warning():
     engine = _make_engine_with_response('{"answer":"ok"}')
-    spec = AgentSpec(name="a", model="m", prompt_template="Do {task}", output_vars=["answer"], structured_output_enabled=True, schema_json="{}")
+    spec = AgentSpec(name="a", model="m", prompt_template="Do {task}", output_vars=["answer"], structured_output_enabled=True, schema_json="{}", max_output=0)
     engine.add_agent(spec)
     res = engine.run_seq(steps=["a"], initial_input="hi", strict_schema_validation=True)
     assert res.agent_schema_validation_failed.get("a") is True
@@ -58,6 +58,7 @@ def test_invalid_output_sets_flag_and_exit_when_strict():
         output_vars=["answer"],
         structured_output_enabled=True,
         schema_json=json.dumps({"type": "object", "properties": {"answer": {"type": "string"}}, "required": ["answer"]}),
+        max_output=0,
     )
     engine.add_agent(spec)
     res = engine.run_seq(steps=["a"], initial_input="hi", strict_schema_validation=True)
@@ -74,6 +75,7 @@ def test_valid_output_passes_without_exit():
         output_vars=["answer"],
         structured_output_enabled=True,
         schema_json=json.dumps({"type": "object", "properties": {"answer": {"type": "string"}}, "required": ["answer"]}),
+        max_output=0,
     )
     engine.add_agent(spec)
     res = engine.run_seq(steps=["a"], initial_input="hi", strict_schema_validation=True)

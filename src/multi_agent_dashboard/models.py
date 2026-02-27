@@ -41,6 +41,7 @@ class AgentSpec:
     schema_json: Optional[str] = None
     schema_name: Optional[str] = None
     temperature: Optional[float] = None
+    max_output: int = 0
 
 @dataclass(frozen=True)
 class PipelineSpec:

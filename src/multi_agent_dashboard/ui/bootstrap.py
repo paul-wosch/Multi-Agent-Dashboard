@@ -160,6 +160,7 @@ def reload_agents_into_engine():
             schema_json=a.get("schema_json"),
             schema_name=a.get("schema_name"),
             temperature=a.get("temperature"),
+            max_output=a.get("max_output", 0),
         )
         engine.add_agent(spec)
 
