@@ -246,18 +246,35 @@ Refer to **APPENDIX A: Database Migrations** for schema changes, fresh DB heuris
 
 ### Required Environment Variables (`.env`)
 
-| Variable           | Required | Description                                          |
-| ------------------ | -------- | ---------------------------------------------------- |
-| `OPENAI_API_KEY`   | Yes      | OpenAI API key                                       |
-| `DEEPSEEK_API_KEY` | Optional | DeepSeek API key                                     |
-| `OLLAMA_HOST`      | Optional | Ollama server URL (for LangChain Ollama integration) |
-| `DB_FILE`          | Optional | Override default database filename                   |
-| `LOG_LEVEL`        | Optional | Logging level (INFO, DEBUG, etc.)                    |
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OPENAI_API_KEY` | Yes | OpenAI API key |
+| `DEEPSEEK_API_KEY` | Yes | DeepSeek API key |
+| `OLLAMA_PROTOCOL` | Optional | Ollama server protocol (default: `http`) |
+| `DB_FILE` | Optional | Override default database filename |
+| `LOG_LEVEL` | Optional | Logging level (INFO, DEBUG, etc.) |
+| `RAISE_ON_AGENT_FAIL` | Optional | Whether to raise exceptions on agent failure (default: `true`) |
+| `AGENT_INPUT_CHAR_CAP` | Optional | Maximum input character count per agent (overrides `agents.yaml`) |
+| `AGENT_OUTPUT_CHAR_CAP` | Optional | Maximum output character count per agent (overrides `agents.yaml`) |
+| `AGENT_OUTPUT_TOKEN_CAP` | Optional | Maximum output token limit per agent (overrides `agents.yaml`; `0` = no limit) |
+| `STRICT_OUTPUT_TOKEN_CAP_OVERRIDE` | Optional | If `true`, ignore per‑agent `max_output` and enforce `AGENT_OUTPUT_TOKEN_CAP` globally (default: `false`) |
 
 ### Agent Caps
 
-- `AGENT_INPUT_CHAR_CAP = 40_000` – maximum input character count per agent
-- `AGENT_OUTPUT_CHAR_CAP = 50_000` – maximum output character count per agent
+- `AGENT_INPUT_CHAR_CAP = 40_000` – maximum input character count per agent (used for prompt value truncation)
+- `AGENT_OUTPUT_CHAR_CAP = 50_000` – maximum output character count per agent (used for final prompt truncation)
+- `AGENT_OUTPUT_TOKEN_CAP = 0` – maximum output token limit per agent (`0` means no limit)
+
+These character caps can be overridden by environment variables `AGENT_INPUT_CHAR_CAP` and `AGENT_OUTPUT_CHAR_CAP`.
+
+**Token limit precedence rules** (implemented in `AgentSpec.effective_max_output()`):
+
+1. If `STRICT_OUTPUT_TOKEN_CAP_OVERRIDE = true`: use `AGENT_OUTPUT_TOKEN_CAP` if `> 0`, else `None` (no limit).
+2. Otherwise: take the smallest non‑zero value among `AGENT_OUTPUT_TOKEN_CAP` and the agent's own `max_output` field.
+3. `0` in any source means no limit and is treated as `None`.
+4. The effective limit is passed to the LLM provider as `max_tokens` (`None` indicates no provider‑side limit).
+
+Per‑agent `max_output` can be set via the UI or agent configuration. The precedence ensures safe defaults while allowing granular overrides.
 
 ### UI Colors & Symbols
 
@@ -281,6 +298,10 @@ Secrets (API keys) and user‑specific preferences remain in `.env` (git‑ignor
 
 - `DB_FILE` – override the database file name
 - `LOG_LEVEL` – override the default log level (still falls back to YAML if not set)
+- `AGENT_INPUT_CHAR_CAP` – override maximum input character count per agent
+- `AGENT_OUTPUT_CHAR_CAP` – override maximum output character count per agent
+- `AGENT_OUTPUT_TOKEN_CAP` – override maximum output token limit per agent (`0` = no limit)
+- `STRICT_OUTPUT_TOKEN_CAP_OVERRIDE` – if `true`, ignore per‑agent `max_output` and enforce `AGENT_OUTPUT_TOKEN_CAP` globally (default: `false`)
 
 All other constants are defined in YAML and cannot be overridden by environment variables.
 
