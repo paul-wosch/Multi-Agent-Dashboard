@@ -72,7 +72,7 @@ SCHEMA = {
             "provider_id": "TEXT",                    # e.g., 'openai', 'ollama', 'custom'
             "model_class": "TEXT",                    # provider-specific class / family hint
             "endpoint": "TEXT",                       # optional host/URL override
-            "use_responses_api": "INTEGER DEFAULT 1", # boolean flag (0/1)
+            "use_responses_api": "INTEGER DEFAULT 0", # boolean flag (0/1)
             "provider_features_json": "TEXT",         # JSON-encoded capability hints (structured_output, tool_calling, etc.)
             # structured output configuration
             "structured_output_enabled": "INTEGER DEFAULT 0",  # boolean flag (0/1)
@@ -87,6 +87,7 @@ SCHEMA = {
             "reasoning_summary": "TEXT",
             # Explicit system / developer prompt (nullable)
             "system_prompt_template": "TEXT",
+            "max_output": "INTEGER DEFAULT 0",
         },
     },
 
@@ -160,6 +161,8 @@ SCHEMA = {
             "extra_config_json": "TEXT",
             # Snapshot of the system prompt used for this agent/run
             "system_prompt_template": "TEXT",
+            "max_output": "INTEGER DEFAULT 0",
+            "max_output_effective": "INTEGER DEFAULT 0",
         },
         "constraints": {
             "foreign_keys": [
