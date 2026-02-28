@@ -30,18 +30,24 @@ def _ensure_langfuse_initialized() -> bool:
         return _langfuse_handler_class is not None
     
     _import_attempted = True
-    
+
     try:
         from langfuse import get_client
         from langfuse.langchain import CallbackHandler  # v3.x.x import path
         from multi_agent_dashboard.config import LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_BASE_URL
         
-        # Pass credentials explicitly (more reliable than environment variables)
-        _langfuse_client = get_client(
-            public_key=LANGFUSE_PUBLIC_KEY,
-            secret_key=LANGFUSE_SECRET_KEY,
-            host=LANGFUSE_BASE_URL,
-        )
+        # Ensure environment variables are set for Langfuse SDK
+        # Langfuse expects LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST
+        # We already have them in config; set them in os.environ if not already present
+        if LANGFUSE_PUBLIC_KEY:
+            os.environ.setdefault('LANGFUSE_PUBLIC_KEY', LANGFUSE_PUBLIC_KEY)
+        if LANGFUSE_SECRET_KEY:
+            os.environ.setdefault('LANGFUSE_SECRET_KEY', LANGFUSE_SECRET_KEY)
+        if LANGFUSE_BASE_URL:
+            os.environ.setdefault('LANGFUSE_HOST', LANGFUSE_BASE_URL)
+        
+        # get_client() reads from environment variables or global singleton
+        _langfuse_client = get_client()
         _langfuse_handler_class = CallbackHandler
         
         # Register automatic flush on program exit (only once)
