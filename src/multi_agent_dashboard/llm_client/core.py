@@ -441,12 +441,51 @@ class LLMClient:
         Returns (result, latency).
         """
         start_ts = time.perf_counter()
+
+        # Build invocation config with Langfuse callback if enabled
+        invoke_config = {}
+        if self._langfuse_enabled:
+            # Extract metadata from context and agent spec
+            session_id = None
+            tags = []
+            metadata = {}
+
+            if context is not None:
+                session_id = context.get("run_id")
+                pipeline_name = context.get("pipeline_name")
+                if pipeline_name:
+                    tags.append(f"pipeline:{pipeline_name}")
+
+            # Agent name (from agent._name or spec)
+            agent_name = getattr(agent, "_name", None)
+            if agent_name:
+                tags.append(f"agent:{agent_name}")
+            else:
+                # Fallback: try to get from agent spec if available
+                agent_spec = getattr(agent, "_agent_spec", None)
+                if agent_spec and hasattr(agent_spec, "name"):
+                    tags.append(f"agent:{agent_spec.name}")
+                else:
+                    tags.append("agent:unknown")
+
+            # Create Langfuse handler (no metadata in constructor for v3)
+            if get_langfuse_handler is not None:
+                handler = get_langfuse_handler()
+                if handler is not None:
+                    invoke_config["callbacks"] = [handler]
+                    invoke_config["metadata"] = {
+                        "langfuse_user_id": "multi_agent_dashboard",
+                        "langfuse_session_id": session_id or "unknown",
+                        "langfuse_tags": tags,
+                        **metadata,
+                    }
+
         # agent.invoke may accept context parameter in v1 Agents API
         try:
             if context is not None:
-                result = agent.invoke(state, context=context)
+                result = agent.invoke(state, context=context, config=invoke_config)
             else:
-                result = agent.invoke(state)
+                result = agent.invoke(state, config=invoke_config)
         except Exception as e:
             logger.debug("agent.invoke failed: %s", e, exc_info=True)
             raise
