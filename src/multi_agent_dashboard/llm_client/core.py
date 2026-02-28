@@ -483,9 +483,15 @@ class LLMClient:
         # agent.invoke may accept context parameter in v1 Agents API
         try:
             if context is not None:
-                result = agent.invoke(state, context=context, config=invoke_config)
+                if invoke_config:
+                    result = agent.invoke(state, context=context, config=invoke_config)
+                else:
+                    result = agent.invoke(state, context=context)
             else:
-                result = agent.invoke(state, config=invoke_config)
+                if invoke_config:
+                    result = agent.invoke(state, config=invoke_config)
+                else:
+                    result = agent.invoke(state)
         except Exception as e:
             logger.debug("agent.invoke failed: %s", e, exc_info=True)
             raise
