@@ -74,10 +74,10 @@ python -m multi_agent_dashboard.db.infra.prune_snapshots my_agent my_custom.db -
 ```
 src/multi_agent_dashboard/
 ├── __init__.py
-├── config/                           # YAML-based configuration package
-│   ├── __init__.py                  # Public API (same constants as before)
-│   ├── core.py                      # Core configuration loading
-│   └── loader.py                    # YAML validation with Pydantic
+├── config/                             # YAML-based configuration package
+│   ├── __init__.py                     # Public API (same constants as before)
+│   ├── core.py                         # Core configuration loading
+│   └── loader.py                       # YAML validation with Pydantic
 ├── engine/                             # Modular multi-agent orchestration engine
 │   ├── __init__.py
 │   ├── agent_executor.py
@@ -116,6 +116,16 @@ src/multi_agent_dashboard/
 │   ├── structured_output.py
 │   ├── tool_binder.py
 │   └── wrappers.py
+├── observability/                      # Observability and tracing integrations
+│   ├── __init__.py
+│   └── langfuse.py                     # Langfuse integration for LLM tracing
+├── provider_data/                      # Dynamic provider capabilities & pricing data loading
+│   ├── __init__.py
+│   ├── cache.py                        # Caching for provider model data
+│   ├── downloader.py                   # Download external provider data
+│   ├── extractor.py                    # Extract and filter provider data
+│   ├── loader.py                       # Load provider data into memory
+│   └── schemas.py                      # Pydantic schemas for provider data
 ├── models.py                           # Data classes (AgentSpec, PipelineSpec) – pure dataclasses
 ├── tool_integration/                   # Tool registry and provider-specific tool adapter
 │   ├── __init__.py
@@ -132,6 +142,10 @@ src/multi_agent_dashboard/
 │   ├── agent_editor_mode.py
 │   ├── history_mode.py
 │   ├── run_mode.py
+│   ├── static/                         # Static assets (fonts)
+│   │   └── ...
+│   ├── .streamlit/                     # Streamlit configuration
+│   │   └── config.toml
 │   └── ...
 └── db/                                 # Database layer
     ├── infra/                          # Low-level DB infrastructure
@@ -139,6 +153,9 @@ src/multi_agent_dashboard/
     │   ├── generate_migration.py
     │   ├── sqlite_rebuild.py
     │   ├── migrations.py
+    │   ├── prune_snapshots.py
+    │   ├── schema_diff.py
+    │   ├── sqlite_features.py
     │   └── ...
     ├── db.py                           # Low-level DB connection and re‑exports
     ├── agents.py                       # Agent DAO
@@ -253,6 +270,10 @@ Refer to **APPENDIX A: Database Migrations** for schema changes, fresh DB heuris
 | `OLLAMA_PROTOCOL` | Optional | Ollama server protocol (default: `http`) |
 | `DB_FILE` | Optional | Override default database filename |
 | `LOG_LEVEL` | Optional | Logging level (INFO, DEBUG, etc.) |
+| `LANGFUSE_PUBLIC_KEY` | Optional | Langfuse public API key (enables observability) |
+| `LANGFUSE_SECRET_KEY` | Optional | Langfuse secret API key (required if public key is set) |
+| `LANGFUSE_BASE_URL` | Optional | Langfuse server URL (default: `https://cloud.langfuse.com`) |
+| `LANGFUSE_ENABLED` | Optional | Explicitly disable Langfuse integration (set to `false` to disable even if keys are present) |
 | `RAISE_ON_AGENT_FAIL` | Optional | Whether to raise exceptions on agent failure (default: `true`) |
 | `AGENT_INPUT_CHAR_CAP` | Optional | Maximum input character count per agent (overrides `agents.yaml`) |
 | `AGENT_OUTPUT_CHAR_CAP` | Optional | Maximum output character count per agent (overrides `agents.yaml`) |
@@ -426,6 +447,31 @@ Capability data is used **advisory only** – the primary source of truth for ag
    - Keep modules focused on single responsibility and preserve existing interfaces while refactoring internals.
 
 **Key Benefit**: Adding a new provider requires ensuring its capabilities are included in the external data and implementing provider‑specific adapters, providing full control over provider integration without maintaining static maps.
+
+## Observability with Langfuse
+
+The dashboard supports optional integration with [Langfuse](https://langfuse.com) for advanced tracing, latency breakdown, and cost tracking.
+
+### Setup
+1. Install Langfuse SDK (already included as a dependency).
+2. Add your Langfuse credentials to `.env`:
+```
+LANGFUSE_PUBLIC_KEY=your_public_key
+LANGFUSE_SECRET_KEY=your_secret_key
+# Optional: LANGFUSE_BASE_URL=https://self-hosted.langfuse.com
+```
+3. Restart the dashboard.
+
+### What Gets Traced
+- Every agent invocation (including tool calls, reasoning steps, and model interactions).
+- Metadata: agent name, pipeline name, run ID.
+- Latency, token usage, provider costs (if available).
+
+### Disabling Langfuse
+Remove or comment out the `LANGFUSE_*` environment variables. The integration will be inactive with zero overhead.
+
+### Manual Flush
+For explicit control, call `LLMClient.flush_langfuse()` before exit. An automatic `atexit` flush is already registered when Langfuse is enabled.
 
 ## Further Reading
 
