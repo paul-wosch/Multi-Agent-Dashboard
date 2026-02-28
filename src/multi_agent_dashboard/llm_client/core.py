@@ -966,3 +966,8 @@ class LLMClient:
             return json.loads(text)
         except Exception:
             return None
+
+    def flush_langfuse(self):
+        """Flush any pending Langfuse traces (useful for short scripts)."""
+        from multi_agent_dashboard.observability import flush_langfuse
+        flush_langfuse()
