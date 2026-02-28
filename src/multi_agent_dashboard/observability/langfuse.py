@@ -14,20 +14,47 @@ logger = logging.getLogger(__name__)
 # Singleton Langfuse client
 _langfuse_client = None
 _langfuse_handler_class = None
+_import_attempted = False
+_atexit_registered = False
+_langfuse_enabled_cache = None
 
-def _try_import_langfuse():
-    """Conditionally import Langfuse components."""
-    global _langfuse_client, _langfuse_handler_class
+def _ensure_langfuse_initialized() -> bool:
+    """Initialize Langfuse client and handler class exactly once.
+    
+    Returns True if Langfuse is enabled and successfully imported.
+    """
+    global _langfuse_client, _langfuse_handler_class, _import_attempted, _atexit_registered
+    
+    if _import_attempted:
+        # Already attempted import, return cached success state
+        return _langfuse_handler_class is not None
+    
+    _import_attempted = True
+    
     try:
         from langfuse import get_client
         from langfuse.langchain import CallbackHandler  # v3.x.x import path
-        _langfuse_client = get_client()
-        # Register automatic flush on program exit
-        atexit.register(flush_langfuse)
+        from multi_agent_dashboard.config import LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_BASE_URL
+        
+        # Pass credentials explicitly (more reliable than environment variables)
+        _langfuse_client = get_client(
+            public_key=LANGFUSE_PUBLIC_KEY,
+            secret_key=LANGFUSE_SECRET_KEY,
+            host=LANGFUSE_BASE_URL,
+        )
         _langfuse_handler_class = CallbackHandler
+        
+        # Register automatic flush on program exit (only once)
+        if not _atexit_registered:
+            atexit.register(flush_langfuse)
+            _atexit_registered = True
+            
         return True
     except ImportError as e:
-        logger.warning("Langfuse not available: %s", e)
+        logger.debug("Langfuse not available: %s", e)
+        return False
+    except Exception as e:
+        logger.warning("Failed to initialize Langfuse client: %s", e)
         return False
 
 def is_langfuse_enabled() -> bool:
@@ -35,7 +62,12 @@ def is_langfuse_enabled() -> bool:
     from multi_agent_dashboard.config import LANGFUSE_ENABLED
     if not LANGFUSE_ENABLED:
         return False
-    return _try_import_langfuse()
+    
+    # Cache the result after first evaluation
+    global _langfuse_enabled_cache
+    if _langfuse_enabled_cache is None:
+        _langfuse_enabled_cache = _ensure_langfuse_initialized()
+    return _langfuse_enabled_cache
 
 def get_langfuse_handler(
     session_id: Optional[str] = None,
