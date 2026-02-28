@@ -25,6 +25,15 @@ except ImportError:
     DuckDuckGoSearchTool = None
     _DUCKDUCKGO_TOOL_AVAILABLE = False
 
+# Langfuse observability (optional)
+try:
+    from multi_agent_dashboard.observability import is_langfuse_enabled, get_langfuse_handler
+    _LANGFUSE_AVAILABLE = True
+except ImportError:
+    is_langfuse_enabled = None
+    get_langfuse_handler = None
+    _LANGFUSE_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -273,6 +282,11 @@ class LLMClient:
                 self._model_factory = None
 
         self._capabilities = {"langchain", "stream", "response_format", "tools", "reasoning", "instructions"}
+
+        # Langfuse observability (optional)
+        self._langfuse_enabled = False
+        if _LANGFUSE_AVAILABLE and is_langfuse_enabled is not None:
+            self._langfuse_enabled = is_langfuse_enabled()
 
     # -------------------------
     # LangChain agent helpers
