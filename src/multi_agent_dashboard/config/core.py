@@ -62,6 +62,12 @@ LOG_LEVEL = _env.get("LOG_LEVEL", _logging['default_log_level']).upper()
 RAISE_ON_AGENT_FAIL = _env.get("RAISE_ON_AGENT_FAIL", "true").lower() == "true"
 STRICT_OUTPUT_TOKEN_CAP_OVERRIDE = _env.get("STRICT_OUTPUT_TOKEN_CAP_OVERRIDE", "false").lower() == "true"
 
+# Langfuse observability (optional)
+LANGFUSE_PUBLIC_KEY = _env.get("LANGFUSE_PUBLIC_KEY")
+LANGFUSE_SECRET_KEY = _env.get("LANGFUSE_SECRET_KEY")
+LANGFUSE_BASE_URL = _env.get("LANGFUSE_BASE_URL", "https://cloud.langfuse.com")
+LANGFUSE_ENABLED = bool(LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY)
+
 LOG_FILE_PATH = (LOGS_PATH / LOG_FILE).resolve()
 
 # --- Agent configuration from YAML with environment variable overrides ---
