@@ -150,6 +150,8 @@ class AgentRuntime:
                 context["allowed_domains_by_agent"] = state.get("allowed_domains_by_agent")
             if "allowed_domains" in state:
                 context["allowed_domains"] = state.get("allowed_domains")
+            if "pipeline_name" in state:
+                context["pipeline_name"] = state.get("pipeline_name")
 
             if tc is not None:
                 context["tools_config"] = tc

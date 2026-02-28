@@ -85,7 +85,7 @@ def get_langfuse_handler(
     Create a Langfuse CallbackHandler for a specific invocation.
 
     Args:
-        session_id: Langfuse session ID (maps to run_id).
+        session_id: Langfuse session ID (maps to pipeline name or "Ad‑Hoc").
         user_id: Static user identifier (default: "multi_agent_dashboard").
         tags: List of tags (e.g., ["agent:my_agent", "pipeline:my_pipeline"]).
         metadata: Additional custom metadata.
@@ -101,10 +101,9 @@ def get_langfuse_handler(
         return None
 
     try:
-        # Langfuse v3.x.x expects metadata via config, not handler constructor
-        # We'll attach metadata later in the invocation config
+        # Langfuse v3.x.x CallbackHandler reads from environment variables
+        # Metadata is passed via config["metadata"] and config["run_name"]
         handler = _langfuse_handler_class()
-        # Note: session_id, user_id, tags are passed via config["metadata"]
         return handler
     except Exception as e:
         logger.error("Failed to create Langfuse handler: %s", e)

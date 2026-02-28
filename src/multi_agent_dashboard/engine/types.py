@@ -35,6 +35,7 @@ class AgentRunResult:
 @dataclass
 class PipelineState:
     """Mutable state shared across all agents in a pipeline."""
+    pipeline_name: Optional[str] = None
     state: Dict[str, Any] = field(default_factory=dict)
     memory: Dict[str, Any] = field(default_factory=dict)
     warnings: List[str] = field(default_factory=list)

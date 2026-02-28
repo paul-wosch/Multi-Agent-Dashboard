@@ -133,6 +133,7 @@ class MultiAgentEngine:
         self,
         *,
         steps: List[str],
+        pipeline_name: Optional[str] = None,
         initial_input: Any,
         strict: bool = False,
         strict_schema_validation: bool = False,
@@ -157,6 +158,7 @@ class MultiAgentEngine:
         # Reset execution state
         # Create pipeline state container
         pipeline_state = PipelineState(
+            pipeline_name=pipeline_name,
             state={
                 "task": initial_input,
                 "input": initial_input,
@@ -169,6 +171,10 @@ class MultiAgentEngine:
             agent_schema_validation_failed={},
             agent_metrics={},
         )
+
+        # Store pipeline name for observability (Langfuse metadata)
+        if pipeline_name:
+            pipeline_state.state["pipeline_name"] = pipeline_name
 
         # Store initial files in state so all agents can access
         if files:

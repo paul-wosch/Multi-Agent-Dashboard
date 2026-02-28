@@ -667,6 +667,7 @@ def render_run_mode(strict_mode: bool = False, strict_schema_validation: bool = 
             try:
                 result: EngineResult = engine.run_seq(
                     steps=steps,
+                    pipeline_name=pipeline if pipeline != AD_HOC_PIPELINE_LABEL else None,
                     initial_input=task,
                     strict=strict_mode,
                     strict_schema_validation=strict_schema_validation,

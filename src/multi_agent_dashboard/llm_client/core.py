@@ -160,6 +160,12 @@ class AgentCreationFacade:
                 response_format=effective_response_format,
             )
 
+            # Set agent name for observability (used in Langfuse metadata)
+            try:
+                setattr(agent, "_name", getattr(spec, "name", None))
+            except Exception:
+                logger.debug("Unable to set _name on agent instance", exc_info=True)
+
             # Annotate agent with instrumentation/profile hints for downstream runtime checks
             try:
                 setattr(agent, "_instrumentation_attached", bool(instrumentation_attached))
@@ -446,36 +452,53 @@ class LLMClient:
         invoke_config = {}
         if self._langfuse_enabled:
             # Extract metadata from context and agent spec
-            session_id = None
+            pipeline_name = None
+            run_id = None
             tags = []
             metadata = {}
 
             if context is not None:
-                session_id = context.get("run_id")
                 pipeline_name = context.get("pipeline_name")
-                if pipeline_name:
-                    tags.append(f"pipeline:{pipeline_name}")
+                run_id = context.get("run_id")
 
-            # Agent name (from agent._name or spec)
+            # Always add pipeline tag (pipeline name or "Ad‑Hoc" for ad‑hoc runs)
+            pipeline_tag_value = pipeline_name or "Ad‑Hoc"
+            tags.append(f"pipeline:{pipeline_tag_value}")
+            
+            if run_id:
+                tags.append(f"run:{run_id}")
+
+            # Agent name (from agent._name, agent.name, or spec)
             agent_name = getattr(agent, "_name", None)
-            if agent_name:
-                tags.append(f"agent:{agent_name}")
-            else:
+            if not agent_name:
+                agent_name = getattr(agent, "name", None)
+            if not agent_name:
                 # Fallback: try to get from agent spec if available
                 agent_spec = getattr(agent, "_agent_spec", None)
                 if agent_spec and hasattr(agent_spec, "name"):
-                    tags.append(f"agent:{agent_spec.name}")
-                else:
-                    tags.append("agent:unknown")
+                    agent_name = agent_spec.name
+            
+            # Default agent name if still None
+            if not agent_name:
+                agent_name = "unknown"
+            
+            # Add agent tag
+            tags.append(f"agent:{agent_name}")
 
-            # Create Langfuse handler (no metadata in constructor for v3)
+            # Session ID: pipeline name or "Ad‑Hoc" for ad‑hoc runs
+            session_id = pipeline_name or "Ad‑Hoc"
+
+            # Create Langfuse handler (no constructor parameters needed)
             if get_langfuse_handler is not None:
                 handler = get_langfuse_handler()
                 if handler is not None:
                     invoke_config["callbacks"] = [handler]
+                    # Trace name (appears as "Name" in Langfuse UI)
+                    invoke_config["run_name"] = agent_name
+                    # Langfuse‑specific metadata keys
                     invoke_config["metadata"] = {
+                        "langfuse_session_id": session_id,
                         "langfuse_user_id": "multi_agent_dashboard",
-                        "langfuse_session_id": session_id or "unknown",
                         "langfuse_tags": tags,
                         **metadata,
                     }
