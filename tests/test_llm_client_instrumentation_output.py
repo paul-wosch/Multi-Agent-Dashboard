@@ -33,7 +33,7 @@ def test_invoke_agent_merges_instrumentation_and_content_blocks() -> None:
     ]
 
     class FakeAgent:
-        def invoke(self, state: Any, context: Any = None):
+        def invoke(self, state: Any, context: Any = None, config=None):
             return {
                 "agent_response": {
                     "_multi_agent_dashboard_events": fake_events,
@@ -60,7 +60,7 @@ def test_invoke_agent_extracts_tokens_from_nested_usage() -> None:
     client = _setup_langchain_client()
 
     class FakeAgent:
-        def invoke(self, state: Any, context: Any = None):
+        def invoke(self, state: Any, context: Any = None, config=None):
             return {
                 "agent_response": {
                     "output": [

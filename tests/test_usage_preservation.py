@@ -56,7 +56,7 @@ class DummyAgent:
         self.system_prompt = ""
         self._message = message
 
-    def invoke(self, state, context=None):
+    def invoke(self, state, context=None, config=None):
         return {"messages": [self._message]}
 
 
