@@ -66,7 +66,13 @@ STRICT_OUTPUT_TOKEN_CAP_OVERRIDE = _env.get("STRICT_OUTPUT_TOKEN_CAP_OVERRIDE", 
 LANGFUSE_PUBLIC_KEY = _env.get("LANGFUSE_PUBLIC_KEY")
 LANGFUSE_SECRET_KEY = _env.get("LANGFUSE_SECRET_KEY")
 LANGFUSE_BASE_URL = _env.get("LANGFUSE_BASE_URL", "https://cloud.langfuse.com")
-LANGFUSE_ENABLED = bool(LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY)
+# Explicit disable overrides key presence
+langfuse_enabled_env = _env.get("LANGFUSE_ENABLED")
+if langfuse_enabled_env is not None and langfuse_enabled_env.strip().lower() == "false":
+    LANGFUSE_ENABLED = False
+else:
+    # Enabled only if both keys present (and not explicitly disabled)
+    LANGFUSE_ENABLED = bool(LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY)
 
 LOG_FILE_PATH = (LOGS_PATH / LOG_FILE).resolve()
 
