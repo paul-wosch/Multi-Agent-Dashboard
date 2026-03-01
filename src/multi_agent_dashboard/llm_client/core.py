@@ -1,20 +1,12 @@
 # multi_agent_dashboard/llm_client/core.py
-import time
-import os
 import logging
 import json
 from typing import Any, Dict, List, Optional, Callable, Tuple
 from dataclasses import dataclass
 from multi_agent_dashboard.shared.structured_schemas import resolve_schema_json
-from multi_agent_dashboard.tool_integration.provider_tool_adapter import convert_tools_for_provider
-from multi_agent_dashboard.tool_integration.registry import get_registry
-from multi_agent_dashboard import config
-from multi_agent_dashboard.models import AgentSpec
 from .provider_adapters import get_adapter
 from .chat_model_factory import ChatModelFactory
-from .instrumentation import INSTRUMENTATION_MIDDLEWARE, InstrumentationManager
-from .tool_binder import ToolBinder
-from .structured_output import StructuredOutputBinder
+from .instrumentation import INSTRUMENTATION_MIDDLEWARE
 from .wrappers import StructuredOutputWrapper
 from .response_normalizer import ResponseNormalizer
 from .response_processor import ResponseProcessor
@@ -25,17 +17,12 @@ from .execution_engine import ExecutionEngine
 from .availability import (
     LANGCHAIN_AVAILABLE,
     LANGFUSE_AVAILABLE,
-    DUCKDUCKGO_TOOL_AVAILABLE,
     get_SystemMessage,
     get_HumanMessage,
-    get_AIMessage,
     get_init_chat_model,
     get_create_agent,
-    get_AgentMiddleware,
     is_langfuse_enabled,
-    DuckDuckGoSearchTool,
 )
-from .observability.langfuse_integration import build_langfuse_config
 
 logger = logging.getLogger(__name__)
 
@@ -45,14 +32,6 @@ __all__ = [
     "LLMError",
     "INSTRUMENTATION_MIDDLEWARE",
 ]
-
-
-
-
-
-
-
-
 
 
 # =========================
@@ -80,12 +59,10 @@ class LLMError(RuntimeError):
     pass
 
 
-
-
-
 # =========================
 # LLM Client
 # =========================
+
 class LLMClient:
     """
     Thin wrapper around LangChain's BaseChatModel factory.
