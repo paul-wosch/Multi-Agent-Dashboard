@@ -54,7 +54,7 @@ def load_yaml_config(config_root: Path) -> Dict[str, Any]:
             raise FileNotFoundError(f"Config file {path} not found")
         with open(path, 'r', encoding='utf-8') as f:
             data = yaml.safe_load(f)
-        return model_cls(**data).dict()
+        return model_cls(**data).model_dump()
     
     try:
         config['paths'] = load_and_validate('paths.yaml', PathsConfig)
