@@ -20,6 +20,7 @@ from .response_normalizer import ResponseNormalizer
 from .response_processor import ResponseProcessor
 from .agent_creation import AgentCreationFacade
 from .request_builder import RequestBuilder
+from .execution_engine import ExecutionEngine
 # Conditional imports now centralized in availability module
 from .availability import (
     LANGCHAIN_AVAILABLE,
@@ -137,6 +138,12 @@ class LLMClient:
             self._langfuse_enabled = is_langfuse_enabled()
         
         self._request_builder = RequestBuilder(self._langchain_available, self._SystemMessage, self._HumanMessage)
+        self._execution_engine = ExecutionEngine(
+            langfuse_enabled=self._langfuse_enabled,
+            max_retries=self._max_retries,
+            backoff_base=self._backoff_base,
+            on_rate_limit=self._on_rate_limit,
+        )
 
     # -------------------------
     # LangChain agent helpers
@@ -224,31 +231,7 @@ class LLMClient:
         Execute agent.invoke with retry/backoff logic.
         Returns (result, latency).
         """
-        start_ts = time.perf_counter()
-
-        # Build invocation config with Langfuse callback if enabled
-        invoke_config = build_langfuse_config(agent, context=context, langfuse_enabled=self._langfuse_enabled)
-
-        # agent.invoke may accept context parameter in v1 Agents API
-        try:
-            if context is not None:
-                if invoke_config:
-                    result = agent.invoke(state, context=context, config=invoke_config)
-                else:
-                    result = agent.invoke(state, context=context)
-            else:
-                if invoke_config:
-                    result = agent.invoke(state, config=invoke_config)
-                else:
-                    result = agent.invoke(state)
-        except Exception as e:
-            logger.debug("agent.invoke failed: %s", e, exc_info=True)
-            raise
-
-        end_ts = time.perf_counter()
-        latency = end_ts - start_ts
-        
-        return result, latency
+        return self._execution_engine.execute(agent, state, context=context)
     
     def _process_response(self, result, latency, agent):
         """
