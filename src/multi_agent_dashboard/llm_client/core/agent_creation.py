@@ -6,6 +6,8 @@ Agent creation facade that coordinates agent creation using extracted components
 import logging
 from typing import Any, List, Optional
 
+from multi_agent_dashboard.models import AgentSpec
+
 logger = logging.getLogger(__name__)
 
 # Internal imports
@@ -20,20 +22,39 @@ class AgentCreationFacade:
     ToolBinder, StructuredOutputBinder, ChatModelFactory).
     """
 
-    def __init__(self, client):
+    def __init__(self, client: Any):
+        """
+        Initialize the agent creation facade.
+        
+        Args:
+            client: LLMClient instance
+        """
         self._client = client
 
     def create_agent(
         self,
-        spec,
+        spec: AgentSpec,
         *,
         tools: Optional[List[Any]] = None,
         middleware: Optional[List[Any]] = None,
         response_format: Optional[Any] = None,
         timeout: Optional[float] = None,
-    ):
+    ) -> Any:
         """
-        Create a LangChain agent bound to the provided AgentSpec-like object.
+        Create a LangChain agent bound to the provided AgentSpec.
+        
+        Args:
+            spec: AgentSpec instance containing agent configuration
+            tools: Optional list of tools to make available to the agent
+            middleware: Optional list of middleware functions to apply
+            response_format: Optional response format configuration
+            timeout: Optional timeout override for this agent
+            
+        Returns:
+            LangChain agent instance configured according to the spec
+            
+        Raises:
+            RuntimeError: If LangChain is not available in the environment
         """
         # Check LangChain availability
         if not self._client._langchain_available or self._client._model_factory is None or self._client._create_agent is None:

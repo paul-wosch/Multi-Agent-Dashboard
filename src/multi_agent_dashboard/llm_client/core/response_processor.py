@@ -22,11 +22,19 @@ class ResponseProcessor:
     """
     
     @staticmethod
-    def extract_usage_from_candidate(candidate: Any) -> dict | None:
+    def extract_usage_from_candidate(candidate: Any) -> Optional[Dict[str, Any]]:
         """
         Recursively search a candidate dict for usage or usage_metadata.
         
-        Supports nested agent_response, output lists, and result fields.
+        This method performs a deep search through nested structures to find usage
+        metadata, checking common field names and nested structures like agent_response
+        and output lists.
+        
+        Args:
+            candidate: Dictionary or object to search for usage data
+            
+        Returns:
+            Usage dictionary containing token counts and other metadata, or None if not found
         """
         if not isinstance(candidate, dict):
             return None
@@ -57,13 +65,19 @@ class ResponseProcessor:
         return None
     
     @staticmethod
-    def extract_usage_from_messages(messages: Any) -> dict | None:
+    def extract_usage_from_messages(messages: Any) -> Optional[Dict[str, Any]]:
         """
-        Pull usage from the last AIMessage-like object in a messages list.
+        Extract usage metadata from the last AIMessage-like object in a messages list.
         
-        LangChain commonly attaches usage on AIMessage.usage_metadata or
-        AIMessage.response_metadata rather than promoting it to the top-level
-        agent state dict.
+        This method searches through message structures from the end to find usage
+        metadata (token counts, etc.) in various formats including usage_metadata,
+        usage, and response_metadata fields.
+        
+        Args:
+            messages: List of message objects or dictionaries to search
+            
+        Returns:
+            Usage dictionary containing token counts and other metadata, or None if not found
         """
         if not isinstance(messages, list):
             return None
@@ -85,15 +99,25 @@ class ResponseProcessor:
         return None
     
     @staticmethod
-    def extract_tool_info_from_messages(messages: Any) -> tuple[list[dict], list[dict]]:
+    def extract_tool_info_from_messages(messages: Any) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
         Extract tool_calls and content_blocks from AIMessage-like objects in a messages list.
-        Returns (tool_calls, content_blocks).
+        
+        This method searches through message structures to find tool calls and content blocks,
+        handling various formats including dicts, LangChain message objects, and OpenAI-style
+        message structures with additional_kwargs.
+        
+        Args:
+            messages: List of message objects or dictionaries to search
+            
+        Returns:
+            Tuple of (tool_calls, content_blocks) where each is a list of dictionaries
+            representing the extracted tool calls and content blocks
         """
         if not isinstance(messages, list):
             return [], []
 
-        def _msg_to_dict(m: Any) -> dict | None:
+        def _msg_to_dict(m: Any) -> Optional[Dict[str, Any]]:
             if isinstance(m, dict):
                 return m
             try:
@@ -157,8 +181,17 @@ class ResponseProcessor:
         """
         Extract textual output from agent result and raw dict.
         
-        Walks messages from the end, prefers assistant/AI messages, then falls back
-        to other fields. Returns empty string if all extraction fails.
+        This method walks through message structures from the end to the beginning,
+        preferring assistant/AI messages, then falls back to other fields. It handles
+        various message formats including dicts, LangChain message objects, and
+        OpenAI-style content blocks.
+        
+        Args:
+            result: Raw agent response object
+            raw_dict: Dictionary representation of the result from ResponseNormalizer
+            
+        Returns:
+            Extracted text as string, or empty string if extraction fails
         """
         text_out = None
         try:
@@ -313,7 +346,21 @@ class ResponseProcessor:
         """
         Process raw agent response into a normalized TextResponse.
         
-        This is the main entry point, replacing LLMClient._process_response.
+        This is the main entry point for response processing. It extracts usage metadata,
+        tool calls, content blocks, and text from the raw agent response, normalizes them
+        into a consistent format, and returns a TextResponse object.
+        
+        Args:
+            result: Raw agent response object from LangChain agent.invoke()
+            latency: Execution latency in seconds
+            agent: Optional agent instance (currently unused, reserved for future use)
+            
+        Returns:
+            TextResponse containing normalized response data with text, raw dict,
+            token counts, and latency
+            
+        Raises:
+            ValueError: If result cannot be processed into a valid TextResponse
         """
         # Convert to serializable dict using ResponseNormalizer
         raw_dict = ResponseNormalizer.to_dict(result)

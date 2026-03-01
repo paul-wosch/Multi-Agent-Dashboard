@@ -50,7 +50,14 @@ class ExecutionEngine:
         """
         Execute agent.invoke with Langfuse tracing and latency measurement.
         
-        Returns (result, latency).
+        Args:
+            agent: LangChain agent instance to invoke
+            state: Dictionary containing the prompt and any file attachments
+            context: Optional context dictionary with pipeline_name, run_id, etc.
+            
+        Returns:
+            Tuple of (result, latency) where result is the agent response
+            and latency is the execution time in seconds
         """
         start_ts = time.perf_counter()
 

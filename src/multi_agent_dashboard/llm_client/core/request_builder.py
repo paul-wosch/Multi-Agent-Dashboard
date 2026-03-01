@@ -6,7 +6,7 @@ including multimodal file handling and message formatting.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ class RequestBuilder:
     
     def build(
         self,
-        agent,
+        agent: Any,
         prompt: str,
         *,
         files: Optional[List[Dict[str, Any]]] = None,
@@ -45,7 +45,18 @@ class RequestBuilder:
     ) -> Dict[str, Any]:
         """
         Build input with files, apply multimodal handling.
-        Returns the state dict for agent.invoke.
+        
+        Args:
+            agent: LangChain agent instance
+            prompt: Text prompt to send to the agent
+            files: Optional list of file attachments (dicts with filename, content, mime_type)
+            context: Optional context dictionary (currently unused)
+            
+        Returns:
+            State dictionary for agent.invoke containing messages array
+            
+        Raises:
+            RuntimeError: If LangChain is not available
         """
         if not self._langchain_available:
             raise RuntimeError("LangChain invoke_agent not available")

@@ -7,6 +7,7 @@ their availability.
 """
 
 import logging
+from typing import Optional, Callable, Type, Any
 
 logger = logging.getLogger(__name__)
 
@@ -87,26 +88,26 @@ except Exception:
 # ------------------------------------------------------------------------------
 # Public getter functions (defer import errors)
 # ------------------------------------------------------------------------------
-def get_SystemMessage():
+def get_SystemMessage() -> Optional[Any]:
     """Return SystemMessage class if LangChain available, else None."""
     return _SystemMessage
 
-def get_HumanMessage():
+def get_HumanMessage() -> Optional[Any]:
     """Return HumanMessage class if LangChain available, else None."""
     return _HumanMessage
 
-def get_AIMessage():
+def get_AIMessage() -> Optional[Any]:
     """Return AIMessage class if LangChain available, else None."""
     return _AIMessage
 
-def get_init_chat_model():
+def get_init_chat_model() -> Optional[Any]:
     """Return init_chat_model function if LangChain available, else None."""
     return _init_chat_model
 
-def get_create_agent():
+def get_create_agent() -> Optional[Any]:
     """Return create_agent function if LangChain available, else None."""
     return _create_agent
 
-def get_AgentMiddleware():
+def get_AgentMiddleware() -> Optional[Any]:
     """Return AgentMiddleware class if LangChain available, else None."""
     return _AgentMiddleware
