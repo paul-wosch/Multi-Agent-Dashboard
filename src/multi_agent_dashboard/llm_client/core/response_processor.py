@@ -8,7 +8,7 @@ LangChain agent responses and normalizes them into a TextResponse.
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
-from .response_normalizer import ResponseNormalizer
+from ..response_normalizer import ResponseNormalizer
 
 logger = logging.getLogger(__name__)
 
@@ -468,7 +468,7 @@ class ResponseProcessor:
         except Exception:
             pass
         
-        from .core import TextResponse
+        from .client import TextResponse
         return TextResponse(
             text=text_out,
             raw=raw_dict,

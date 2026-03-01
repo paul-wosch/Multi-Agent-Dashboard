@@ -9,7 +9,7 @@ import time
 import logging
 from typing import Any, Dict, Optional, Callable, Tuple
 
-from .observability.langfuse_integration import build_langfuse_config
+from ..observability.langfuse_integration import build_langfuse_config
 
 logger = logging.getLogger(__name__)
 

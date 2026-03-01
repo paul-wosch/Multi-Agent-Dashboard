@@ -9,9 +9,9 @@ from typing import Any, List, Optional
 logger = logging.getLogger(__name__)
 
 # Internal imports
-from .instrumentation import InstrumentationManager
-from .tool_binder import ToolBinder
-from .structured_output import StructuredOutputBinder
+from ..instrumentation import InstrumentationManager
+from ..tool_binder import ToolBinder
+from ..structured_output import StructuredOutputBinder
 
 
 class AgentCreationFacade:

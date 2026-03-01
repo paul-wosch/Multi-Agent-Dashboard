@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 # Conditional import for DuckDuckGoSearchTool (may not be available if LangChain missing)
-from .availability import DUCKDUCKGO_TOOL_AVAILABLE, DuckDuckGoSearchTool
+from .core.availability import DUCKDUCKGO_TOOL_AVAILABLE, DuckDuckGoSearchTool
 
 # Import required dependencies
 from multi_agent_dashboard.tool_integration.provider_tool_adapter import convert_tools_for_provider

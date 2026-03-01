@@ -10,7 +10,7 @@ import logging
 from typing import Any, Dict, Optional
 
 # Try to import LangChain AIMessage (optional)
-from .availability import get_AIMessage
+from .core.availability import get_AIMessage
 _AIMessage = get_AIMessage()
 
 logger = logging.getLogger(__name__)

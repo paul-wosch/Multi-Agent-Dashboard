@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger(__name__)
 
 # Import Langfuse utilities from centralized availability module
-from ..availability import get_langfuse_handler
+from ..core.availability import get_langfuse_handler
 
 
 def build_langfuse_config(

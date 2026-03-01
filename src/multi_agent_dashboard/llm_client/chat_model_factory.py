@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional, Tuple, Callable
 logger = logging.getLogger(__name__)
 
 # Try to import LangChain init_chat_model (optional)
-from .availability import LANGCHAIN_AVAILABLE, get_init_chat_model
+from .core.availability import LANGCHAIN_AVAILABLE, get_init_chat_model
 _init_chat_model = get_init_chat_model()
 
 
