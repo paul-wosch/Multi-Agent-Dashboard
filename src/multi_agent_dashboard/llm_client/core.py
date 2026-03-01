@@ -1,4 +1,4 @@
-# multi_agent_dashboard/llm_client.py
+# multi_agent_dashboard/llm_client/core.py
 import time
 import os
 import logging
@@ -17,22 +17,21 @@ from .tool_binder import ToolBinder
 from .structured_output import StructuredOutputBinder
 from .wrappers import StructuredOutputWrapper
 from .response_normalizer import ResponseNormalizer
-# Conditional import for DuckDuckGoSearchTool (may not be available if LangChain missing)
-try:
-    from multi_agent_dashboard.tool_integration.search import DuckDuckGoSearchTool
-    _DUCKDUCKGO_TOOL_AVAILABLE = True
-except ImportError:
-    DuckDuckGoSearchTool = None
-    _DUCKDUCKGO_TOOL_AVAILABLE = False
-
-# Langfuse observability (optional)
-try:
-    from multi_agent_dashboard.observability import is_langfuse_enabled, get_langfuse_handler
-    _LANGFUSE_AVAILABLE = True
-except ImportError:
-    is_langfuse_enabled = None
-    get_langfuse_handler = None
-    _LANGFUSE_AVAILABLE = False
+# Conditional imports now centralized in availability module
+from .availability import (
+    LANGCHAIN_AVAILABLE,
+    LANGFUSE_AVAILABLE,
+    DUCKDUCKGO_TOOL_AVAILABLE,
+    get_SystemMessage,
+    get_HumanMessage,
+    get_AIMessage,
+    get_init_chat_model,
+    get_create_agent,
+    get_AgentMiddleware,
+    is_langfuse_enabled,
+    get_langfuse_handler,
+    DuckDuckGoSearchTool,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,38 +41,6 @@ __all__ = [
     "LLMError",
     "INSTRUMENTATION_MIDDLEWARE",
 ]
-
-# Try to import LangChain pieces (optional)
-_LANGCHAIN_AVAILABLE = False
-_init_chat_model = None
-_SystemMessage = None
-_HumanMessage = None
-_AIMessage = None
-_create_agent = None
-_AgentMiddleware = None
-
-try:
-    from langchain.chat_models import init_chat_model  # type: ignore
-    from langchain.messages import SystemMessage, HumanMessage, AIMessage  # type: ignore
-    from langchain.agents import create_agent  # type: ignore
-    from langchain.agents.middleware import AgentMiddleware  # type: ignore
-
-    _LANGCHAIN_AVAILABLE = True
-    _init_chat_model = init_chat_model
-    _SystemMessage = SystemMessage
-    _HumanMessage = HumanMessage
-    _AIMessage = AIMessage
-    _create_agent = create_agent
-    _AgentMiddleware = AgentMiddleware
-except Exception:
-    # Keep resilience when LangChain is not installed or partial environments.
-    _LANGCHAIN_AVAILABLE = False
-    _init_chat_model = None
-    _SystemMessage = None
-    _HumanMessage = None
-    _AIMessage = None
-    _create_agent = None
-    _AgentMiddleware = None
 
 
 
@@ -266,16 +233,15 @@ class LLMClient:
         self._on_rate_limit = on_rate_limit
 
         # SDK / LangChain capability detection (best-effort)
-        self._langchain_available = _LANGCHAIN_AVAILABLE
+        self._langchain_available = LANGCHAIN_AVAILABLE
 
 
 
         # Use standard LangChain init_chat_model (may be None if LangChain not available)
-        self._init_chat_model = _init_chat_model
-
-        self._SystemMessage = _SystemMessage
-        self._HumanMessage = _HumanMessage
-        self._create_agent = _create_agent
+        self._init_chat_model = get_init_chat_model()
+        self._SystemMessage = get_SystemMessage()
+        self._HumanMessage = get_HumanMessage()
+        self._create_agent = get_create_agent()
 
         # Chat model factory (LangChain path)
         self._model_factory: Optional[ChatModelFactory] = None
@@ -291,7 +257,7 @@ class LLMClient:
 
         # Langfuse observability (optional)
         self._langfuse_enabled = False
-        if _LANGFUSE_AVAILABLE and is_langfuse_enabled is not None:
+        if LANGFUSE_AVAILABLE and is_langfuse_enabled is not None:
             self._langfuse_enabled = is_langfuse_enabled()
 
     # -------------------------

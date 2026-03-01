@@ -6,17 +6,8 @@ from typing import Any, Dict, Optional, Tuple, Callable
 logger = logging.getLogger(__name__)
 
 # Try to import LangChain init_chat_model (optional)
-_LANGCHAIN_AVAILABLE = False
-_init_chat_model = None
-
-try:
-    from langchain.chat_models import init_chat_model  # type: ignore
-    _LANGCHAIN_AVAILABLE = True
-    _init_chat_model = init_chat_model
-except Exception:
-    # Keep resilience when LangChain is not installed or partial environments.
-    _LANGCHAIN_AVAILABLE = False
-    _init_chat_model = None
+from .availability import LANGCHAIN_AVAILABLE, get_init_chat_model
+_init_chat_model = get_init_chat_model()
 
 
 class ChatModelFactory:
@@ -27,7 +18,7 @@ class ChatModelFactory:
     """
 
     def __init__(self, init_fn: Optional[Callable[..., Any]] = None):
-        if init_fn is None and not _LANGCHAIN_AVAILABLE:
+        if init_fn is None and not LANGCHAIN_AVAILABLE:
             raise RuntimeError("LangChain not available; cannot create ChatModelFactory without init function.")
         self._init_fn = init_fn or _init_chat_model
         # include timeout as final component in key tuple (Optional[float])

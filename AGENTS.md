@@ -541,7 +541,7 @@ A database is considered “fresh” if no user‑created tables exist or existi
 
 2. **DeepSeek‑reasoner structured output** – On 400 tool_choice error, the client automatically retries with `json_mode` to enforce JSON formatting without tool invocation.
 
-3. **LangChain optional dependency** – The codebase handles missing LangChain gracefully (`_LANGCHAIN_AVAILABLE` flag). Tests mock LangChain components to avoid import errors.
+3. **LangChain optional dependency** – The codebase handles missing LangChain gracefully (`LANGCHAIN_AVAILABLE` flag). Tests mock LangChain components to avoid import errors.
 
 4. **Provider‑feature detection & normalization** – The `provider_features` field is a legacy artifact stored for backward compatibility only. When an AgentSpec doesn’t provide `provider_features`, the engine may derive them from `detected_provider_profile` in raw metrics. The field is normalized to keys `tool_calling`, `structured_output`, `reasoning`, `image_inputs`, `max_input_tokens` (accepting variations like `tool_calls`, `toolcalling`, etc.). This functionality is already deactivated in the UI and will be removed in a future release. Agent configuration (tools, structured output, etc.) remains the source of truth.
 

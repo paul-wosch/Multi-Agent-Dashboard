@@ -7,12 +7,7 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 # Conditional import for DuckDuckGoSearchTool (may not be available if LangChain missing)
-try:
-    from multi_agent_dashboard.tool_integration.search import DuckDuckGoSearchTool
-    _DUCKDUCKGO_TOOL_AVAILABLE = True
-except ImportError:
-    DuckDuckGoSearchTool = None
-    _DUCKDUCKGO_TOOL_AVAILABLE = False
+from .availability import DUCKDUCKGO_TOOL_AVAILABLE, DuckDuckGoSearchTool
 
 # Import required dependencies
 from multi_agent_dashboard.tool_integration.provider_tool_adapter import convert_tools_for_provider
@@ -97,7 +92,7 @@ class ToolBinder:
                     if tool_instance is not None:
                         # Apply domain filters to DuckDuckGoSearchTool instance (hidden from LLM)
                         allowed_domains = tool_filters.get(tool_name)
-                        if allowed_domains and _DUCKDUCKGO_TOOL_AVAILABLE and isinstance(tool_instance, DuckDuckGoSearchTool):
+                        if allowed_domains and DUCKDUCKGO_TOOL_AVAILABLE and isinstance(tool_instance, DuckDuckGoSearchTool):
                             tool_instance._domain_filter = allowed_domains
                             logger.debug(f"Set domain filter on DuckDuckGoSearchTool: {allowed_domains}")
                         tool_instances.append(tool_instance)
