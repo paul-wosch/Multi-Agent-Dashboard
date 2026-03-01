@@ -30,9 +30,9 @@ from .availability import (
     get_create_agent,
     get_AgentMiddleware,
     is_langfuse_enabled,
-    get_langfuse_handler,
     DuckDuckGoSearchTool,
 )
+from .observability.langfuse_integration import build_langfuse_config
 
 logger = logging.getLogger(__name__)
 
@@ -289,59 +289,7 @@ class LLMClient:
         start_ts = time.perf_counter()
 
         # Build invocation config with Langfuse callback if enabled
-        invoke_config = {}
-        if self._langfuse_enabled:
-            # Extract metadata from context and agent spec
-            pipeline_name = None
-            run_id = None
-            tags = []
-            metadata = {}
-
-            if context is not None:
-                pipeline_name = context.get("pipeline_name")
-                run_id = context.get("run_id")
-
-            # Always add pipeline tag (pipeline name or "Ad‑Hoc" for ad‑hoc runs)
-            pipeline_tag_value = pipeline_name or "Ad‑Hoc"
-            tags.append(f"pipeline:{pipeline_tag_value}")
-            
-            if run_id:
-                tags.append(f"run:{run_id}")
-
-            # Agent name (from agent._name, agent.name, or spec)
-            agent_name = getattr(agent, "_name", None)
-            if not agent_name:
-                agent_name = getattr(agent, "name", None)
-            if not agent_name:
-                # Fallback: try to get from agent spec if available
-                agent_spec = getattr(agent, "_agent_spec", None)
-                if agent_spec and hasattr(agent_spec, "name"):
-                    agent_name = agent_spec.name
-            
-            # Default agent name if still None
-            if not agent_name:
-                agent_name = "unknown"
-            
-            # Add agent tag
-            tags.append(f"agent:{agent_name}")
-
-            # Session ID: pipeline name or "Ad‑Hoc" for ad‑hoc runs
-            session_id = pipeline_name or "Ad‑Hoc"
-
-            # Create Langfuse handler (no constructor parameters needed)
-            if get_langfuse_handler is not None:
-                handler = get_langfuse_handler()
-                if handler is not None:
-                    invoke_config["callbacks"] = [handler]
-                    # Trace name (appears as "Name" in Langfuse UI)
-                    invoke_config["run_name"] = agent_name
-                    # Langfuse‑specific metadata keys
-                    invoke_config["metadata"] = {
-                        "langfuse_session_id": session_id,
-                        "langfuse_user_id": "multi_agent_dashboard",
-                        "langfuse_tags": tags,
-                        **metadata,
-                    }
+        invoke_config = build_langfuse_config(agent, context=context, langfuse_enabled=self._langfuse_enabled)
 
         # agent.invoke may accept context parameter in v1 Agents API
         try:
