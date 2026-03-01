@@ -106,7 +106,14 @@ src/multi_agent_dashboard/
 ├── llm_client/                         # Modular LLM provider integration subpackage
 │   ├── __init__.py
 │   ├── chat_model_factory.py
-│   ├── core.py                         # Main LLMClient class
+│   ├── core/                           # Modular LLMClient core implementation
+│   │   ├── __init__.py                 # Public API (LLMClient, TextResponse, etc.)
+│   │   ├── availability.py             # Conditional import flags and lazy references
+│   │   ├── agent_creation.py           # AgentCreationFacade for agent creation
+│   │   ├── request_builder.py          # RequestBuilder for constructing agent inputs
+│   │   ├── execution_engine.py         # ExecutionEngine for agent invocation with retries
+│   │   ├── response_processor.py       # ResponseProcessor for normalizing responses
+│   │   └── client.py                   # Main LLMClient class implementation
 │   ├── instrumentation.py
 │   ├── multimodal/                     # Multimodal file handling
 │   │   ├── __init__.py
@@ -193,6 +200,13 @@ config/                                 # Centralized YAML‑based configuration
 
 - Provider‑agnostic client in `llm_client/` subpackage with factory pattern; uses LangChain's unified `init_chat_model` interface with provider‑specific adapters for OpenAI, DeepSeek, and Ollama
 - Modular subpackage with separate modules for instrumentation, tool binding, structured output, response normalization, and provider adapters
+- **Core implementation modularization**: The `LLMClient` internals have been decomposed into focused modules under `llm_client/core/`:
+  - `availability.py` – conditional import flags and lazy references
+  - `agent_creation.py` – `AgentCreationFacade` for agent creation
+  - `request_builder.py` – `RequestBuilder` for constructing agent inputs
+  - `execution_engine.py` – `ExecutionEngine` for agent invocation with retries
+  - `response_processor.py` – `ResponseProcessor` for normalizing responses
+  - `client.py` – main `LLMClient` class implementation
 - Supported providers: `openai`, `deepseek`, `ollama`
 - Provider‑specific logic is encapsulated in `_build_structured_output_adapter`, `_build_input_with_files`, and `_compute_cost`
 - Structured output uses provider‑specific methods: OpenAI JSON Schema, DeepSeek function‑calling/json‑mode, Ollama raw schema
