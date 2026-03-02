@@ -7,6 +7,7 @@ import pytest
 from multi_agent_dashboard.config import MIGRATIONS_PATH
 from multi_agent_dashboard.db.infra.sqlite_rebuild import _scan_migrations_for_rebuilds, rebuild_tables_batch
 from multi_agent_dashboard.db.infra.migrations import apply_migrations
+from multi_agent_dashboard.db.db import init_db
 
 
 def _fk_has_on_delete(conn: sqlite3.Connection, table: str, column: str, expected_on_delete: str) -> bool:
@@ -61,13 +62,20 @@ def test_sqlite_rebuild_all_with_diffs_scans_and_rebuilds(tmp_path):
     and that the batch rebuild path (rebuild_tables_batch) successfully applies the
     rebuild_defs (PRAGMA foreign_key_check passes and ON DELETE CASCADE appears).
     """
-    # Prepare a minimal DB state: runs + agent_outputs (agent_outputs without ON DELETE CASCADE)
     db_file = tmp_path / "rebuild_all_with_diffs.db"
+    
+    # Initialize a fresh DB with all tables (including agent_run_configs)
+    init_db(str(db_file))
+    
+    # Open connection for the rest of the test
     conn = sqlite3.connect(str(db_file))
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("CREATE TABLE runs (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT)")
+        
+        # Drop agent_outputs (created by init_db with ON DELETE CASCADE)
+        # and recreate it without ON DELETE CASCADE to have something to rebuild
+        conn.execute("DROP TABLE IF EXISTS agent_outputs")
         conn.execute(
             "CREATE TABLE agent_outputs ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -77,27 +85,27 @@ def test_sqlite_rebuild_all_with_diffs_scans_and_rebuilds(tmp_path):
             "FOREIGN KEY(run_id) REFERENCES runs(id)"
             ")"
         )
-        # insert minimal data so DB is non-empty (we're testing rebuild path directly)
+        # Insert minimal data so DB is non-empty (we're testing rebuild path directly)
         conn.execute("INSERT INTO runs (id, timestamp) VALUES (NULL, 'now')")
         conn.execute("INSERT INTO agent_outputs (run_id, agent_name, output) VALUES (1, 'a', 'o')")
         conn.commit()
-
+        
         # Scan migrations directory for rebuild metadata
         tables, rebuild_defs, file_map = _scan_migrations_for_rebuilds(MIGRATIONS_PATH)
-
+        
         # Expect agent_outputs to be listed among tables requiring rebuild (per our repo migrations)
         assert "agent_outputs" in tables, f"Expected agent_outputs in scanned tables, got: {tables}"
         assert "agent_outputs" in rebuild_defs, "Expected rebuild_defs to contain agent_outputs entry"
-
+        
         # Perform the rebuild using the batch helper for the scanned table(s)
         rebuild_map = {t: rebuild_defs[t] for t in tables if t in rebuild_defs and rebuild_defs[t].get("columns")}
         assert rebuild_map, "No valid rebuild map constructed from scanned rebuild_defs"
-
+        
         rebuild_tables_batch(conn, rebuild_map)
-
+        
         # After rebuild, the FK should have ON DELETE CASCADE per migration-provided rebuild_defs
         assert _fk_has_on_delete(conn, "agent_outputs", "run_id", "CASCADE"), \
             "Expected agent_outputs.run_id to have ON DELETE CASCADE after batch rebuild"
-
+        
     finally:
         conn.close()
