@@ -1,7 +1,37 @@
 """
-Langfuse observability integration (optional).
+Langfuse observability integration for the Multi-Agent Dashboard.
 
-This module is only active when LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are set.
+This module provides optional integration with Langfuse (https://langfuse.com) for
+distributed tracing of LLM calls, tool invocations, and agent reasoning steps.
+It enables detailed observability including latency breakdown, token usage,
+provider costs, and execution metadata.
+
+Key Features:
+- Optional dependency with graceful fallback when not configured
+- Singleton client with lazy initialization
+- Automatic flush on program exit via atexit
+- Environment-based configuration
+- Support for Langfuse v3.x.x SDK
+
+Architecture:
+- Uses singleton pattern for Langfuse client
+- Lazy initialization on first use
+- Automatic environment variable setup from config
+- CallbackHandler creation for individual invocations
+
+Configuration Requirements:
+    LANGFUSE_PUBLIC_KEY: Public API key from Langfuse dashboard
+    LANGFUSE_SECRET_KEY: Secret API key from Langfuse dashboard
+    LANGFUSE_BASE_URL: Optional, for self-hosted instances (default: cloud.langfuse.com)
+    LANGFUSE_ENABLED: Optional, set to 'false' to explicitly disable
+
+Integration Points:
+    - LLMClient uses get_langfuse_handler() for tracing
+    - Automatic flush ensures all traces are sent on program exit
+    - Environment variables are automatically set from config
+
+Note: This module is completely optional. If Langfuse credentials are not set,
+the integration remains inactive with zero overhead.
 """
 
 import atexit
