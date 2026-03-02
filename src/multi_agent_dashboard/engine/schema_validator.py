@@ -1,5 +1,13 @@
 """
-SchemaValidator – validates structured output against JSON schema and handles strict‑exit logic.
+Structured output validation against JSON schemas.
+
+This module provides the SchemaValidator class which validates agent outputs against
+configured JSON schemas. It supports schema resolution (from schema_json or schema_name),
+JSON validation using jsonschema, and strict‑validation‑exit detection for early
+pipeline termination when validation fails.
+
+The validator handles various validation states including missing schemas, invalid
+JSON, empty schemas, and validation errors.
 """
 
 from __future__ import annotations

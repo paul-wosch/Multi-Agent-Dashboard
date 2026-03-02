@@ -1,5 +1,12 @@
 """
-MetricsAggregator – cost computation and aggregation across agent runs.
+Cost computation and metrics aggregation for agent runs.
+
+This module provides the MetricsAggregator class with static methods for computing
+token costs using dynamic provider pricing data and aggregating metrics across
+multiple agent executions.
+
+Cost computation is provider-aware and uses pricing data loaded dynamically from
+provider data files (OpenAI, DeepSeek, Ollama) with support for local overrides.
 """
 
 from __future__ import annotations

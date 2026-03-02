@@ -1,5 +1,13 @@
 """
-ProgressReporter – tick‑based progress updates for sequential agent pipelines.
+Progress reporting for sequential agent pipelines.
+
+This module provides the ProgressReporter class which manages tick‑based progress
+updates for the multi-agent engine. It uses a simple tick model where each agent
+consumes two ticks (start and end), enabling smooth progress bar updates during
+pipeline execution.
+
+The reporter encapsulates tick arithmetic and calls user‑supplied progress
+callbacks with computed percentages and agent names.
 """
 
 from __future__ import annotations

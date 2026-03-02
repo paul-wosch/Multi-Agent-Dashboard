@@ -1,5 +1,13 @@
 """
-RunSnapshotBuilder – creates agent configuration snapshots for run logging.
+Agent configuration snapshot creation for run logging.
+
+This module provides the RunSnapshotBuilder class which creates comprehensive
+configuration snapshots for individual agent executions. These snapshots capture
+the complete runtime state including agent specifications, runtime configuration,
+observability data, provider metadata, and structured output configuration.
+
+Snapshots are used for database logging, later inspection, and must be
+JSON‑serializable for persistence.
 """
 
 from __future__ import annotations

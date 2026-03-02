@@ -1,16 +1,21 @@
-# engine.py
-from __future__ import annotations
+"""
+Multi-agent orchestration engine.
 
+Core orchestration logic for executing sequential agent pipelines with shared state,
+input/output contracts, and deterministic writeback.
+
+This module contains the main MultiAgentEngine class and EngineResult dataclass.
+"""
+
+from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Callable
 
-
 from multi_agent_dashboard.models import AgentSpec
 from multi_agent_dashboard.runtime import AgentRuntime
 from multi_agent_dashboard.llm_client import LLMClient
-
 
 logger = logging.getLogger(__name__)
 

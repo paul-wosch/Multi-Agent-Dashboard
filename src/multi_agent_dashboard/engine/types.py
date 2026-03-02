@@ -1,8 +1,14 @@
 """
-Data containers for the multi-agent engine.
+Data containers and type definitions for the multi-agent engine.
 
-These dataclasses provide structured interfaces for the engine's internal data flow,
-enabling modularization of the orchestration logic.
+This module provides structured dataclass interfaces for the engine's internal
+data flow, enabling clean modularization of orchestration logic. The dataclasses
+define contracts between engine components and ensure type safety.
+
+Contains:
+  - RunMetrics: Per-agent token and cost metrics
+  - AgentRunResult: Result of executing a single agent within a pipeline
+  - PipelineState: Mutable state shared across all agents in a pipeline
 """
 
 from dataclasses import dataclass, field

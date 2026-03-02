@@ -1,5 +1,13 @@
 """
-AgentExecutor – encapsulates per‑agent execution logic extracted from run_seq().
+Agent execution logic for the multi-agent engine.
+
+This module contains the AgentExecutor class which encapsulates per‑agent execution
+logic extracted from MultiAgentEngine.run_seq(). It handles input validation,
+agent invocation, metric extraction, cost computation, configuration snapshotting,
+tool‑usage parsing, structured‑output validation, and writeback to pipeline state.
+
+The executor is designed to be stateless with respect to the pipeline; all mutable
+state is passed via a PipelineState instance.
 """
 
 from __future__ import annotations

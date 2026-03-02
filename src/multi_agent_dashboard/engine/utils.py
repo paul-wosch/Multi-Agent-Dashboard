@@ -1,5 +1,9 @@
-# src/multi_agent_dashboard/engine/utils.py
-# Consolidated helper functions extracted from engine.py and models.py
+"""
+Utility functions for the engine package.
+
+Consolidated helper functions extracted from engine.py and models.py for
+content block normalization and provider feature extraction.
+"""
 
 from __future__ import annotations
 

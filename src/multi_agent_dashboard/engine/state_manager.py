@@ -1,14 +1,20 @@
 """
-StateManager – encapsulates the engine's persistent state between pipeline runs.
+Persistent state management for the multi-agent engine.
+
+The StateManager encapsulates the engine's persistent state between pipeline runs,
+providing a clean interface for resetting and updating from per‑run PipelineState
+instances.
 
 Holds:
   - state: shared mutable dict (carries final output, files, allowed_domains, etc.)
   - memory: per‑agent memory dict (stores agent‑specific data across pipeline)
   - warnings: accumulated warning messages
-  - agent_metrics: per‑agent metrics from the last run (as dict of dict)
+  - errors: accumulated error messages
+  - agent_metrics: per‑agent metrics from the last run (as dict of dict, maintaining
+    backward compatibility with the original engine.agent_metrics format)
 
-The manager provides a clean interface for resetting and updating from a per‑run
-PipelineState instance.
+The manager enables state persistence across multiple pipeline executions while
+providing clean separation from per‑run state containers.
 """
 
 from __future__ import annotations
