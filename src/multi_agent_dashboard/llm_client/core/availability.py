@@ -1,9 +1,20 @@
 """
-Centralized conditional import detection for the LLM client subpackage.
+Centralized conditional import detection and lazy loading for optional dependencies.
 
-This module provides lazy-loaded references to optional dependencies
-(LangChain, Langfuse, DuckDuckGoSearchTool) and boolean flags indicating
-their availability.
+This module provides a unified interface for detecting and accessing optional
+dependencies in the LLM client. It uses lazy loading to avoid import errors
+when dependencies are missing and provides boolean flags to check availability
+at runtime.
+
+Key features:
+- Lazy-loaded references to optional dependencies (LangChain, Langfuse, DuckDuckGo)
+- Boolean flags indicating dependency availability (LANGCHAIN_AVAILABLE, etc.)
+- Graceful fallback mechanisms for missing dependencies
+- Consistent interface for accessing optional functionality
+
+The module enables the LLM client to work in environments with partial
+dependency installations while providing full functionality when all
+dependencies are available.
 """
 
 import logging

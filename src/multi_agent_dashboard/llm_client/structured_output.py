@@ -1,7 +1,18 @@
 """
-Structured output binding for LLM providers.
+Structured output binding and schema management for LLM providers.
 
-This module handles provider-specific schema extraction and structured output binding.
+This module provides the core logic for binding JSON schemas to LLM providers
+for structured output generation. It handles provider-specific schema extraction,
+response format wrapping, and structured output method selection.
+
+Key functionality:
+- Provider-specific schema extraction from response_format wrappers
+- Structured output method selection (JSON Schema, function calling, JSON mode)
+- Schema validation and transformation for provider compatibility
+- Integration with provider adapters for consistent behavior
+
+The module enables reliable structured output generation across different
+LLM providers while maintaining schema integrity and validation.
 """
 
 import logging

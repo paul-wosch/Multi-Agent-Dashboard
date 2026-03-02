@@ -1,3 +1,20 @@
+"""
+LLM Client package for the Multi-Agent Dashboard.
+
+This package provides a provider-agnostic LLM client interface with support for
+multiple LLM providers (OpenAI, DeepSeek, Ollama), structured output, tool calling,
+multimodal file handling, and comprehensive instrumentation.
+
+Key components:
+- LLMClient: Main client class with provider-agnostic interface
+- Core modules: Modular implementation of client internals
+- Provider adapters: Provider-specific structured output and tool handling
+- Instrumentation: Middleware for metrics, logging, and observability
+- Response normalization: Standardization of provider-specific responses
+
+The package uses LangChain's unified init_chat_model interface internally while
+exposing a simplified, consistent API to the engine and UI layers.
+"""
 # multi_agent_dashboard.llm_client package
 # Exports the main LLM client interface and instrumentation middleware.
 

@@ -1,7 +1,19 @@
 """
-Langfuse integration for LLM client observability.
+Langfuse integration for LLM client observability and distributed tracing.
 
-Provides a function to build invocation configuration for Langfuse tracing.
+This module provides integration with Langfuse for comprehensive observability
+of LLM interactions. It builds invocation configurations for LangChain agents
+that enable distributed tracing, latency monitoring, token usage tracking,
+and cost calculation across the multi-agent dashboard.
+
+Key functionality:
+- Build Langfuse invocation configurations for agent tracing
+- Context propagation for pipeline and run correlation
+- Conditional enablement based on configuration and availability
+- Integration with LangChain's middleware system
+
+The integration is designed to work seamlessly with LangChain agents while
+providing detailed observability data for debugging and optimization.
 """
 
 import logging

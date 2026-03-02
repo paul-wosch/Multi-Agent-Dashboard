@@ -1,8 +1,20 @@
 """
-Request building for LLM client.
+Request builder for constructing LLM agent invocation states.
 
-This module encapsulates the logic for constructing agent invocation states,
-including multimodal file handling and message formatting.
+This module provides the RequestBuilder class that constructs the complete
+invocation state for LangChain agents, including message formatting and
+multimodal file handling. It processes file attachments, converts them to
+provider-appropriate formats, and builds the final message structure.
+
+Key responsibilities:
+- Multimodal file processing for images, PDFs, and text files
+- Provider-specific message construction (base64 for vision, text fallbacks)
+- Message formatting with LangChain message classes when available
+- Fallback to plain text concatenation when LangChain is unavailable
+- MIME type detection and content type handling
+
+The request builder ensures that file attachments are properly processed
+and formatted for each LLM provider's specific requirements.
 """
 
 import logging

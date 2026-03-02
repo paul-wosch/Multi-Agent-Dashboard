@@ -1,8 +1,22 @@
 """
-Response processing for LLM client.
+Response processor for extracting and normalizing LLM agent responses.
 
-This module extracts usage metadata, tool calls, content blocks, and text from
-LangChain agent responses and normalizes them into a TextResponse.
+This module provides the ResponseProcessor class that extracts metadata,
+tool calls, content blocks, and text from LangChain agent responses and
+normalizes them into a consistent TextResponse format. It handles the
+complexities of different response structures across providers and
+LangChain versions.
+
+Key extraction capabilities:
+- Usage metadata extraction (tokens, latency, costs)
+- Tool call extraction and normalization
+- Content block merging and text extraction
+- Nested agent_response chain flattening
+- Provider-specific response format handling
+
+The response processor ensures that regardless of the underlying LLM
+provider or LangChain version, the dashboard receives consistent,
+well-structured responses with complete metadata.
 """
 
 import logging

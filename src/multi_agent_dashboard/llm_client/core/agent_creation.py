@@ -1,6 +1,20 @@
 """
-Agent creation facade that coordinates agent creation using extracted components
-(InstrumentationManager, ToolBinder, StructuredOutputBinder, ChatModelFactory).
+Agent creation facade for coordinating LLM agent instantiation.
+
+This module provides the AgentCreationFacade class that coordinates the
+creation of LangChain agents using extracted components. It orchestrates
+the interaction between instrumentation, tool binding, structured output
+binding, and chat model factory to create fully configured agent instances.
+
+Key responsibilities:
+- Coordinate agent creation across multiple specialized components
+- Apply instrumentation middleware for observability
+- Bind tools and structured output based on agent specification
+- Cache and reuse chat model instances for performance
+- Handle provider-specific agent configuration variations
+
+The facade pattern simplifies agent creation while maintaining separation
+of concerns between the different aspects of agent configuration.
 """
 
 import logging

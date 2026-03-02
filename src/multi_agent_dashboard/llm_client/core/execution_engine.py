@@ -1,8 +1,20 @@
 """
-Execution engine for LLM client.
+Execution engine for LLM agent invocations with observability and resilience.
 
-This module encapsulates the logic for executing agent invocations with
-optional Langfuse observability and retry/backoff handling.
+This module provides the ExecutionEngine class that handles the actual
+invocation of LangChain agents with comprehensive observability integration
+and resilience features. It manages Langfuse tracing, latency measurement,
+and retry logic with exponential backoff for rate limits and transient failures.
+
+Key capabilities:
+- Agent invocation with Langfuse observability integration
+- Latency measurement and performance monitoring
+- Retry logic with exponential backoff for rate limits
+- Error handling and recovery for transient failures
+- Context propagation for distributed tracing
+
+The execution engine ensures reliable agent execution while providing
+detailed observability data for monitoring and debugging.
 """
 
 import time

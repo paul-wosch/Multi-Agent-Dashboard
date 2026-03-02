@@ -1,10 +1,23 @@
 """
-Provider-specific adapters for structured output binding.
+Provider-specific adapters for structured output binding across LLM providers.
 
-Each adapter encapsulates provider-specific logic for:
-- Structured output method selection (json_schema, function_calling, json_mode)
+This module provides adapter classes that encapsulate provider-specific logic
+for structured output handling. Each adapter implements the appropriate method
+for the provider's API while maintaining a consistent interface for the LLM client.
+
+Supported providers and their structured output methods:
+- OpenAI: JSON Schema mode with response_format parameter
+- DeepSeek: Function calling with JSON mode fallback
+- Ollama: Raw JSON schema with format parameter
+
+Key responsibilities:
+- Structured output method selection based on provider capabilities
 - Schema extraction from provider-specific response_format wrappers
-- Schema wrapping into provider-specific response_format payloads
+- Schema wrapping into provider-specific API payloads
+- Provider capability detection and feature negotiation
+
+The adapters enable consistent structured output behavior across different
+LLM providers while respecting each provider's unique API constraints.
 """
 
 import logging

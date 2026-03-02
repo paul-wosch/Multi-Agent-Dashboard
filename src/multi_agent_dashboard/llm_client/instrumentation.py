@@ -1,6 +1,21 @@
-# multi_agent_dashboard.llm_client.instrumentation
-# Instrumentation middleware and manager for LangChain agents.
+"""
+Instrumentation middleware for LangChain agents with comprehensive metrics collection.
 
+This module provides middleware for collecting detailed metrics from LangChain
+agent executions, including token usage, latency, costs, and execution traces.
+It integrates with Langfuse for observability and supports graceful fallback
+when LangChain dependencies are unavailable.
+
+Key capabilities:
+- Real-time metrics collection (tokens, latency, costs)
+- Langfuse integration for distributed tracing
+- Provider-specific cost calculation using dynamic pricing data
+- Fallback compatibility for environments without LangChain
+- Structured logging with context preservation
+
+The middleware is designed to be transparent to agent execution while providing
+comprehensive observability for debugging and optimization.
+"""
 import logging
 import time
 from typing import Any, Dict, List, Optional, Callable, Tuple

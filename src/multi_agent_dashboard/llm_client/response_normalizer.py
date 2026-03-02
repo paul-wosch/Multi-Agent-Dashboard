@@ -1,6 +1,21 @@
-# multi_agent_dashboard.llm_client.response_normalizer
-# Normalize SDK/LangChain responses into serializable dicts.
+"""
+Response Normalizer for standardizing LLM provider responses.
 
+This module normalizes diverse LLM provider responses into consistent,
+serializable dictionaries. It handles provider-specific response formats,
+extracts tool calls, merges content blocks, and flattens nested agent
+response chains for uniform processing by the agent pipeline.
+
+Key normalization tasks:
+- Convert provider SDK objects to serializable dictionaries
+- Merge multiple content blocks into single text responses
+- Extract and structure tool calls from provider-specific formats
+- Handle nested agent_response chains (e.g., from LangChain agents)
+- Preserve metadata (usage, tokens, costs) across normalization
+
+The normalizer ensures that regardless of the underlying LLM provider,
+the engine receives responses in a consistent format for processing.
+"""
 import logging
 from typing import Any, Dict, List, Optional
 

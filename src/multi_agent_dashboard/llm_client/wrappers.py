@@ -1,8 +1,21 @@
 """
 Wrapper classes for structured output and response normalization.
 
-This module provides the StructuredOutputWrapper class that normalizes payloads,
-extracts usage/token counts, and wraps structured output results for the agent pipeline.
+This module provides wrapper classes that normalize LLM responses, extract
+usage metrics, and ensure consistent formatting for the agent pipeline.
+The StructuredOutputWrapper class is particularly important for handling
+structured output from LLM providers while preserving metadata.
+
+Key functionality:
+- Normalize structured output payloads from LLM providers
+- Extract usage metrics (tokens, latency, costs) from provider responses
+- Wrap structured output results in consistent message formats
+- Preserve metadata across the agent execution pipeline
+- Handle provider-specific response formats and metadata extraction
+
+The wrappers ensure that regardless of the LLM provider or output format,
+the agent pipeline receives consistent, well-structured responses with
+complete metadata for observability and debugging.
 """
 
 import json

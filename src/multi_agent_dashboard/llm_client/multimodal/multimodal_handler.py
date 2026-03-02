@@ -1,10 +1,21 @@
 """
-Multimodal file handler for provider-agnostic file uploads.
+Multimodal file handler for provider-agnostic file uploads and processing.
 
-This module handles conversion of binary files (images, PDFs, etc.) into
-provider-appropriate formats (e.g., base64 for vision-capable providers).
-It falls back to plain text concatenation when the provider does not support
-multimodal attachments.
+This module provides comprehensive file handling for multimodal inputs
+across LLM providers. It detects file types, extracts content, and converts
+files into provider-appropriate formats. For vision-capable providers,
+images are converted to base64; for others, files are extracted as text.
+
+Key capabilities:
+- File type detection and MIME type classification
+- Image processing with base64 encoding for vision providers
+- PDF text extraction using pypdf when available
+- Text file decoding with proper encoding handling
+- Provider capability detection (vision, tool support)
+- Fallback mechanisms for providers without native support
+
+The handler ensures that file attachments work consistently across
+different LLM providers while maximizing each provider's capabilities.
 """
 
 import base64

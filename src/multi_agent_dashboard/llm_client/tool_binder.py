@@ -1,6 +1,21 @@
-# multi_agent_dashboard.llm_client.tool_binder
-# Tool conversion, binding, and tool instance retrieval.
+"""
+Tool binding and conversion for LLM provider tool calling.
 
+This module handles the conversion, binding, and management of tools for
+LLM provider tool calling. It converts tool configurations from the agent
+specification into provider-specific tool formats, binds them to model
+instances, and manages tool instance retrieval for execution.
+
+Key responsibilities:
+- Convert tool configurations to provider-specific formats
+- Bind tools to LLM model instances for tool calling
+- Manage tool instances and their execution contexts
+- Handle provider-specific tool calling limitations and capabilities
+- Integrate with structured output binding when tools are present
+
+The binder ensures consistent tool calling behavior across different
+LLM providers while respecting each provider's tool calling API.
+"""
 import logging
 from typing import Any, Dict, List, Optional
 

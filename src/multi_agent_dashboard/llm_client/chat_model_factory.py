@@ -1,4 +1,22 @@
-# multi_agent_dashboard/chat_model_factory.py
+"""
+Chat Model Factory for caching and reusing LangChain chat model instances.
+
+This module provides a caching factory for LangChain chat models created via
+init_chat_model. It reduces overhead by reusing model instances with identical
+configuration parameters, improving performance for repeated agent invocations.
+
+The factory caches models based on a comprehensive fingerprint including:
+- Model name and provider ID
+- API endpoint and timeout settings
+- Provider features and configuration
+- Structured output and tool calling preferences
+
+Key features:
+- Thread-safe caching with configurable cache keys
+- Support for multiple LLM providers (OpenAI, DeepSeek, Ollama)
+- Graceful handling of missing LangChain dependencies
+- Automatic cache invalidation on configuration changes
+"""
 import logging
 import json
 from typing import Any, Dict, Optional, Tuple, Callable
