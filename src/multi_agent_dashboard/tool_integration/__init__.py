@@ -1,7 +1,16 @@
 """
-Tool integration module for Multi-Agent Dashboard.
+Tool integration and provider adaptation for Multi-Agent Dashboard.
 
-Provides a registry for LangChain tools and adapters for provider-specific tool calling.
+This package provides a comprehensive tool ecosystem for LLM agents, including:
+- Tool registry with decorator-based registration for LangChain tools
+- Provider-specific tool adapters for converting tool configurations across
+  different LLM APIs (OpenAI, DeepSeek, Ollama)
+- Built-in tools: web search (DuckDuckGo) and web content fetching
+- Domain filtering and security controls for web-based tools
+
+The package enables agent tool calling while maintaining provider compatibility
+and respecting agent configuration as the primary source of truth. Advisory
+capability warnings are provided based on dynamic provider data.
 """
 
 from .registry import ToolRegistry, register_tool, get_registry, register_tool_instance

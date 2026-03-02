@@ -1,8 +1,21 @@
 """
-Tool registry for LangChain tools.
+Tool registry for LangChain tools with decorator-based registration.
 
-Provides a central registry for tool definitions with decorator-based registration.
-Each tool is a LangChain BaseTool subclass with a JSON Schema description.
+This module provides a centralized registry for managing tool definitions across
+the multi-agent system. It supports both class-based and instance-based tool
+registration, with automatic JSON schema generation and dependency handling.
+
+Key components:
+- `ToolRegistry`: Singleton registry storing tool metadata and instances
+- `ToolMetadata`: Data class for tool registration information
+- `register_tool`: Decorator for registering tool classes with automatic
+  schema extraction
+- `register_tool_instance`: Function for registering tool instances
+- `get_registry`: Accessor for the global registry singleton
+
+The registry handles optional LangChain dependencies gracefully and provides
+consistent tool lookup for both the runtime package (tool execution) and
+provider adapters (tool configuration conversion).
 """
 
 import logging

@@ -1,8 +1,20 @@
 """
-Web fetch tool for Multi-Agent Dashboard.
+Web fetch tool for retrieving and processing webpage content.
 
-Fetches webpage content, extracts main content, and converts to markdown.
-Registered as "web_fetch" in the tool registry.
+This module provides a LangChain-compatible tool for fetching web pages,
+extracting main content (removing navigation, ads, scripts), and converting
+to clean markdown format. It includes domain filtering support and graceful
+handling of missing dependencies.
+
+Key features:
+- Main content extraction using BeautifulSoup with heuristic filtering
+- Markdown conversion with configurable options
+- Domain filtering based on allowed domains configuration
+- Error handling for network issues and malformed HTML
+- Optional dependency handling (requests, beautifulsoup4, markdownify)
+
+The tool is registered as "web_fetch" in the global tool registry and can be
+enabled in agent configurations for web research tasks.
 """
 
 import logging
