@@ -1,4 +1,46 @@
 # ui/graph_view.py
+"""
+Pipeline visualization module for the Multi-Agent Dashboard.
+
+This module provides Graphviz-based visualization of agent pipelines with
+integrated metrics display. It renders agent execution graphs showing
+the flow of state between agents, annotated with cost and latency metrics.
+
+Key responsibilities:
+- Generate Graphviz digraphs representing agent pipeline structures
+- Annotate nodes with agent roles, symbols, and execution metrics
+- Display cost and latency metrics on nodes and edges
+- Integrate with UI color and symbol configuration
+- Support both live execution and historical pipeline visualization
+
+Architecture:
+- Uses `graphviz` library for graph generation and rendering
+- Integrates with Streamlit for display in the web interface
+- Follows UI color and symbol configuration from `config.py`
+- Supports both explicit engine passing and session state lookup
+
+Visualization Features:
+    - Node styling: Agent-specific colors and symbols
+    - Metric annotation: Cost and latency on nodes and edges
+    - Role display: Agent roles shown in node labels
+    - Edge labeling: Flow direction with downstream agent metrics
+
+Usage:
+    # Render pipeline graph with metrics
+    >>> dot = render_agent_graph(steps, agent_metrics, engine)
+    >>> st.graphviz_chart(dot)
+    
+    # Use in run mode or history mode
+    >>> graph = render_agent_graph(pipeline_steps, run_metrics)
+    >>> st.graphviz_chart(graph)
+
+Dependencies:
+    - `graphviz`: Graph visualization library
+    - `streamlit`: UI components and rendering
+    - `config.py`: UI color and symbol configuration
+    - `metrics_view.py`: Metric formatting utilities
+    - `engine.py`: MultiAgentEngine for agent runtime information
+"""
 from __future__ import annotations
 
 from typing import Dict, List, Optional

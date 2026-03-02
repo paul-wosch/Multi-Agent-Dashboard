@@ -1,4 +1,45 @@
 # ui/exports.py
+"""
+Data export and serialization module for the Multi-Agent Dashboard.
+
+This module provides comprehensive export functionality for agent configurations,
+pipeline definitions, and run results. It creates JSON-serializable structures
+that capture the complete runtime environment including provider metadata,
+tool configurations, and execution metrics for both live and historical runs.
+
+Key responsibilities:
+- Export agent configurations and pipeline definitions as JSON
+- Build structured export data from live engine execution results
+- Create consistent export formats for both current and historical runs
+- Handle provider metadata serialization with friendly names and host parsing
+- Ensure backward compatibility with session state engine access
+
+Architecture:
+- Uses dataclasses.asdict for safe serialization with fallback mechanisms
+- Provides consistent provider snapshot structures across all exports
+- Handles both explicit engine passing and session state access patterns
+- Creates export structures that mirror historical run formats
+
+Export Formats:
+    Pipeline Export: JSON with pipeline name, timestamp, and agent configurations
+    Run Export: Structured JSON with metrics, tool usage, and provider snapshots
+    Agent Export: Individual agent specifications with provider metadata
+
+Usage:
+    # Export pipeline agents as JSON
+    >>> json_str = export_pipeline_agents_as_json("my_pipeline", steps, engine)
+    
+    # Build export from live engine result
+    >>> export_data = build_export_from_engine_result(result, steps, task, engine)
+    
+    # Download exports via Streamlit download buttons
+
+Dependencies:
+    - `streamlit`: UI components and session state management
+    - `engine.py`: MultiAgentEngine and EngineResult classes
+    - `dataclasses`: Safe serialization of agent specifications
+    - `json`: JSON serialization utilities
+"""
 from __future__ import annotations
 
 import json

@@ -1,4 +1,39 @@
-# ui/app.py
+"""
+Main Streamlit application entry point for the Multi-Agent Dashboard.
+
+This module serves as the primary user interface controller, handling:
+- Application initialization and engine setup
+- Mode-based routing between different dashboard sections
+- Global UI styling and layout configuration
+- Cost tracking and metrics display
+- Session state management for user interactions
+
+The application is organized into four main modes:
+1. **Run Pipeline**: Execute multi-agent pipelines with real-time monitoring
+2. **Manage Agents**: Create, edit, and configure individual agent specifications
+3. **History**: View and analyze past pipeline runs with detailed metrics
+4. **Logs**: Monitor real-time application logs and agent execution traces
+
+Key architectural patterns:
+- Streamlit session state for persistent user data across reruns
+- Cached database services for performance optimization
+- Modular mode renderers for clean separation of concerns
+- Resilient error handling to maintain UI availability during failures
+- Global CSS styling for consistent visual presentation
+
+Usage:
+    This module is executed directly by Streamlit:
+    ```bash
+    streamlit run src/multi_agent_dashboard/ui/app.py
+    ```
+
+Dependencies:
+    - Streamlit for web interface components
+    - Database services via the caching layer
+    - Configuration system for paths and UI constants
+    - Mode-specific renderers for each dashboard section
+"""
+
 import json
 import logging
 import time

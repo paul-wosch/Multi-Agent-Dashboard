@@ -1,4 +1,41 @@
-# ui/run_mode.py
+"""
+Pipeline execution interface for the Multi-Agent Dashboard.
+
+This module provides the complete "Run Pipeline" mode interface, allowing users to:
+- Select and configure pipelines for execution
+- Upload files for agents with multimodal capabilities
+- Configure web search domain restrictions per agent
+- Execute multi-agent pipelines with real-time progress monitoring
+- View detailed results including outputs, metrics, and tool usage
+
+Key components:
+1. **Sidebar Configuration**: Pipeline selection, task input, agent ordering, file uploads
+2. **Execution Engine**: Background thread execution with progress callbacks
+3. **Results Visualization**: Tabbed interface for outputs, warnings, graphs, comparisons
+4. **Export Integration**: JSON export of pipeline runs for external analysis
+5. **Tool Integration**: Web search domain filtering and tool usage tracking
+
+Architecture patterns:
+- Streamlit session state for persistent run data across reruns
+- Background threading for non-blocking pipeline execution
+- Modular result rendering with specialized view components
+- Cached database services for performance optimization
+- Resilient error handling with user-friendly error messages
+
+Integration points:
+- Uses `MultiAgentEngine` from the engine package for actual execution
+- Integrates with caching layer for database service access
+- Delegates visualization to specialized view modules (graph, metrics, tools)
+- Provides export functionality via the exports module
+
+Usage:
+    Called from `app.py` when user selects "Run Pipeline" mode:
+    ```python
+    from multi_agent_dashboard.ui.run_mode import render_run_mode
+    render_run_mode(strict_mode=False, strict_schema_validation=False)
+    ```
+"""
+
 from __future__ import annotations
 
 import json

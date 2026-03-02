@@ -1,4 +1,44 @@
 # ui/cache.py
+"""
+Database caching and service management module for the Multi-Agent Dashboard.
+
+This module provides lazy-initialized database service singletons and Streamlit-
+cached data loaders for efficient UI performance. It centralizes database access
+patterns and provides cache invalidation utilities to maintain data consistency
+across the application.
+
+Key responsibilities:
+- Lazy initialization of database service singletons (AgentService, PipelineService, RunService)
+- Streamlit-cached data loaders with appropriate TTLs for different data types
+- Cache invalidation helpers to maintain consistency after data modifications
+- Graceful error handling for missing tables (migration compatibility)
+
+Architecture:
+- Service singletons are created on first use and reused across the application
+- Cached loaders use Streamlit's `@st.cache_data` decorator with TTLs
+- Cache invalidation is triggered after data modifications (save, delete operations)
+- Error handling ensures UI resilience during database schema migrations
+
+Usage:
+    # Load cached data
+    >>> agents = cached_load_agents()
+    >>> runs = cached_load_runs()
+    
+    # Invalidate caches after modifications
+    >>> invalidate_agents()  # After saving/deleting an agent
+    >>> invalidate_runs()    # After running a pipeline
+
+Caching Strategy:
+    - Agents/Pipelines: 60-second TTL (less frequent changes)
+    - Runs/Run Details: 30-second TTL (more frequent updates)
+    - Monthly Costs: 30-second TTL (updated after each run)
+    - Snapshots: 60-second TTL (agent configuration history)
+
+Dependencies:
+    - `config.py`: Database file path configuration
+    - `db.services.py`: Database service implementations
+    - `streamlit`: Caching decorators and session state management
+"""
 from __future__ import annotations
 
 from typing import List, Tuple, Optional

@@ -1,4 +1,43 @@
 # ui/view_models.py
+"""
+Data transformation and view model module for the Multi-Agent Dashboard.
+
+This module provides structured data classes and transformation functions that
+convert raw database rows and engine results into UI-friendly view models.
+It handles the presentation layer's data needs while maintaining separation
+from the underlying storage and engine layers.
+
+Key responsibilities:
+- Define structured view classes (`AgentMetricsView`, `AgentConfigView`) for UI presentation
+- Transform database rows into view models for historical runs
+- Process engine results into view models for live runs
+- Extract and normalize configuration data from stored JSON blobs
+- Handle data summarization and DataFrame creation for visualization
+
+Architecture:
+- Uses `NamedTuple` classes for immutable, typed view models
+- Provides transformation functions for different data sources (DB vs engine)
+- Handles JSON parsing and field extraction from stored configurations
+- Integrates with pandas for DataFrame-based UI components
+
+View Models:
+    AgentMetricsView: Token usage, latency, and cost metrics per agent
+    AgentConfigView: Agent configuration including tools, reasoning, and provider metadata
+
+Usage:
+    # Transform database rows to view models
+    >>> metrics_views = metrics_view_from_db_rows(db_metrics_rows)
+    >>> config_views = config_view_from_db_rows(db_agents, db_configs)
+    
+    # Summarize metrics for UI display
+    >>> summary, df = summarize_agent_metrics(agent_metrics_dict)
+
+Dependencies:
+    - `pandas`: DataFrame creation and manipulation
+    - `utils.py`: JSON field parsing utilities
+    - Database service layer: Raw data from `db.services.py`
+    - Engine layer: Live execution results from `engine` package
+"""
 from __future__ import annotations
 
 from typing import Dict, List, NamedTuple, Optional, Tuple

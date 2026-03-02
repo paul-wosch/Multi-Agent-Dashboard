@@ -1,4 +1,45 @@
 # ui/tools_view.py
+"""
+Tool configuration and usage analysis module for the Multi-Agent Dashboard.
+
+This module provides comprehensive visualization and analysis components for
+agent tool usage, including configuration display, per-call details, and
+domain filtering analysis. It handles both live execution results and
+historical run data with consistent presentation.
+
+Key responsibilities:
+- Render detailed agent configuration panels with tool settings
+- Display per-agent tool usage with call details and arguments
+- Analyze and visualize web search domain filtering
+- Provide tool usage overview tables and summaries
+- Handle differences between live and historical data formats
+
+Architecture:
+- Uses Streamlit expanders for detailed configuration panels
+- Integrates with view models from `view_models.py` for configuration data
+- Provides specialized handling for web search tools and domain filtering
+- Supports both current run results and historical run data
+
+Visualization Components:
+    - Agent configuration panels: Model settings, tools, reasoning, prompts
+    - Tool usage details: Per-call arguments and domain filtering
+    - Tool usage overview: Compact tables with call counts and domains
+    - Domain filtering analysis: Configured vs actual usage patterns
+
+Usage:
+    # Render agent configuration and tool usage
+    >>> render_agent_config_section(config_view, tool_usages_by_agent, 
+    ...                             title_suffix="stored", is_historic=True)
+    
+    # Build tool calls overview DataFrame
+    >>> df = build_tool_calls_overview(tool_usages_by_agent, is_historic=False)
+
+Dependencies:
+    - `streamlit`: UI components and rendering
+    - `pandas`: DataFrame manipulation for tabular display
+    - `view_models.py`: Agent configuration view models
+    - `utils.py`: JSON parsing utilities for historical data
+"""
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional

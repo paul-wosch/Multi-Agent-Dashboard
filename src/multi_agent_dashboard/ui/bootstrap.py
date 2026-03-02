@@ -1,4 +1,38 @@
-# ui/bootstrap.py
+"""
+Application initialization and bootstrap module for the Multi-Agent Dashboard.
+
+This module handles the critical startup sequence for the Streamlit application:
+- Database initialization and migration application
+- MultiAgentEngine creation with LLM client configuration
+- Default agent template creation for first-time users
+- Runtime hook registration for UI state synchronization
+- Automatic maintenance tasks (snapshot pruning, log handler attachment)
+
+Key responsibilities:
+1. **Database Setup**: Ensures SQLite database exists with proper schema and migrations
+2. **Engine Initialization**: Creates the MultiAgentEngine with provider-agnostic LLM client
+3. **Default Agent Bootstrap**: Creates starter agent templates (planner, solver, critic, finalizer)
+4. **Runtime Integration**: Registers hooks for agent change notifications
+5. **Maintenance**: Performs automatic snapshot pruning and log handler setup
+
+The module provides two main entry points:
+- `app_start()`: Complete application bootstrap called from main app
+- `reload_agents_into_engine()`: Helper to refresh agent state from database
+
+Architecture notes:
+- Uses Streamlit session state for persistent engine storage
+- Integrates with caching layer for database service access
+- Registers runtime hooks for real-time UI updates
+- Handles first-run initialization with default templates
+
+Usage:
+    Called automatically from `app.py` during application startup:
+    ```python
+    from multi_agent_dashboard.ui.bootstrap import app_start
+    app_start()
+    ```
+"""
+
 from __future__ import annotations
 
 from typing import Dict

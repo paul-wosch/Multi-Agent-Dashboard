@@ -1,4 +1,43 @@
-# ui/agent_editor_mode.py
+"""
+Agent configuration editor for the Multi-Agent Dashboard.
+
+This module provides the complete "Manage Agents" mode interface, allowing users to:
+- Create, edit, duplicate, and delete agent specifications
+- Configure provider-specific settings (OpenAI, DeepSeek, Ollama, custom)
+- Define prompt templates with system and user prompt separation
+- Configure tool calling capabilities and web search domain restrictions
+- Manage agent snapshots with versioning and rollback capabilities
+- Set structured output schemas and validation parameters
+
+Key features:
+1. **Tabbed Editor Interface**: Organized into Basics, Prompt, Inputs/Outputs, Advanced, Snapshots
+2. **Provider Configuration**: Per-agent provider selection with endpoint customization
+3. **Visual Customization**: Color and symbol selection for agent identification
+4. **Snapshot Management**: Versioned snapshots with manual and automatic creation
+5. **Template Import**: Load agent configurations from JSON templates
+6. **Health Checking**: Ollama endpoint reachability verification
+
+Architecture patterns:
+- Streamlit session state for persistent editor state across reruns
+- Cached database services for agent and snapshot data access
+- Comprehensive validation for provider-specific configurations
+- Resilient error handling with user-friendly feedback
+- Integration with engine reload for real-time agent updates
+
+Integration points:
+- Uses `AgentService` via caching layer for database operations
+- Integrates with `MultiAgentEngine` for real-time agent reloading
+- Provides snapshot management via agent service APIs
+- Supports template import/export for agent sharing
+
+Usage:
+    Called from `app.py` when user selects "Manage Agents" mode:
+    ```python
+    from multi_agent_dashboard.ui.agent_editor_mode import render_agent_editor
+    render_agent_editor()
+    ```
+"""
+
 from __future__ import annotations
 
 from datetime import datetime

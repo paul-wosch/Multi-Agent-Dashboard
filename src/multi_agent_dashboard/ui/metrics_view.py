@@ -1,4 +1,41 @@
 # ui/metrics_view.py
+"""
+Cost and latency visualization module for the Multi-Agent Dashboard.
+
+This module provides visualization components for displaying agent execution
+metrics including token usage, latency, and cost breakdowns. It renders both
+summary metrics and detailed per-agent breakdowns in a consistent format
+across current and historical runs.
+
+Key responsibilities:
+- Render cost and latency summary metrics with formatted display
+- Display per-agent breakdown tables with token counts and costs
+- Format numeric values for human-readable display
+- Provide reusable visualization components for both live and historical runs
+
+Architecture:
+- Uses Streamlit's metric and dataframe components for visualization
+- Integrates with view models from `view_models.py` for data transformation
+- Provides consistent formatting across different data sources
+- Supports both current run results and historical run data
+
+Visualization Components:
+    - Summary metrics: Total latency, input cost, output cost, total cost
+    - Per-agent breakdown: DataFrame with token counts, latency, and costs
+    - Formatted display: Currency formatting, latency formatting, null handling
+
+Usage:
+    # Render metrics for current run
+    >>> render_cost_latency_section(metrics_view)
+    
+    # Render metrics for historical run with suffix
+    >>> render_cost_latency_section(metrics_view, title_suffix="Stored")
+
+Dependencies:
+    - `streamlit`: UI components and rendering
+    - `view_models.py`: Data transformation and view model classes
+    - `pandas`: DataFrame manipulation for tabular display
+"""
 from __future__ import annotations
 
 from typing import Dict, List, Optional

@@ -1,4 +1,35 @@
 # ui/styles.py
+"""
+CSS styling and UI theme components for the Streamlit-based Multi-Agent Dashboard.
+
+This module provides centralized styling functions that enhance the visual appearance
+and user experience of the dashboard interface. It handles CSS injection for custom
+styling of Streamlit components, particularly focusing on tag styling and theme
+consistency across different sections of the application.
+
+Key Responsibilities:
+- Inject custom CSS styles into Streamlit application
+- Provide consistent tag styling (background colors, hover effects)
+- Support scoped styling (global vs sidebar-specific)
+- Maintain backward compatibility with existing styling functions
+
+Architecture:
+- Uses Streamlit's `st.markdown()` with `unsafe_allow_html=True` for CSS injection
+- CSS selectors target specific Streamlit component data attributes
+- Modular design with a primary function and backward-compatible wrappers
+
+Usage:
+    from multi_agent_dashboard.ui.styles import inject_tag_style, inject_tag_style_for_sidebar
+
+    # Apply global tag styling
+    inject_tag_style("global")
+
+    # Apply sidebar-specific tag styling
+    inject_tag_style_for_sidebar()
+
+Dependencies:
+- streamlit: For CSS injection via markdown components
+"""
 from __future__ import annotations
 
 import streamlit as st

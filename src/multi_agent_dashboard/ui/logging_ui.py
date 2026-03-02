@@ -1,4 +1,47 @@
 # ui/logging_ui.py
+"""
+Real-time log viewer and logging integration module for the Multi-Agent Dashboard.
+
+This module provides a comprehensive logging interface that captures application
+logs in real-time and displays them in a searchable, filterable viewer. It includes
+a custom Streamlit log handler, historic log loading, and a rich UI for log
+exploration and export.
+
+Key responsibilities:
+- Capture application logs in real-time via custom Streamlit log handler
+- Display logs with color-coded levels and search/filter capabilities
+- Load historic logs from file on application startup
+- Provide log export and clearing functionality
+- Integrate with application-wide logging configuration
+
+Architecture:
+- Custom `StreamlitLogHandler` captures log records in Streamlit session state
+- Log buffer uses `deque` for efficient rolling window storage
+- UI components provide filtering by log level and text search
+- Historic log loading parses existing log files for continuity
+- Color coding follows UI color configuration from `config.py`
+
+Features:
+    - Real-time log capture: Application logs appear immediately in the UI
+    - Level filtering: Show/hide DEBUG, INFO, WARNING, ERROR, CRITICAL logs
+    - Text search: Filter logs by message content
+    - Color coding: Log levels colored according to UI theme
+    - Export functionality: Download filtered logs as text file
+    - Log clearing: Clear the in-memory log buffer
+
+Usage:
+    # Attach log handler during application initialization
+    >>> attach_streamlit_log_handler(capacity=500)
+    
+    # Render logs viewer in "Application Logs" mode
+    >>> render_logs_mode()
+
+Dependencies:
+    - `streamlit`: UI components and session state management
+    - `logging`: Python standard logging framework
+    - `config.py`: Log file path and UI color configuration
+    - `styles.py`: CSS styling utilities for log display
+"""
 from __future__ import annotations
 
 import logging

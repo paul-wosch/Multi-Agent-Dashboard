@@ -1,4 +1,36 @@
 # ui/history_mode.py
+"""
+Run history viewer module for the Multi-Agent Dashboard.
+
+This module provides the "Past Runs" interface where users can browse, inspect,
+and export historical pipeline executions. It displays detailed run information
+including task inputs, agent outputs, metrics, tool usage, and configuration
+snapshots captured at execution time.
+
+Key responsibilities:
+- Load and display historical runs from the database
+- Render detailed run views with cost/latency metrics
+- Show agent configurations and tool usage per run
+- Provide structured data export functionality
+- Handle strict schema validation exit indicators
+
+Architecture:
+- Uses cached database queries via `cache.py` for performance
+- Integrates with visualization modules (`metrics_view.py`, `tools_view.py`)
+- Builds export-ready JSON structures with run-time snapshots
+- Follows Streamlit's component-based rendering pattern
+
+Usage:
+    Called from `app.py` when user selects "Past Runs" mode:
+    >>> render_history_mode()
+
+Dependencies:
+    - `cache.py`: Cached database queries for runs and details
+    - `view_models.py`: Data transformation for UI presentation
+    - `metrics_view.py`: Cost and latency visualization
+    - `tools_view.py`: Tool configuration and usage analysis
+    - `utils.py`: JSON field parsing utilities
+"""
 from __future__ import annotations
 
 from typing import Dict, List
