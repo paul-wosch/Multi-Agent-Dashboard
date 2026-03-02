@@ -1,7 +1,63 @@
 """
-Load provider model data from disk.
+Load provider model data from disk with file‑state management and parsing.
 
-Handles the file‑state machine and parses raw JSON into ProviderModel instances.
+This module is the central coordinator for the provider data pipeline. It:
+1. Manages the file‑state machine to ensure required files exist
+2. Parses raw JSON into structured ProviderModel instances
+3. Loads local Ollama model overrides (user‑customizable)
+4. Provides public API functions for capability and pricing queries
+
+Key Features:
+- File‑state machine with automatic download/extraction when needed
+- Thread‑safe file operations with locking
+- Composite key generation: 'provider|model_id'
+- Local Ollama model overrides (takes precedence over external data)
+- LRU caching for expensive operations (get_all_models, get_capabilities, get_pricing)
+
+File‑State Machine Logic:
+    ┌─────────────────────────────────────────────────────────────┐
+    │ Both files missing → download → extract                     │
+    │ provider_models_all.json missing → download (warn)          │
+    │ provider_models.json missing → extract                      │
+    │ Both files present → use existing                           │
+    └─────────────────────────────────────────────────────────────┘
+
+Composite Keys:
+    To disambiguate duplicate model IDs across providers, internal cache uses
+    composite keys: 'provider|model_id' (e.g., 'openai|gpt-4', 'deepseek|deepseek-chat')
+
+Local Ollama Overrides:
+    - Loaded from local_ollama_models.json (git‑ignored)
+    - Takes precedence over external definitions for same 'ollama|model' key
+    - Allows users to customize capabilities and pricing for local models
+
+Public API Functions:
+    - get_all_models(): List of all known model IDs (deduplicated)
+    - get_capabilities(model_id): Advisory capabilities for a model
+    - get_pricing(model_id): (input_price, output_price) per 1M tokens
+    - get_capabilities_for_provider(provider_id, model): Provider‑specific capabilities
+    - get_pricing_for_provider(provider_id, model): Provider‑specific pricing
+
+Usage:
+    from multi_agent_dashboard.provider_data import (
+        get_capabilities,
+        get_pricing,
+        get_all_models,
+    )
+    
+    # Get all available models
+    models = get_all_models()
+    
+    # Check capabilities
+    caps = get_capabilities('gpt-4o')
+    if caps.get('tool_calling'):
+        print('Model supports tool calling')
+    
+    # Get pricing for cost calculation
+    input_price, output_price = get_pricing('gpt-4o')
+
+Note: Capability data is advisory only. The actual agent configuration
+determines which features are enabled for a given agent.
 """
 import json
 import logging

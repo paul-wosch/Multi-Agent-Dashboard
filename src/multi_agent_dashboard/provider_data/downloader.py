@@ -1,7 +1,47 @@
 """
-Download provider models from external source.
+Download provider models from external source (models.dev) with retry logic.
 
-Fetches raw JSON from models.dev and saves it locally.
+This module handles downloading raw provider model data from the external
+models.dev API. It implements exponential backoff retry logic for network
+errors and saves the raw JSON to the local filesystem for offline use.
+
+Key Features:
+- Exponential backoff retry with configurable attempts and timeouts
+- User‑agent headers to avoid blocking
+- Validation of JSON response before saving
+- Automatic directory creation for output files
+
+Workflow:
+    1. Check if 'requests' library is available (required dependency)
+    2. Make HTTP GET request to MODELS_DEV_URL with timeout
+    3. Validate response status and JSON parsing
+    4. Save raw JSON to PROVIDER_MODELS_ALL_FILE
+    5. Return parsed data for immediate use
+
+Error Handling:
+    - ImportError: 'requests' library not installed
+    - ConnectionError: All retry attempts failed
+    - ValueError: Response is not valid JSON
+    - requests.exceptions.RequestException: HTTP/network errors
+
+Configuration:
+    - MODELS_DEV_URL: External API endpoint (from config)
+    - PROVIDER_MODELS_ALL_FILE: Output filename (from config)
+    - DATA_PATH, PROVIDER_DATA_DIR: Directory paths (from config)
+
+Usage:
+    from multi_agent_dashboard.provider_data.downloader import download_provider_models_all
+    
+    try:
+        raw_data = download_provider_models_all(max_retries=3, timeout=30.0)
+        print(f"Downloaded {len(raw_data)} provider entries")
+    except ImportError:
+        print("Install requests library: pip install requests")
+    except ConnectionError as e:
+        print(f"Download failed: {e}")
+
+Note: This is the first step in the provider data pipeline. The downloaded
+raw data is later filtered and parsed by the extractor and loader modules.
 """
 import json
 import logging

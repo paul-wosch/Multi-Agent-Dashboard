@@ -1,7 +1,65 @@
 """
-Schema definitions for provider models.
+Schema definitions for provider model data using immutable dataclasses.
 
-Defines the internal representation of provider model data extracted from external sources.
+This module defines the structured representation of provider model data
+extracted from external sources (models.dev). It provides mapping from
+external JSON schema fields to internal capability and pricing fields used
+by the advisory system.
+
+Key Components:
+    ProviderModel: Immutable dataclass representing a single provider model
+    - Capability flags (tool_calling, structured_output, image_inputs, etc.)
+    - Pricing information (input_price, output_price per 1M tokens)
+    - Metadata (knowledge cutoff, token limits)
+    - Raw JSON data for debugging
+
+External-to-Internal Field Mapping:
+    External JSON field → ProviderModel field
+    ──────────────────────────────────────────────
+    cost.input           → input_price
+    cost.output          → output_price
+    attachment           → (not directly mapped)
+    tool_call            → tool_calling
+    structured_output    → structured_output
+    reasoning            → reasoning
+    temperature          → temperature
+    modalities.input     → image_inputs (if 'image' in list)
+    knowledge            → knowledge
+    limit.context        → max_input_tokens
+    limit.output         → max_output_tokens
+
+Immutable Design:
+    - All fields are frozen (immutable after creation)
+    - Default values reflect missing data (False, 0.0, empty string)
+    - Raw JSON stored for debugging but not used in normal operations
+
+Factory Method:
+    ProviderModel.from_raw_json(): Creates instance from raw JSON with
+    proper field mapping and type conversion.
+
+Capability Dictionary:
+    to_capability_dict(): Converts to dictionary format expected by
+    advisory capability system, omitting missing fields.
+
+Usage:
+    from multi_agent_dashboard.provider_data.schemas import ProviderModel
+    
+    # Create from raw JSON (typically done by loader)
+    model = ProviderModel.from_raw_json(
+        provider='openai',
+        model_id='gpt-4o',
+        raw={'cost': {'input': 5.0, 'output': 15.0}, 'tool_call': True}
+    )
+    
+    # Access capabilities
+    if model.tool_calling:
+        print('Model supports tool calling')
+    
+    # Convert to capability dictionary
+    caps = model.to_capability_dict()
+
+Note: This schema represents advisory data only. Actual agent capabilities
+are determined by agent configuration, not by these advisory flags.
 """
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional, List

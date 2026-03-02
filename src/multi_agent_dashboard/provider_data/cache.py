@@ -1,7 +1,36 @@
 """
-In‑memory caching for provider model data.
+In‑memory caching for provider model data with thread‑safe initialization.
 
-Provides thread‑safe access to the parsed ProviderModel dictionary.
+This module provides a singleton cache for ProviderModel instances loaded from
+external data sources. It uses double‑checked locking for thread‑safe lazy
+initialization and composite keys ('provider|model_id') to disambiguate
+duplicate model IDs across different providers.
+
+Key Features:
+- Thread‑safe singleton pattern with double‑checked locking
+- Composite cache keys: 'provider|model_id' (e.g., 'openai|gpt-4o')
+- Lazy initialization on first access
+- Cache clearing for testing purposes
+
+Architecture:
+    ┌─────────────────┐
+    │   get_model_cache()  │ ← Thread‑safe lazy initialization
+    └─────────┬───────┘
+              │
+    ┌─────────▼───────┐
+    │   _model_cache   │ ← Dict['provider|model_id' → ProviderModel]
+    └─────────────────┘
+
+Usage:
+    from multi_agent_dashboard.provider_data.cache import get_model_cache
+    
+    cache = get_model_cache()
+    model = cache.get('openai|gpt-4o')
+    if model:
+        print(f"Model supports tool calling: {model.tool_calling}")
+
+Note: The cache is populated by calling load_provider_models() from the
+loader module. This happens automatically on first access.
 """
 import logging
 import threading

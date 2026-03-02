@@ -1,11 +1,47 @@
 """
-Extract and filter provider model data.
+Extract and filter provider model data from raw downloaded JSON.
 
-Parses the raw downloaded provider_models_all.json, filters for openai and deepseek
-providers, copies entire provider entries preserving the original nested structure,
-and writes the filtered dictionary to provider_models.json (only if the file does not already exist).
+This module processes the raw provider_models_all.json file, filtering for
+supported providers (currently OpenAI and DeepSeek). It preserves the complete
+nested structure of provider entries and writes the filtered data to
+provider_models.json, but only if the output file doesn't already exist
+(idempotent operation).
 
-No schema mapping is performed at this stage; mapping is deferred to the loader/cache layer.
+Key Features:
+- Idempotent extraction: won't overwrite existing provider_models.json
+- Preserves complete nested structure of provider entries
+- Filters only for supported providers (configurable list)
+- No schema mapping at this stage (deferred to loader)
+
+Workflow:
+    1. Check if provider_models.json already exists → return existing data
+    2. Read raw provider_models_all.json
+    3. Filter for supported providers (openai, deepseek)
+    4. Copy entire provider entry including all fields
+    5. Write filtered dictionary to provider_models.json
+    6. Return filtered data
+
+File State Management:
+    - If provider_models.json exists: return it, skip extraction
+    - If provider_models_all.json missing: raise FileNotFoundError
+    - If output file missing: create it from filtered data
+
+Supported Providers:
+    Currently: 'openai', 'deepseek'
+    (Extensible by modifying the `supported_providers` tuple)
+
+Usage:
+    from multi_agent_dashboard.provider_data.extractor import extract_provider_models
+    
+    filtered_data = extract_provider_models()
+    print(f"Extracted {len(filtered_data)} providers")
+    
+    # Access OpenAI models
+    openai_models = filtered_data.get('openai', {}).get('models', {})
+
+Note: This module performs minimal processing - no field mapping or schema
+validation. The raw structure is preserved for the loader module to parse
+into ProviderModel instances with proper schema mapping.
 """
 import json
 import logging
