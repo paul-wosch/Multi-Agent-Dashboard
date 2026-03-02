@@ -1,4 +1,59 @@
 # src/multi_agent_dashboard/models.py
+"""
+Core data classes for the Multi-Agent Dashboard system.
+
+This module defines the immutable data structures that represent agents and pipelines
+in the system. These classes are designed to be safe for serialization, storage,
+comparison, and testing. They serve as the canonical representation of agent
+configurations and pipeline definitions throughout the application.
+
+Key Classes:
+- `AgentSpec`: Immutable agent definition with provider configuration, tool settings,
+  structured output configuration, and UI metadata.
+- `PipelineSpec`: Immutable pipeline definition with ordered agent steps and metadata.
+
+Design Principles:
+- **Immutability**: All classes are frozen dataclasses to prevent accidental mutation
+- **Serialization Safety**: All fields are JSON-serializable for database storage
+- **Provider Agnosticism**: Agent specifications work with any supported LLM provider
+- **Extensibility**: New fields can be added without breaking existing serialized data
+
+Usage:
+    from multi_agent_dashboard.models import AgentSpec, PipelineSpec
+    
+    # Create an agent specification
+    agent = AgentSpec(
+        name="researcher",
+        model="gpt-4",
+        prompt_template="Research topic: {topic}",
+        provider_id="openai",
+        tools={"enabled": True, "tools": ["web_search"]},
+        structured_output_enabled=True,
+        schema_json='{"type": "object", "properties": {"summary": {"type": "string"}}}'
+    )
+    
+    # Create a pipeline specification
+    pipeline = PipelineSpec(
+        name="research_pipeline",
+        steps=["researcher", "writer", "reviewer"],
+        metadata={"description": "Research and writing workflow"}
+    )
+
+Token Limit Precedence:
+The `AgentSpec.effective_max_output()` method implements token limit precedence rules:
+1. If `STRICT_OUTPUT_TOKEN_CAP_OVERRIDE=True`: Use `AGENT_OUTPUT_TOKEN_CAP` if > 0
+2. Otherwise: Use smallest non-zero value among `AGENT_OUTPUT_TOKEN_CAP` and agent's `max_output`
+3. `0` means no limit (treated as `None`)
+
+Dependencies:
+- dataclasses: For immutable data class definitions
+- typing: For type hints and optional fields
+
+See Also:
+- `multi_agent_dashboard.db.agents`: Database operations for AgentSpec persistence
+- `multi_agent_dashboard.runtime.AgentRuntime`: Execution engine using AgentSpec
+- `multi_agent_dashboard.engine.MultiAgentEngine`: Pipeline orchestration using PipelineSpec
+"""
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 # -------------------------
