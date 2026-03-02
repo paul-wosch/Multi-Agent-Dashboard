@@ -1,4 +1,24 @@
-# Metrics extraction logic for agent runtime
+"""
+Metrics extraction and analysis for agent runtime execution.
+
+This module provides functions for extracting and processing metrics from
+LLM responses, including token usage, cost calculations, provider profile
+detection, and tool usage tracking. It works with both raw response data
+and structured instrumentation events.
+
+Key functions:
+- `extract_tokens_from_raw`: Extract input/output token counts from raw
+  response data with fallback mechanisms for different provider formats
+- `collect_tool_usage`: Aggregate tool invocation data from content blocks
+  and raw metrics, deduplicating repeated entries
+- `extract_detected_provider_profile`: Detect provider capabilities and
+  features from response metadata for advisory purposes
+
+The extracted metrics are used for cost tracking, observability dashboards,
+and provider capability detection (advisory only - agent configuration
+remains the source of truth).
+"""
+
 from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional, Tuple

@@ -1,4 +1,27 @@
-# Structured output detection logic for agent runtime
+"""
+Structured output detection and parsing for agent runtime execution.
+
+This module implements the 4-path detection strategy for extracting structured
+output (JSON/dict/list) from LLM responses. It handles multiple response formats
+across different providers and instrumentation patterns.
+
+Detection paths (in order of precedence):
+1. Direct structured keys in raw response (`structured`, `structured_response`)
+2. Instrumentation events with structured payloads
+3. Content blocks with structured types (`structured`, `structured_response`,
+   `structured_output`, `tool_call` with args)
+4. Fallback JSON parsing of raw text output
+
+The module also provides state writeback functionality to update execution
+state with parsed structured output while preserving existing state values.
+
+Key functions:
+- `detect_structured_output`: Main detection function implementing the 4-path
+  strategy with graceful fallbacks
+- `writeback_to_state`: Safely merges parsed structured output into execution
+  state, handling nested structures and type conflicts
+"""
+
 from __future__ import annotations
 import json
 import logging

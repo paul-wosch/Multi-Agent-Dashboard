@@ -1,4 +1,25 @@
-# Tool configuration logic for agent runtime
+"""
+Tool configuration and provider adaptation for agent runtime execution.
+
+This module handles the conversion and preparation of tool configurations
+for different LLM providers. It manages domain restrictions, tool merging,
+and provider-specific tool adaptation through the provider tool adapter.
+
+Key responsibilities:
+- Domain filtering: Apply allowed domain restrictions from state to web search
+  and web fetch tools
+- Tool configuration building: Convert agent tool specifications into
+  provider-specific tool configurations
+- Reasoning configuration: Prepare reasoning settings for providers that
+  support step-by-step reasoning
+- Provider adaptation: Use provider-specific adapters to convert tool
+  configurations for different LLM APIs (OpenAI, DeepSeek, Ollama)
+
+The module ensures that tool configurations respect both agent-level
+preferences and runtime state restrictions while maintaining compatibility
+across different provider APIs.
+"""
+
 from __future__ import annotations
 import logging
 from typing import Dict, List, Any, Optional, Union

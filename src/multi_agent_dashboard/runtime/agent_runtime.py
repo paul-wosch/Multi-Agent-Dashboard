@@ -33,8 +33,31 @@ logger = logging.getLogger(__name__)
 @dataclass
 class AgentRuntime:
     """
-    Execution wrapper.
-    Holds runtime-only dependencies (LLM client, memory).
+    Execution wrapper for running individual agents with instrumentation and tool support.
+
+    This class orchestrates the complete agent execution lifecycle:
+    1. Input processing: File decoding, prompt template formatting
+    2. Tool preparation: Provider-specific tool configuration and adaptation
+    3. LLM invocation: Structured output, reasoning, and tool calling support
+    4. Response processing: Metrics extraction, structured output detection
+    5. State management: Result writeback and error handling
+
+    The runtime holds agent-specific dependencies (LLM client, memory) and
+    provides a clean interface for the engine package to execute agents
+    within pipelines or standalone.
+
+    Key responsibilities:
+    - Format prompts using safe template substitution
+    - Process multimodal file inputs (text, images, PDFs)
+    - Convert tool configurations for provider-specific APIs
+    - Extract metrics (tokens, costs, provider profiles) from LLM responses
+    - Detect and parse structured output using 4-path detection
+    - Handle errors and instrumentation events
+
+    Attributes:
+        spec: AgentSpec defining the agent's configuration and behavior
+        llm_client: Provider-specific LLM client for model invocation
+        last_metrics: Dictionary of metrics from the most recent LLM call
     """
     spec: AgentSpec
     llm_client: Any  # injected, intentionally untyped

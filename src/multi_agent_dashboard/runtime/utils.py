@@ -1,4 +1,21 @@
-# utils.py
+"""
+Utility functions for safe template formatting and runtime operations.
+
+This module provides safe string template handling with graceful error
+recovery and character limit enforcement. It's used throughout the runtime
+package for prompt formatting and state variable substitution.
+
+Key components:
+- `SafeTemplate`: Custom string.Template variant that uses {var} syntax
+  instead of $var and safely ignores missing keys without raising errors
+- `safe_format`: Robust template formatting function with character limit
+  enforcement, missing key handling, and error recovery
+
+The utilities ensure that agent execution continues even when template
+variables are missing or formatting errors occur, providing resilience
+in multi-agent pipelines.
+"""
+
 import logging
 from string import Template
 from typing import Dict, Any
