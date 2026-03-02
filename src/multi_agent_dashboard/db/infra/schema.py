@@ -1,4 +1,15 @@
-# schema.py
+"""Canonical database schema definition for the Multi-Agent Dashboard.
+
+This module defines the complete database schema as a Python dictionary.
+The schema is used for:
+- Database initialization and table creation
+- Migration generation and validation
+- Schema comparison and diffing
+- Table rebuild operations
+
+The schema follows a consistent structure with tables containing 'columns' and
+optional 'constraints' (foreign keys, etc.).
+"""
 
 SCHEMA = {
     "migrations": {

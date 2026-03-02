@@ -1,4 +1,11 @@
-# db/infra/core.py
+"""Core database infrastructure utilities.
+
+This module provides essential database infrastructure functions including:
+- Database initialization and migration application
+- Safe JSON handling for database fields
+- Connection management with context managers
+- Database backup and restore operations
+"""
 import json
 import logging
 import sqlite3

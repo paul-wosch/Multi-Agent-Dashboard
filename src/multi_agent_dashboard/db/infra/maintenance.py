@@ -1,6 +1,9 @@
-# db/infra/maintenance.py
-"""
-Database maintenance helpers.
+"""Database maintenance utilities for the Multi-Agent Dashboard.
+
+This module provides database maintenance operations including:
+- Agent snapshot pruning to manage storage usage
+- Database optimization and cleanup tasks
+- Maintenance operations that can be run periodically
 """
 import logging
 from typing import Optional

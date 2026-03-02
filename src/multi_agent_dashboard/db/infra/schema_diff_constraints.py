@@ -1,4 +1,9 @@
-# multi_agent_dashboard/db/infra/schema_diff_constraints.py
+"""Foreign key constraint diffing utilities for SQLite databases.
+
+This module provides specialized functions for comparing foreign key constraints
+between the canonical schema definition and actual database schema. It handles
+composite foreign keys and detects changes in ON DELETE/UPDATE actions.
+"""
 import sqlite3
 from typing import Dict, List, Any, TypedDict
 

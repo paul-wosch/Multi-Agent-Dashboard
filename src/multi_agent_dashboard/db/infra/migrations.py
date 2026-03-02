@@ -1,4 +1,9 @@
-# multi_agent_dashboard/db/infra/migrations.py
+"""Migration application and management for SQLite databases.
+
+This module handles the application of SQL migration files to SQLite databases,
+including support for both safe ALTER operations and table rebuilds when needed.
+It integrates with the migration metadata system to handle complex schema changes.
+"""
 import os
 import re
 import sqlite3

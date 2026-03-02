@@ -1,4 +1,9 @@
-# multi_agent_dashboard/db/infra/schema_diff.py
+"""Schema comparison and diffing utilities for SQLite databases.
+
+This module provides tools to compare the canonical schema definition with
+actual database schema, generating actionable diffs for migration generation.
+It handles table structure, columns, indexes, triggers, and foreign keys.
+"""
 import sqlite3
 import copy
 from typing import Dict, List, Any, Optional
