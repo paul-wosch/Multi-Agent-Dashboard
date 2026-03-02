@@ -1,4 +1,20 @@
-"""Load and validate YAML configuration files."""
+"""
+YAML configuration loader with Pydantic validation.
+
+This module provides structured loading and validation of YAML configuration
+files using Pydantic models. It defines schema classes for each configuration
+domain and validates them at load time.
+
+Configuration domains:
+- Paths: Directory and file names for data storage
+- Agents: Agent-specific limits and snapshot settings
+- Providers: Provider data file names and external URLs
+- UI: User interface settings (colors, file types)
+- Logging: Default log level and logging configuration
+
+The module ensures configuration consistency and provides early error detection
+for malformed or missing configuration values.
+"""
 import yaml
 from pathlib import Path
 from typing import Any, Dict

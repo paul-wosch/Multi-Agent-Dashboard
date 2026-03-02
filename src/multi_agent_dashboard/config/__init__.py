@@ -1,4 +1,17 @@
-# Public API – exposes exactly the same names as current config.py
+"""
+Configuration package for the Multi-Agent Dashboard.
+
+This package provides centralized configuration management with YAML-based
+configuration files, environment variable overrides, and derived path resolution.
+It replaces the previous monolithic config.py with a modular, validated approach.
+
+Modules:
+- core: Loads .env, YAML, computes derived paths, and exposes global constants
+- loader: YAML validation with Pydantic models
+
+The public API exposes exactly the same names as the previous config.py module
+for backward compatibility.
+"""
 from .core import (
     UI_COLORS,
     DB_FILE_PATH,

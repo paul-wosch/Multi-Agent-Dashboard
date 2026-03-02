@@ -1,4 +1,20 @@
-"""Core configuration module – loads .env, YAML, computes derived paths."""
+"""
+Core configuration module for the Multi-Agent Dashboard.
+
+This module loads environment variables from .env, validates YAML configuration
+files, computes derived paths, and exposes global constants for the entire
+application. It serves as the central configuration hub.
+
+Key responsibilities:
+- Load and validate YAML configuration (paths, agents, providers, UI, logging)
+- Load environment variables with overrides for YAML defaults
+- Compute derived file system paths and ensure directories exist
+- Expose global constants for use throughout the application
+- Configure application logging with rotating file handler
+
+The module maintains backward compatibility with the previous config.py API
+while introducing structured validation and modular configuration management.
+"""
 from pathlib import Path
 from dotenv import dotenv_values
 import logging
