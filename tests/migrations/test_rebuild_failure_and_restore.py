@@ -17,7 +17,7 @@ def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
 def test_rebuild_failure_triggers_restore(tmp_path, monkeypatch):
     """
     Simulate a rebuild failure during apply_migrations (on the fresh DB auto-rebuild path).
-    The test patches the rebuild_tables_batch used by apply_migrations to create a
+    The test patches the rebuild_table_with_constraints used by apply_migrations to create a
     transient artifact (a table) and then raise. After apply_migrations fails and
     the code attempts restore, the transient artifact should not exist (backup restore succeeded).
     """
@@ -27,14 +27,14 @@ def test_rebuild_failure_triggers_restore(tmp_path, monkeypatch):
     try:
         # Patch the rebuild function referenced by the migrations module so apply_migrations
         # will call our fake and it will raise after making a visible change.
-        def fake_rebuild(conn_arg, rebuild_map):
+        def fake_rebuild(conn_arg, table, columns, constraints):
             # Simulate partial work that is committed by the rebuild step (a transient artifact)
             conn_arg.execute("CREATE TABLE temp_during_rebuild (id INTEGER PRIMARY KEY)")
             conn_arg.commit()
             # Then fail
             raise RuntimeError("simulated rebuild failure")
 
-        monkeypatch.setattr(migrations_mod, "rebuild_tables_batch", fake_rebuild)
+        monkeypatch.setattr(migrations_mod, "rebuild_table_with_constraints", fake_rebuild)
 
         with pytest.raises(RuntimeError):
             apply_migrations(conn, MIGRATIONS_PATH)
