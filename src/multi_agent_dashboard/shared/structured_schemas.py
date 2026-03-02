@@ -1,4 +1,24 @@
-# structured_schemas.py
+"""
+Schema registry and JSON schema resolution for structured output validation.
+
+This module provides a centralized registry for reusable JSON schemas used in
+structured output generation. It supports both Pydantic BaseModel classes and
+raw JSON schema dictionaries, with automatic conversion between formats.
+
+Key components:
+- `SCHEMA_REGISTRY`: Global dictionary mapping schema names to schema objects
+  (Pydantic models or JSON schema dicts)
+- `register_schema`: Register a schema by name for reuse across agents
+- `get_schema`: Lookup a schema by name from the registry
+- `schema_to_json`: Convert Pydantic models or JSON schema dicts into
+  standardized JSON schema format
+- `resolve_schema_json`: Resolve schema references and return final JSON schema
+  for LLM provider consumption
+
+The module handles Pydantic v1/v2 compatibility and provides consistent schema
+resolution for structured output across different agent configurations.
+"""
+
 from __future__ import annotations
 
 import json

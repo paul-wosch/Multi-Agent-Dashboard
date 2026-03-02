@@ -1,5 +1,23 @@
-# src/multi_agent_dashboard/shared/instrumentation.py
-# Shared instrumentation helper functions extracted from engine/utils.py
+"""
+Instrumentation helper functions for extracting and processing LLM response metadata.
+
+This module provides shared utilities for working with instrumentation events
+and metrics collected during LLM agent execution. It handles extraction from
+raw response data, content block processing, and structured output detection.
+
+Key functions:
+- `_extract_instrumentation_events`: Extract instrumentation events from raw
+  metrics with backward compatibility support
+- `_collect_content_blocks`: Aggregate content blocks from instrumentation events
+- `_structured_from_instrumentation`: Extract structured output from
+  instrumentation events
+- `_collect_tool_calls`: Collect tool call information from content blocks
+- `_tool_usage_entry_from_payload`: Create standardized tool usage entries from
+  tool call payloads
+
+These functions are used by both the runtime package (for metrics extraction)
+and the engine package (for orchestration and state management).
+"""
 
 from __future__ import annotations
 
