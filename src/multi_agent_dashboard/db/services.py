@@ -1,4 +1,15 @@
-# src/multi_agent_dashboard/db/services.py
+"""High-level database services for the Multi-Agent Dashboard.
+
+This module provides service classes that encapsulate business logic and
+coordinate multiple DAO operations within transactions. Services handle
+complex operations like agent creation with automatic snapshotting and
+provide a cleaner API for the UI layer.
+
+Key services:
+- RunService: Manages execution runs and agent outputs
+- AgentService: Handles agent operations with snapshot management
+- PipelineService: Manages pipeline configurations
+"""
 from typing import Dict, Any, List, Optional, Tuple
 import json
 

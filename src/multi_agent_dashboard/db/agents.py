@@ -1,16 +1,14 @@
-"""db/agents.py
+"""Data Access Object (DAO) for agent management in the Multi-Agent Dashboard.
 
-Construction modes:
+This module provides the AgentDAO class for CRUD operations on agents and their snapshots.
+It supports both direct database connection and file path construction modes, with
+context manager support for atomic multi-step operations.
 
-- AgentDAO(db_path="...")
-- AgentDAO(conn=sqlite3.Connection)
-
-Support for atomic multi-step operations:
-
-with agent_dao(db_path) as dao:
-    dao.save(...)
-    dao.save_snapshot(...)
-    dao.rename(...)
+Key features:
+- Agent creation, retrieval, updating, and deletion
+- Agent snapshot management with versioning
+- Atomic operations with transaction support
+- JSON serialization/deserialization of agent specifications
 """
 import json
 import logging

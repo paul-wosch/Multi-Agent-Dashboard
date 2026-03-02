@@ -1,16 +1,15 @@
-"""db/runs.py
+"""Data Access Object (DAO) for run management in the Multi-Agent Dashboard.
 
-Construction modes:
+This module provides the RunDAO class for CRUD operations on execution runs.
+It supports both direct database connection and file path construction modes, with
+context manager support for atomic multi-step operations.
 
-- RunDAO(db_path="...")
-- RunDAO(conn=sqlite3.Connection)
-
-Support for atomic multi-step operations:
-
-with run_dao(db_path) as dao:
-    run_id = dao.save(...)
-    dao.add_tags(run_id, ...)
-    dao.attach_metadata(run_id, ...)
+Key features:
+- Run creation, retrieval, updating, and deletion
+- Agent output storage and retrieval
+- Tag and metadata management for runs
+- Atomic operations with transaction support
+- JSON serialization/deserialization of run data
 """
 import json
 import logging

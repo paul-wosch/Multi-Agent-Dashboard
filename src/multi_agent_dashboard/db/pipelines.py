@@ -1,15 +1,14 @@
-"""db/pipelines.py
+"""Data Access Object (DAO) for pipeline management in the Multi-Agent Dashboard.
 
-Construction modes:
+This module provides the PipelineDAO class for CRUD operations on agent pipelines.
+It supports both direct database connection and file path construction modes, with
+context manager support for atomic multi-step operations.
 
-- PipelineDAO(db_path="...")
-- PipelineDAO(conn=sqlite3.Connection)
-
-Support for atomic multi-step operations:
-
-with pipeline_dao(db_path) as dao:
-    dao.save("analysis", ["planner", "executor"])
-    dao.save("final", ["planner", "executor", "finalizer"])
+Key features:
+- Pipeline creation, retrieval, updating, and deletion
+- Agent sequence management within pipelines
+- Atomic operations with transaction support
+- JSON serialization/deserialization of pipeline specifications
 """
 import json
 import logging
