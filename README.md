@@ -1,6 +1,6 @@
 # 🤖 Multi-Agent Dashboard
 
-![License: MIT](https://img.shields.io/badge/license-MIT-brightgreen) ![Python ≥3.11](https://img.shields.io/badge/python-%3E%3D3.11-blue) ![Streamlit](https://img.shields.io/badge/streamlit-ready-orange)
+![License: MIT](https://img.shields.io/badge/license-MIT-brightgreen) ![Python ≥3.10](https://img.shields.io/badge/python-%3E%3D3.10-blue) ![Streamlit](https://img.shields.io/badge/streamlit-ready-orange) ![LangChain](https://img.shields.io/badge/LangChain-✓-blue) ![Langfuse](https://img.shields.io/badge/Langfuse-✓-orange) ![SQLite](https://img.shields.io/badge/SQLite-✓-green) ![Multi‑Agent](https://img.shields.io/badge/Multi‑Agent-✓-purple)
 
 *Local Streamlit playground to build, run and inspect multi-agent LLM pipelines.*
 
@@ -81,7 +81,7 @@ On first run, the app will:
 
 ## 🧩 System Requirements
 
-- 🐍 **Python**: >=3.11 (tested with CPython 3.14)  
+- 🐍 **Python**: >=3.10 (tested with CPython 3.13)  
 - 💻 **OS**: Tested on macOS; should work on Linux and Windows with appropriate environment setup  
 - 🌐 **Network**: Outbound HTTPS access to OpenAI’s APIs  
 - 🔑 **Credentials**: Valid `OPENAI_API_KEY` in `.env`
@@ -92,17 +92,34 @@ Note: pandas (and numpy) are installed as direct dependencies of Streamlit, so y
 
 ## ⚙️ Configuration (essential)
 
-Most configuration is centralized in `config.py` and `.env`. See [docs/CONFIG.md](docs/CONFIG.md)  for the full reference.
+Configuration is centralized in YAML files under `config/` and environment variables in `.env`. See [docs/CONFIG.md](docs/CONFIG.md) for the full reference.
+
+**YAML files:**
+- `paths.yaml` – directory and file names
+- `agents.yaml` – agent limits and snapshot settings
+- `providers.yaml` – provider‑data file names and URLs
+- `ui.yaml` – UI colors and attachment file types
+- `logging.yaml` – default log level configuration
 
 ### 🌱 Environment Variables (`.env` at project root)
 
-| Name              | Required | Default | Description                                                |
-| ----------------- | -------- | ------- | ---------------------------------------------------------- |
-| `OPENAI_API_KEY`  | ✅        | None    | OpenAI API key used by the LLM client                      |
-| `DEEPSEEK_API_KEY`| ❌        | None    | DeepSeek API key for DeepSeek provider                     |
-| `USE_LITELLM`     | ❌        | `false` | Enable unified provider access via LiteLLM (true/false)    |
-| `LOG_LEVEL`       | ❌        | `INFO`  | Global logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
-| `DB_FILE`         | ❌        | `multi_agent_runs.db` | Custom SQLite database filename          |
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OPENAI_API_KEY` | Yes | OpenAI API key |
+| `DEEPSEEK_API_KEY` | Yes | DeepSeek API key (required for DeepSeek provider) |
+| `DB_FILE` | Optional | Override default database filename |
+| `LOG_LEVEL` | Optional | Logging level (INFO, DEBUG, etc.) |
+| `LANGFUSE_PUBLIC_KEY` | Optional | Langfuse public API key (enables observability) |
+| `LANGFUSE_SECRET_KEY` | Optional | Langfuse secret API key (required if public key is set) |
+| `LANGFUSE_BASE_URL` | Optional | Langfuse server URL (default: `https://cloud.langfuse.com`) |
+| `LANGFUSE_ENABLED` | Optional | Explicitly disable Langfuse integration (set to `false` to disable even if keys are present) |
+| `RAISE_ON_AGENT_FAIL` | Optional | Whether to raise exceptions on agent failure (default: `true`) |
+| `AGENT_INPUT_CHAR_CAP` | Optional | Maximum input character count per agent (overrides `agents.yaml`) |
+| `AGENT_OUTPUT_CHAR_CAP` | Optional | Maximum output character count per agent (overrides `agents.yaml`) |
+| `AGENT_OUTPUT_TOKEN_CAP` | Optional | Maximum output token limit per agent (overrides `agents.yaml`; `0` = no limit) |
+| `STRICT_OUTPUT_TOKEN_CAP_OVERRIDE` | Optional | If `true`, ignore per‑agent `max_output` and enforce `AGENT_OUTPUT_TOKEN_CAP` globally (default: `false`) |
+
+**Note:** Many other constants (paths, agent caps, UI colors, provider data) are defined in YAML files under `config/` and can be customized there.
 
 ---
 
@@ -118,16 +135,23 @@ pip install -e .
 # Start the UI
 streamlit run src/multi_agent_dashboard/ui/app.py
 
-# One-click
+# One-click scripts
 ./scripts/quick_start.sh        # macOS / Linux
 .\scripts\quick_start.ps1       # Windows PowerShell
 
-# Migration helpers (after pip install -e .)
+# Testing
+pytest
+
+# Database migrations (after pip install -e .)
 python -m multi_agent_dashboard.db.infra.generate_migration add_feature --dry-run
 python -m multi_agent_dashboard.db.infra.generate_migration add_feature
 
 # Safe sqlite rebuild (when migrations require rebuild)
-python src/multi_agent_dashboard/db/infra/sqlite_rebuild.py --all-with-diffs data/db/multi_agent_runs.db
+python src/multi_agent_dashboard/db/infra/sqlite_rebuild.py --all-with-diffs data/db/multi_agent_runs.db  # must be run as script, not module
+
+# Prune agent snapshots (keep latest N snapshots per agent)
+python -m multi_agent_dashboard.db.infra.prune_snapshots --keep 100
+# Dry‑run: add --dry-run; optional agent name & DB path: python -m ... my_agent my.db --keep 50
 ```
 
 ---
@@ -148,46 +172,65 @@ For a detailed breakdown of each UI mode and what you can inspect/configure, see
 
 ### 🧠 Engine & Contracts
 
-- 🤖 Multi-agent pipeline execution with a unified dashboard UI  
-- 🧩 Dynamic agent configuration (model, role, inputs/outputs, tools, reasoning behavior, colors, symbols)  
-- 🧠 Strict vs permissive execution modes:
+- 🤖 **UI‑agnostic execution engine** (`engine/` and `runtime/` packages) for reusable agent orchestration  
+- 🧩 **Dynamic agent configuration** (model, role, inputs/outputs, tools, reasoning behavior, colors, symbols)  
+- 🧠 **Strict vs permissive execution modes**:
   - Strict mode with explicit input/output contracts and writeback behavior
   - Permissive mode for easier experimentation
-- 🧾 Rich output metadata:
+- 🧾 **Rich output metadata**:
   - JSON vs markdown flags
   - Model identifiers and execution context
+- 🔌 **Provider‑agnostic LLM integration** (OpenAI, DeepSeek, Ollama) via LangChain with dynamic capability data
+- 🧱 **Structured output** with JSON schema validation
 
 ### 🔌 Tools & Reasoning
 
-- 🛠 Tool calling:
-  - Optional web search tools
-  - Per-agent domain restrictions
-  - Tool-call traces and agent configurations persisted with each run
-- 🧠 Reasoning controls:
+- 🛠 **Tool calling** with per‑agent controls:
+  - Optional web search tools (DuckDuckGo)
+  - Per‑agent domain restrictions
+  - Tool‑call traces and agent configurations persisted with each run
+- 🧠 **Reasoning controls**:
   - Configurable reasoning effort / style per agent where supported
-  - Persisted reasoning and tool-usage configuration per run
+  - Persisted reasoning and tool‑usage configuration per run
 
 ### 💾 Database & Migrations
 
-- 💾 SQLite-backed persistence for agents, prompts, pipelines, runs, and metrics
-- 🧱 Centralized migration system (canonical schema + generator + ordered SQL migrations)
-- 🔁 Tools & guidance for safe FK/constraint changes and rebuilds (see docs/MIGRATIONS.md)
+- 💾 **Persistent SQLite storage** with automatic migrations  
+- 🧱 **Centralized migration system** (canonical schema + generator + ordered SQL migrations)  
+- 🔁 **Tools & guidance** for safe FK/constraint changes and rebuilds ([docs/MIGRATIONS.md](docs/MIGRATIONS.md))  
+- 🗃️ **Layered database access**: low‑level infra (`db/infra/`), DAOs (`db/*.py`), high‑level services (`db/services.py`)
 
 ### 📊 Monitoring & Metrics
 
-- Per-run and per-agent cost & latency metrics (input/output token breakdown)
-- Pipeline graph visualization with per-agent colors & symbols
-- Run exports including configs, outputs, metrics, and tool usage
+- 📈 **Rich observability** (cost, latency, logs, history)  
+- 🧮 **Per‑run and per‑agent cost & latency metrics** (input/output token breakdown)  
+- 🎨 **Pipeline graph visualization** with per‑agent colors & symbols  
+- 📤 **Run exports** including configs, outputs, metrics, and tool usage  
+- 👀 **Optional Langfuse integration** for distributed tracing. (See [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) for setup and usage details.)  
+
+### ⚙️ Configuration & Extensibility
+
+- ⚙️ **YAML‑based configuration** (`config/` directory) with Pydantic validation  
+- 🔧 **Environment variable overrides** for API keys, logging, and agent caps  
+- 📊 **Dynamic provider capabilities & pricing data** loaded from external sources with local Ollama overrides  
+- 🖼️ **Multimodal file handling** (images, PDFs, text) with provider‑specific encoding
 
 ---
 
 ## 🏗️ Architecture — short
 
 - 🎛️ UI (Streamlit): `src/multi_agent_dashboard/ui/` — presentation, graph view, run mode, history, logs.  
-- 🧰 Services: `src/multi_agent_dashboard/db/services.py` — transactional APIs for UI and scripts.  
-- 🗃️ Persistence / DAOs: `src/multi_agent_dashboard/db/*.py` — agents, pipelines, runs.  
-- 🧱 DB infra & migrations: `src/multi_agent_dashboard/db/infra/`.  
-- 🧠 Engine & LLM client: `src/multi_agent_dashboard/engine.py`, `src/multi_agent_dashboard/llm_client.py`.
+- 🧠 Engine: `src/multi_agent_dashboard/engine/` — modular multi-agent orchestration engine.  
+- 🚀 Runtime: `src/multi_agent_dashboard/runtime/` — AgentRuntime class and execution logic.  
+- 🔌 LLM Client: `src/multi_agent_dashboard/llm_client/` — provider‑agnostic LLM integration with LangChain unified interface.  
+- 🧰 Shared Utilities: `src/multi_agent_dashboard/shared/` — instrumentation, provider capabilities, runtime hooks, structured schemas.  
+- 📊 Provider Data: `src/multi_agent_dashboard/provider_data/` — dynamic provider capabilities & pricing data loading.  
+- 🛠️ Tool Integration: `src/multi_agent_dashboard/tool_integration/` — tool registry and provider‑specific tool adapter.  
+- ⚙️ Configuration: `src/multi_agent_dashboard/config/` — YAML‑based configuration loading.  
+- 👀 Observability: `src/multi_agent_dashboard/observability/` — Langfuse integration for distributed tracing.  
+- 🗃️ Database Layer: `src/multi_agent_dashboard/db/` — DAOs, services, and low‑level infra.
+
+The codebase follows a clean separation between UI (`ui/`) and engine (all other packages). Database access is layered with low‑level infra (`db/infra/`), DAOs (`db/*.py`), and high‑level services (`db/services.py`).
 
 For a deeper architecture walkthrough and the repository layout, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -207,10 +250,13 @@ For a deeper architecture walkthrough and the repository layout, see [docs/ARCHI
 
 ## 🔎 Troubleshooting — short
 
-- UI opens but model calls fail → check `OPENAI_API_KEY` in `.env`.
+- UI opens but model calls fail → check `OPENAI_API_KEY` and `DEEPSEEK_API_KEY` in `.env`.
 - Permission errors when writing `data/` → ensure write permissions.
-- Python syntax errors → use Python >= 3.11 (this repo is tested with CPython 3.14).   
-- Graphviz export requires system `dot` binary when exporting images; in-browser Streamlit `graphviz_chart` generally works without it.
+- Python syntax errors → use Python >= 3.10 (tested with CPython 3.13).   
+- Graphviz export requires system `dot` binary when exporting images; in‑browser Streamlit `graphviz_chart` generally works without it.
+- DeepSeek‑reasoner structured output errors → client automatically retries with JSON mode.
+- SQLite rebuild required for certain migrations → use `sqlite_rebuild.py` as a script (see docs/MIGRATIONS.md).
+- Missing provider capabilities warnings → dynamic data loaded from external sources; check `data/provider_models/` files.
 
 For a longer troubleshooting guide and FAQs, see [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
@@ -226,6 +272,8 @@ To keep the project healthy:
 - 🧱 Always use the migration system for schema changes (see Migration: Safe Workflow)
 - 🧠 Preserve engine/UI separation; keep the engine free of Streamlit dependencies
 - 🧪 Add or extend tests for new engine, DB, or migration behavior where applicable
+- ⚙️ Use YAML configuration (`config/`) for new constants; update Pydantic models in `config/loader.py`
+- 🧩 Respect modular package structure (engine/, runtime/, llm_client/, etc.) and follow existing patterns
 
 Developer checklist (quick):
 
@@ -241,9 +289,9 @@ Developer checklist (quick):
 
 ## 🔧 Status & Known Gaps
 
-- Unit tests: not yet implemented.  
+- Unit tests: implemented (in `tests/`) but coverage may be incomplete.  
 - CHANGELOG: not currently maintained — a `CHANGELOG.md` would be helpful.  
-- CI: add checks for linting and tests once a test suite exists.
+- CI: GitHub Actions not yet configured — contributions welcome.
 
 ---
 
@@ -271,6 +319,12 @@ The project evolved from a single-file Streamlit script into a modular, package-
   - Persisted, color-coded logs with search & filters
   - Finer-grained input/output cost tracking
   - Safer migration tooling for foreign-key changes with explicit rebuild helpers
+- 🧩 Latest architectural improvements:
+  - Modular LLM client core with focused modules (availability, agent creation, request builder, execution engine, response processor)
+  - YAML‑based configuration system with Pydantic validation
+  - Dynamic provider capabilities & pricing data with local Ollama customization
+  - Per‑agent max output token limits with precedence rules
+  - Langfuse observability integration for distributed tracing
 
 Use this dashboard as both a day-to-day multi-agent playground and a reference architecture for building robust, observable LLM workflows.
 
@@ -287,6 +341,7 @@ For deep, step-by-step instructions (install, CLI reference, migrations, archite
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
 - [docs/USAGE.md](docs/USAGE.md)
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
+- [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md)
 
 ---
 
