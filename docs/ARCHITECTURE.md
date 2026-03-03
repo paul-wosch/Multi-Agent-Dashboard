@@ -97,15 +97,16 @@ The Multi-Agent Dashboard follows a layered, modular architecture that separates
 
 **Design rationale**: Centralizing configuration and shared utilities reduces duplication and ensures consistent behavior. Observability is optional and non‑invasive—enabled only when credentials are present.
 
-### 📦 Models (`models.py`)
+### 📦 Models & Result DTOs (`models.py` + `engine/`)
 
-**Purpose**: Defines the core data structures used across all layers.
+**Purpose**: Defines the core data structures and result containers used across all layers.
 
 **Responsibilities**:
-- Immutable dataclasses for `AgentSpec`, `PipelineSpec`, `AgentRuntime`, run results, etc.
+- **Core domain models** (`models.py`): Immutable dataclasses for `AgentSpec`, `PipelineSpec`.
+- **Engine result DTOs** (`engine/engine_orchestrator.py`, `engine/types.py`): `EngineResult`, `AgentRunResult`, `PipelineState`, `RunMetrics`.
 - Provides validation, serialization, and convenience methods.
 
-**Integration**: Imported and used by UI, Services, Engine, Runtime, and Persistence layers. Serves as the common language for data exchange.
+**Integration**: Imported and used by UI, Services, Engine, Runtime, and Persistence layers. Serve as the common language for data exchange.
 
 **Design rationale**: Immutable dataclasses ensure thread‑safe data passing and clear contracts between layers. They also enable easy serialization for storage and UI display.
 
