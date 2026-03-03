@@ -72,113 +72,187 @@ python -m multi_agent_dashboard.db.infra.prune_snapshots my_agent my_custom.db -
 ## Project Structure
 
 ```
-src/multi_agent_dashboard/
-├── __init__.py
-├── config/                             # YAML-based configuration package
-│   ├── __init__.py                     # Public API (same constants as before)
-│   ├── core.py                         # Core configuration loading
-│   └── loader.py                       # YAML validation with Pydantic
-├── engine/                             # Modular multi-agent orchestration engine
-│   ├── __init__.py
-│   ├── agent_executor.py
-│   ├── engine_orchestrator.py
-│   ├── metrics_aggregator.py
-│   ├── progress_reporter.py
-│   ├── schema_validator.py
-│   ├── snapshot_builder.py
-│   ├── state_manager.py
-│   ├── types.py
-│   └── utils.py
-├── runtime/                            # AgentRuntime class and execution logic
-│   ├── __init__.py
-│   ├── agent_runtime.py                # Main AgentRuntime class
-│   ├── file_processor.py               # File type detection & content decoding
-│   ├── tool_converter.py               # Tool configuration merging & provider conversion
-│   ├── metrics_extractor.py            # Token extraction & provider profile detection
-│   ├── structured_output_detector.py   # 4‑path detection & state writeback
-│   └── utils.py                        # Utility functions (safe_format, etc.)
-├── shared/                             # Shared utilities between engine and runtime
-│   ├── __init__.py
-│   ├── instrumentation.py              # Helper functions for metrics/instrumentation extraction
-│   ├── provider_capabilities.py        # Legacy module (deprecated) - capabilities now loaded from dynamic data
-│   ├── runtime_hooks.py                # Runtime hooks for agent execution
-│   └── structured_schemas.py           # JSON schema resolution for structured output
-├── llm_client/                         # Modular LLM provider integration subpackage
-│   ├── __init__.py
-│   ├── chat_model_factory.py
-│   ├── core/                           # Modular LLMClient core implementation
-│   │   ├── __init__.py                 # Public API (LLMClient, TextResponse, etc.)
-│   │   ├── availability.py             # Conditional import flags and lazy references
-│   │   ├── agent_creation.py           # AgentCreationFacade for agent creation
-│   │   ├── request_builder.py          # RequestBuilder for constructing agent inputs
-│   │   ├── execution_engine.py         # ExecutionEngine for agent invocation with retries
-│   │   ├── response_processor.py       # ResponseProcessor for normalizing responses
-│   │   └── client.py                   # Main LLMClient class implementation
-│   ├── instrumentation.py
-│   ├── multimodal/                     # Multimodal file handling
-│   │   ├── __init__.py
-│   │   └── multimodal_handler.py
-│   ├── provider_adapters.py
-│   ├── response_normalizer.py
-│   ├── structured_output.py
-│   ├── tool_binder.py
-│   └── wrappers.py
-├── observability/                      # Observability and tracing integrations
-│   ├── __init__.py
-│   └── langfuse.py                     # Langfuse integration for LLM tracing
-├── provider_data/                      # Dynamic provider capabilities & pricing data loading
-│   ├── __init__.py
-│   ├── cache.py                        # Caching for provider model data
-│   ├── downloader.py                   # Download external provider data
-│   ├── extractor.py                    # Extract and filter provider data
-│   ├── loader.py                       # Load provider data into memory
-│   └── schemas.py                      # Pydantic schemas for provider data
-├── models.py                           # Data classes (AgentSpec, PipelineSpec) – pure dataclasses
-├── tool_integration/                   # Tool registry and provider-specific tool adapter
-│   ├── __init__.py
-│   ├── provider_tool_adapter.py
-│   ├── registry.py
-│   ├── web_fetch_tool.py
-│   └── search/                         # Web search tools
-│       ├── __init__.py
-│       ├── duckduckgo_base.py
-│       └── duckduckgo_tool.py
-├── ui/                                 # Streamlit UI components
-│   ├── app.py                          # Main Streamlit application
-│   ├── bootstrap.py                    # UI initialization
-│   ├── agent_editor_mode.py
-│   ├── history_mode.py
-│   ├── run_mode.py
-│   ├── static/                         # Static assets (fonts)
-│   │   └── ...
-│   ├── .streamlit/                     # Streamlit configuration
-│   │   └── config.toml
-│   └── ...
-└── db/                                 # Database layer
-    ├── infra/                          # Low-level DB infrastructure
-    │   ├── schema.py                   # Canonical SQL schema
-    │   ├── generate_migration.py
-    │   ├── sqlite_rebuild.py
-    │   ├── migrations.py
-    │   ├── prune_snapshots.py
-    │   ├── schema_diff.py
-    │   ├── sqlite_features.py
-    │   └── ...
-    ├── db.py                           # Low-level DB connection and re‑exports
-    ├── agents.py                       # Agent DAO
-    ├── pipelines.py                    # Pipeline DAO
-    ├── runs.py                         # Run DAO
-    └── services.py                     # High-level transactional APIs
+Multi-Agent-Dashboard/                          # Project root directory
+├── .env                                        # Environment variables (API keys, secrets; untracked)
+├── .env.template                               # Environment variable template
+├── .gitignore                                  # Git ignore patterns
+├── LICENSE                                     # MIT License
+├── README.md                                   # Project overview and quick start guide
+├── pyproject.toml                              # Python project configuration and dependencies
+├── AGENTS.md                                   # Agent guidelines and project documentation (this file)
+│
+└── src/                                        # Source code directory
+    └── multi_agent_dashboard/                  # Main Python package
+        ├── __init__.py                         # Package exports and version
+        ├── models.py                           # Core data classes (AgentSpec, PipelineSpec) – immutable dataclasses
+        │
+        ├── config/                             # YAML-based configuration package
+        │   ├── __init__.py                     # Public API (same constants as before)
+        │   ├── core.py                         # Core configuration loading
+        │   └── loader.py                       # YAML validation with Pydantic
+        │
+        ├── engine/                             # Modular multi-agent orchestration engine
+        │   ├── __init__.py                     # Engine package exports
+        │   ├── agent_executor.py               # Individual agent execution logic
+        │   ├── engine_orchestrator.py          # Multi-agent orchestration and coordination
+        │   ├── metrics_aggregator.py           # Metrics collection and aggregation
+        │   ├── progress_reporter.py            # Progress reporting and status updates
+        │   ├── schema_validator.py             # JSON schema validation for structured output
+        │   ├── snapshot_builder.py             # Agent state snapshot creation and management
+        │   ├── state_manager.py                # Agent state persistence and retrieval
+        │   ├── types.py                        # Engine type definitions and data structures
+        │   └── utils.py                        # Engine utility functions
+        │
+        ├── runtime/                            # AgentRuntime class and execution logic
+        │   ├── __init__.py
+        │   ├── agent_runtime.py                # Main AgentRuntime class
+        │   ├── file_processor.py               # File type detection & content decoding
+        │   ├── tool_converter.py               # Tool configuration merging & provider conversion
+        │   ├── metrics_extractor.py            # Token extraction & provider profile detection
+        │   ├── structured_output_detector.py   # 4‑path detection & state writeback
+        │   └── utils.py                        # Utility functions (safe_format, etc.)
+        │
+        ├── shared/                             # Shared utilities between engine and runtime
+        │   ├── __init__.py                     # Shared utilities package exports
+        │   ├── instrumentation.py              # Helper functions for metrics/instrumentation extraction
+        │   ├── provider_capabilities.py        # Static advisory capability mapping (warnings/UI defaults)
+        │   ├── runtime_hooks.py                # Runtime hooks for agent execution
+        │   └── structured_schemas.py           # JSON schema resolution for structured output
+        │
+        ├── llm_client/                         # Modular LLM provider integration subpackage
+        │   ├── __init__.py                     # LLM client package exports
+        │   ├── chat_model_factory.py           # Factory for creating LangChain chat models
+        │   ├── instrumentation.py              # LLM call instrumentation and metrics
+        │   ├── provider_adapters.py            # Provider-specific adapter implementations
+        │   ├── response_normalizer.py          # Response normalization across providers
+        │   ├── structured_output.py            # Structured output configuration
+        │   ├── tool_binder.py                  # Tool binding and invocation
+        │   ├── wrappers.py                     # LLM client wrapper utilities
+        │   │
+        │   ├── core/                           # Modular LLMClient core implementation
+        │   │   ├── __init__.py                 # Public API (LLMClient, TextResponse, etc.)
+        │   │   ├── availability.py             # Conditional import flags and lazy references
+        │   │   ├── agent_creation.py           # AgentCreationFacade for agent creation
+        │   │   ├── request_builder.py          # RequestBuilder for constructing agent inputs
+        │   │   ├── execution_engine.py         # ExecutionEngine for agent invocation with retries
+        │   │   ├── response_processor.py       # ResponseProcessor for normalizing responses
+        │   │   └── client.py                   # Main LLMClient class implementation
+        │   │
+        │   ├── multimodal/                     # Multimodal file handling
+        │   │   ├── __init__.py                 # Multimodal package exports
+        │   │   └── multimodal_handler.py       # File type detection and content processing
+        │   │
+        │   └── observability/                  # Langfuse integration for LLM tracing
+        │       ├── __init__.py                 # Observability package exports
+        │       └── langfuse_integration.py     # Langfuse tracing integration
+        │
+        ├── provider_data/                      # Dynamic provider capabilities & pricing data loading
+        │   ├── __init__.py                     # Provider data package exports
+        │   ├── cache.py                        # Caching for provider model data
+        │   ├── downloader.py                   # Download external provider data
+        │   ├── extractor.py                    # Extract and filter provider data
+        │   ├── loader.py                       # Load provider data into memory
+        │   └── schemas.py                      # Pydantic schemas for provider data
+        │
+        ├── tool_integration/                   # Tool registry and provider-specific tool adapter
+        │   ├── __init__.py                     # Tool integration package exports
+        │   ├── provider_tool_adapter.py        # Provider-specific tool calling adapter
+        │   ├── registry.py                     # Tool registry and management
+        │   ├── web_fetch_tool.py               # Web content fetching tool implementation
+        │   │
+        │   └── search/                         # Web search tools
+        │       ├── __init__.py                 # Search tools package exports
+        │       ├── duckduckgo_base.py          # Base DuckDuckGo search functionality
+        │       └── duckduckgo_tool.py          # DuckDuckGo search tool implementation
+        │
+        ├── ui/                                 # Streamlit UI components
+        │   ├── app.py                          # Main Streamlit application entry point
+        │   ├── bootstrap.py                    # UI initialization and session state setup
+        │   ├── agent_editor_mode.py            # Agent creation and editing interface
+        │   ├── history_mode.py                 # Run history and results viewer
+        │   ├── run_mode.py                     # Pipeline execution interface
+        │   ├── cache.py                        # UI caching utilities for performance
+        │   ├── exports.py                      # Data export functionality (JSON, CSV)
+        │   ├── graph_view.py                   # Pipeline graph visualization component
+        │   ├── logging_ui.py                   # Logging UI components and log viewer
+        │   ├── metrics_view.py                 # Metrics display components and charts
+        │   ├── styles.py                       # UI styling and themes (CSS, colors)
+        │   ├── tools_view.py                   # Tools management UI and configuration
+        │   ├── utils.py                        # UI utility functions and helpers
+        │   ├── view_models.py                  # UI data models and view state
+        │   ├── static/                         # Static assets (fonts)
+        │   └── .streamlit/                     # Streamlit theme configuration        
+        │    
+        ├── observability/                      # Observability and tracing integrations
+        │   ├── __init__.py                     # Observability package exports
+        │   └── langfuse.py                     # Langfuse integration for distributed tracing
+        │
+        └── db/                                 # Database layer
+            ├── __init__.py                     # Database package exports
+            ├── agents.py                       # Agent DAO (Data Access Object)
+            ├── db.py                           # Low-level DB connection and re‑exports
+            ├── pipelines.py                    # Pipeline DAO
+            ├── runs.py                         # Run DAO
+            ├── services.py                     # High-level transactional APIs
+            │
+            └── infra/                          # Low-level DB infrastructure
+                ├── __init__.py                 # DB infrastructure package exports
+                ├── backup_utils.py             # Database backup utilities
+                ├── cli_utils.py                # CLI utility functions for database operations
+                ├── core.py                     # Core DB infrastructure and connection management
+                ├── generate_migration.py       # Migration generation from schema changes
+                ├── maintenance.py              # Database maintenance utilities
+                ├── migration_meta.py           # Migration metadata management and tracking
+                ├── migrations.py               # Migration application and version control
+                ├── prune_snapshots.py          # Agent snapshot pruning and cleanup
+                ├── schema.py                   # Canonical SQL schema definitions
+                ├── schema_diff.py              # Schema comparison utilities for migrations
+                ├── schema_diff_constraints.py  # Constraint comparison utilities
+                ├── sql_utils.py                # SQL utility functions and helpers
+                ├── sqlite_features.py          # SQLite feature detection and compatibility
+                └── sqlite_rebuild.py           # SQLite database rebuild for destructive changes
 
 data/                                   # Runtime data (created on first run)
-├── db/                                 # SQLite database files
-├── migrations/                         # Generated migration SQL files
+├── db/                                 # SQLite database files (multi_agent_runs.db, etc.)
+├── migrations/                         # Generated migration SQL files (20+ migrations)
 ├── provider_models/                    # Dynamic provider capabilities & pricing data
-└── logs/                               # Application logs
+│   ├── local_ollama_models.json        # Local Ollama model customization (untracked)
+│   ├── provider_models.json            # Provider Data for OpenAI & DeepSeek (untracked)
+│   ├── provider_models_all.json        # Provider Data fetched (untracked)
+│   └── template_ollama_models.json     # Template for local Ollama model customization
+└── logs/                               # Application logs (rotating log files)
 
 tests/                                  # Unit tests (pytest)
+
 docs/                                   # Project documentation
+├── ARCHITECTURE.md                     # System architecture overview
+├── CONFIG.md                           # Configuration reference and YAML format
+├── DEVELOPMENT.md                      # Developer guide and workflow
+├── INSTALL.md                          # Installation instructions
+├── MIGRATIONS.md                       # Database migration guide
+├── TROUBLESHOOTING.md                  # Troubleshooting common issues
+├── USAGE.md                            # User guide and features
+├── implementation-strategies/          # Implementation strategy documents
+└── archive/                            # Archived planning documents
+
 config/                                 # Centralized YAML‑based configuration
+├── agents.yaml                         # Agent limits and snapshot settings
+├── logging.yaml                        # Default log level configuration
+├── paths.yaml                          # Directory and file names
+├── providers.yaml                      # Provider‑data file names and URLs
+└── ui.yaml                             # UI colors and attachment file types
+
+scripts/                                # Utility scripts
+├── quick_start.sh                      # Quick start script for Linux/macOS (venv setup)
+├── quick_start.ps1                     # Quick start script for Windows PowerShell
+└── verification/                       # Verification scripts for development
+
+tools/                                  # Development tools
+└── annotate_old_migrations.py          # Migration annotation utility
+
+.github/                                # GitHub configuration
+└── ISSUE_TEMPLATE/
+    └── quickstart_feedback.md          # Issue template for quickstart feedback
 ```
 
 ## Code Patterns & Conventions
