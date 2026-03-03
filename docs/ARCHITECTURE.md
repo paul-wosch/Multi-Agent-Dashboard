@@ -345,7 +345,7 @@ graph TD
     Engine["Engine Layer<br/>engine/"]
     Runtime["Runtime Layer<br/>runtime/"]
     LLMClient["LLM Client Layer<br/>llm_client/"]
-    Models["Models Layer<br/>models.py"]
+    Models["Models & Result DTOs<br/>models.py + engine/"]
     Shared["Shared Utilities<br/>shared/"]
     
     UI --> Service
@@ -502,7 +502,7 @@ graph TD
         ToolIntegration[Tool Integration]
     end
     
-    subgraph "Models Layer"
+    subgraph "Models & Result DTOs"
         AgentSpec[AgentSpec]
         PipelineSpec[PipelineSpec]
         EngineResult[EngineResult]
