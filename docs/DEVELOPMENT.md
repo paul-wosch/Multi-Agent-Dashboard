@@ -1,10 +1,10 @@
 # 🧪 Development Notes
 
-This document expands developer-focused guidance present in the [README](README.md).
+This document expands developer-focused guidance present in the [README](../README.md).
 
 ## 📁 Project Structure
 
-- **Modular package layout** (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full tree):
+- **Modular package layout** (see [docs/ARCHITECTURE.md](ARCHITECTURE.md) for full tree):
   - `engine/` – Multi-agent orchestration engine (8 focused modules)
   - `runtime/` – Agent execution logic (6 modules including `safe_format` in `utils.py`)
   - `shared/` – Utilities shared between engine and runtime
@@ -122,7 +122,7 @@ A database is considered “fresh” if no user‑created tables exist or existi
 3. If rebuild required, run `sqlite_rebuild.py --dry-run` and review the plan.
 4. Test migration application on a copy of your DB before applying to production/user data.
 
-> For detailed migration caveats and examples, see [docs/MIGRATIONS.md](docs/MIGRATIONS.md).
+> For detailed migration caveats and examples, see [docs/MIGRATIONS.md](MIGRATIONS.md).
 
 ## 🔧 Status & Known Gaps
 
@@ -136,9 +136,9 @@ If you are working on a larger change touching schema, migrations, engine behavi
 
 ## 📚 Further Reading
 
-- [AGENTS.md](AGENTS.md) – Agent guidelines, code patterns, gotchas.
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) – System architecture overview.
-- [docs/CONFIG.md](docs/CONFIG.md) – Configuration reference and YAML format.
-- [docs/MIGRATIONS.md](docs/MIGRATIONS.md) – Detailed database migration guide.
-- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) – Troubleshooting common issues.
-- [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) - Langfuse setup and usage.
+- [AGENTS.md](../AGENTS.md) – Agent guidelines, code patterns, gotchas.
+- [docs/ARCHITECTURE.md](ARCHITECTURE.md) – System architecture overview.
+- [docs/CONFIG.md](CONFIG.md) – Configuration reference and YAML format.
+- [docs/MIGRATIONS.md](MIGRATIONS.md) – Detailed database migration guide.
+- [docs/TROUBLESHOOTING.md](TROUBLESHOOTING.md) – Troubleshooting common issues.
+- [docs/OBSERVABILITY.md](OBSERVABILITY.md) - Langfuse setup and usage.
