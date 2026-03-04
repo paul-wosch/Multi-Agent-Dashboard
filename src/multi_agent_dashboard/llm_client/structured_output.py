@@ -78,12 +78,22 @@ class StructuredOutputBinder:
                 logger.info(f"Applied unified tools+structured_output binding for {provider_id}")
             else:
                 # Structured output only
-                structured_model = model_instance.with_structured_output(
-                    schema,
-                    method=structured_output_method,
-                    include_raw=True,
-                    strict=strict,
-                )
+                if model == "deepseek-reasoner":
+                    # quick fix to prevent deepseek returning code 400 w/ structured output
+                    # removed strict flag and explicitly set "json_mode"
+                    # TODO: analyze and fix root cause why structured_output_method does not hold correct value
+                    structured_model = model_instance.with_structured_output(
+                        schema,
+                        method="json_mode",
+                        include_raw=True,
+                    )
+                else:
+                    structured_model = model_instance.with_structured_output(
+                        schema,
+                        method=structured_output_method,
+                        include_raw=True,
+                        strict=strict,
+                    )
                 model_instance = StructuredOutputWrapper.wrap(structured_model)
                 effective_response_format = None
                 logger.info(f"Applied provider-specific structured output binding for {provider_id}")
