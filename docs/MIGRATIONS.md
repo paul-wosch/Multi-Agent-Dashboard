@@ -1,6 +1,6 @@
 # 🧱 Migrations & DB (deep reference)
 
-This document contains the detailed guidance for schema changes, migration generation, and safe rebuilds.
+This document contains the detailed guidance for schema changes, migration generation, safe rebuilds, and includes a current schema ER diagram.
 
 ## Key paths
 - Canonical schema: `src/multi_agent_dashboard/db/infra/schema.py`
@@ -74,3 +74,131 @@ This document contains the detailed guidance for schema changes, migration gener
 - For large or complex schema changes, prefer staged migrations and careful review rather than a single big migration.
 
 See also: [docs/ARCHITECTURE.md](ARCHITECTURE.md) (for storage layout) and [docs/CONFIG.md](CONFIG.md) (for DB path overrides).
+
+## APPENDIX A: Database Schema Diagram
+
+The current database schema (as defined in `src/multi_agent_dashboard/db/infra/schema.py`) consists of nine tables with the following relationships:
+
+```mermaid
+erDiagram
+    migrations {
+        string id
+        string applied_at
+    }
+    runs {
+        int id
+        string timestamp
+        string task_input
+        string final_output
+        int final_is_json
+        string final_model
+        int strict_schema_exit
+    }
+    agent_outputs {
+        int id
+        int run_id
+        string agent_name
+        string output
+        int is_json
+        string model
+        int schema_validation_failed
+    }
+    agent_snapshots {
+        int id
+        string agent_name
+        int version
+        string snapshot_json
+        string metadata_json
+        int is_auto
+        string created_at
+    }
+    agents {
+        string agent_name
+        string model
+        string prompt_template
+        string role
+        string input_vars
+        string output_vars
+        string color
+        string symbol
+        string provider_id
+        string model_class
+        string endpoint
+        int use_responses_api
+        string provider_features_json
+        int structured_output_enabled
+        string schema_json
+        string schema_name
+        float temperature
+        string tools_json
+        string reasoning_effort
+        string reasoning_summary
+        string system_prompt_template
+        int max_output
+    }
+    pipelines {
+        string pipeline_name
+        string steps_json
+        string metadata_json
+        string timestamp
+    }
+    agent_metrics {
+        int id
+        int run_id
+        string agent_name
+        int input_tokens
+        int output_tokens
+        float latency
+        float input_cost
+        float output_cost
+        float cost
+    }
+    agent_run_configs {
+        int id
+        int run_id
+        string agent_name
+        string model
+        string provider_id
+        string model_class
+        string endpoint
+        int use_responses_api
+        string provider_features_json
+        int structured_output_enabled
+        string schema_json
+        string schema_name
+        float temperature
+        int strict_schema_validation
+        string prompt_template
+        string role
+        string input_vars
+        string output_vars
+        string tools_json
+        string tools_config_json
+        string reasoning_effort
+        string reasoning_summary
+        string reasoning_config_json
+        string extra_config_json
+        string system_prompt_template
+        int max_output
+        int max_output_effective
+    }
+    tool_usages {
+        int id
+        int run_id
+        string agent_name
+        string tool_type
+        string tool_call_id
+        string args_json
+        string result_summary
+    }
+
+    runs ||--|{ agent_outputs : "has"
+    runs ||--|{ agent_metrics : "has"
+    runs ||--|{ agent_run_configs : "has"
+    runs ||--|{ tool_usages : "has"
+    agents ||--o{ agent_run_configs : "configures"
+```
+
+**Note:** The `migrations` table is used internally by the migration system and is not shown in relationships. The `agent_snapshots` table is decoupled from the `agents` table (no foreign key) to preserve history even if an agent is deleted.
+
+For the exact column definitions and constraints, refer to the canonical schema in `schema.py`.
