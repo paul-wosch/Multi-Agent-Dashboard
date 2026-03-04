@@ -36,7 +36,7 @@ Use it to prototype agent workflows, compare models and prompts, inspect tool us
 
 ## ⚡ Try it in 5 minutes (fast path)
 
-Try it in 5 minutes — copy these commands into your terminal and open the shown localhost URL to see the app.
+Try it in 5 minutes — copy these commands into your terminal and open the shown localhost URL to see the app. For a detailed installation guide, see [docs/INSTALL.md](docs/INSTALL.md).
 
 ```bash
 # 1) Clone the repo & enter the directory
@@ -94,32 +94,16 @@ Note: pandas (and numpy) are installed as direct dependencies of Streamlit, so y
 
 Configuration is centralized in YAML files under `config/` and environment variables in `.env`. See [docs/CONFIG.md](docs/CONFIG.md) for the full reference.
 
-**YAML files:**
-- `paths.yaml` – directory and file names
-- `agents.yaml` – agent limits and snapshot settings
-- `providers.yaml` – provider‑data file names and URLs
-- `ui.yaml` – UI colors and attachment file types
-- `logging.yaml` – default log level configuration
-
 ### 🌱 Environment Variables (`.env` at project root)
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `OPENAI_API_KEY` | Yes | OpenAI API key |
 | `DEEPSEEK_API_KEY` | Yes | DeepSeek API key (required for DeepSeek provider) |
-| `DB_FILE` | Optional | Override default database filename |
-| `LOG_LEVEL` | Optional | Logging level (INFO, DEBUG, etc.) |
-| `LANGFUSE_PUBLIC_KEY` | Optional | Langfuse public API key (enables observability) |
-| `LANGFUSE_SECRET_KEY` | Optional | Langfuse secret API key (required if public key is set) |
-| `LANGFUSE_BASE_URL` | Optional | Langfuse server URL (default: `https://cloud.langfuse.com`) |
-| `LANGFUSE_ENABLED` | Optional | Explicitly disable Langfuse integration (set to `false` to disable even if keys are present) |
-| `RAISE_ON_AGENT_FAIL` | Optional | Whether to raise exceptions on agent failure (default: `true`) |
-| `AGENT_INPUT_CHAR_CAP` | Optional | Maximum input character count per agent (overrides `agents.yaml`) |
-| `AGENT_OUTPUT_CHAR_CAP` | Optional | Maximum output character count per agent (overrides `agents.yaml`) |
-| `AGENT_OUTPUT_TOKEN_CAP` | Optional | Maximum output token limit per agent (overrides `agents.yaml`; `0` = no limit) |
-| `STRICT_OUTPUT_TOKEN_CAP_OVERRIDE` | Optional | If `true`, ignore per‑agent `max_output` and enforce `AGENT_OUTPUT_TOKEN_CAP` globally (default: `false`) |
 
-**Note:** Many other constants (paths, agent caps, UI colors, provider data) are defined in YAML files under `config/` and can be customized there.
+For all other environment variables (agent caps, Langfuse observability, etc.), see [docs/CONFIG.md](docs/CONFIG.md).
+
+**Note:** Configuration defaults (paths, agent caps, UI colors, provider data) are defined in YAML files under `config/` and can be customized there.
 
 ---
 

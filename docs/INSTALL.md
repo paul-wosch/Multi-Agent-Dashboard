@@ -36,40 +36,25 @@ streamlit run src/multi_agent_dashboard/ui/app.py
 - `scripts/quick_start.sh` – creates venv, installs, copies `.env`, starts app (Linux/macOS; make executable: `chmod +x scripts/quick_start.sh`)
 - `scripts/quick_start.ps1` – same for Windows PowerShell
 
-## Environment Variables
+## Configuration
 
-Secrets (API keys) and user‑specific preferences are stored in `.env` (git‑ignored). The following variables are supported:
+The dashboard uses a centralized YAML‑based configuration system (files in `config/`) and environment variables (`.env`) for secrets and overrides.
+
+### Environment variables
+
+The following variables are required to run the dashboard; additional variables can be used to customize important features:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `OPENAI_API_KEY` | Yes | OpenAI API key |
 | `DEEPSEEK_API_KEY` | Yes | DeepSeek API key |
-| `OLLAMA_PROTOCOL` | Optional | Ollama server protocol (default: `http`) |
-| `DB_FILE` | Optional | Override default database filename |
-| `LOG_LEVEL` | Optional | Logging level (INFO, DEBUG, etc.); falls back to `logging.yaml` |
-| `LANGFUSE_PUBLIC_KEY` | Optional | Langfuse public API key (enables observability) |
-| `LANGFUSE_SECRET_KEY` | Optional | Langfuse secret API key (required if public key is set) |
-| `LANGFUSE_BASE_URL` | Optional | Langfuse server URL (default: `https://cloud.langfuse.com`) |
-| `LANGFUSE_ENABLED` | Optional | Explicitly disable Langfuse integration (set to `false` to disable even if keys are present) |
-| `RAISE_ON_AGENT_FAIL` | Optional | Whether to raise exceptions on agent failure (default: `true`) |
-| `AGENT_INPUT_CHAR_CAP` | Optional | Maximum input character count per agent (overrides `agents.yaml`) |
-| `AGENT_OUTPUT_CHAR_CAP` | Optional | Maximum output character count per agent (overrides `agents.yaml`) |
 | `AGENT_OUTPUT_TOKEN_CAP` | Optional | Maximum output token limit per agent (overrides `agents.yaml`; `0` = no limit) |
 | `STRICT_OUTPUT_TOKEN_CAP_OVERRIDE` | Optional | If `true`, ignore per‑agent `max_output` and enforce `AGENT_OUTPUT_TOKEN_CAP` globally (default: `false`) |
+| `LANGFUSE_PUBLIC_KEY` | Optional | Langfuse public API key (enables observability) |
+| `LANGFUSE_SECRET_KEY` | Optional | Langfuse secret API key (required if public key is set) |
+| `RAISE_ON_AGENT_FAIL` | Optional | Whether to raise exceptions on agent failure (default: `true`) |
 
-**Note**: The variables `DB_FILE`, `LOG_LEVEL`, `AGENT_INPUT_CHAR_CAP`, `AGENT_OUTPUT_CHAR_CAP`, `AGENT_OUTPUT_TOKEN_CAP`, and `STRICT_OUTPUT_TOKEN_CAP_OVERRIDE` override YAML configuration defaults; all other constants are defined in YAML files and cannot be overridden by environment variables.
-
-## Configuration (YAML‑based)
-
-The project uses a centralized YAML‑based configuration system located in the `config/` directory:
-
-- `paths.yaml` – directory and file names
-- `agents.yaml` – agent limits and snapshot settings
-- `providers.yaml` – provider‑data file names and URLs
-- `ui.yaml` – UI colors and attachment file types
-- `logging.yaml` – default log level
-
-Each file is validated with Pydantic at import time; missing or malformed keys raise immediate errors. For a full configuration reference, see [CONFIG.md](CONFIG.md).
+For a complete reference of all environment variables, YAML files, derived paths, and agent caps, see [CONFIG.md](CONFIG.md).
 
 ## Provider Data (Dynamic Capabilities & Pricing)
 
