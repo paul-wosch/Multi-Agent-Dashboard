@@ -22,7 +22,7 @@
 - Symptom: Graph export to PNG/PDF fails with `dot: command not found`.
 - Fix: Install system Graphviz (`apt install graphviz` or `brew install graphviz`) if you plan to render files. In-browser Streamlit graphviz_chart usually works without the binary.
 
-### Migration issues / `_REQUIRES_REBUILD`
+### Migration issues / destructive changes
 
 - Symptom: Migrations require table rebuilds; DB is non-empty.
 - Fix: Back up DB, then run the rebuild tool in dry-run mode and then execute with backup enabled:

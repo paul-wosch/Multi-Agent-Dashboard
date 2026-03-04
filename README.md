@@ -244,7 +244,7 @@ For a deeper architecture walkthrough and the repository layout, see [docs/ARCHI
 - To generate migrations (recommended after `pip install -e .`):
   - `python -m multi_agent_dashboard.db.infra.generate_migration my_change --dry-run`
   - `python -m multi_agent_dashboard.db.infra.generate_migration my_change`
-- For migrations tagged `_REQUIRES_REBUILD` on non-empty DBs, use the sqlite_rebuild tool (see [docs/MIGRATIONS.md](docs/MIGRATIONS.md) for full instructions and caveats).
+- For migrations that require rebuilds on non-empty DBs, use the sqlite_rebuild tool (see [docs/MIGRATIONS.md](docs/MIGRATIONS.md) for full instructions and caveats).
 
 ---
 
@@ -281,7 +281,7 @@ Developer checklist (quick):
 - Update `schema.py` for DB changes (if any)
 - Run `generate_migration.py --dry-run`, review diffs, then run without `--dry-run`
 - Start the app or run scripts that call `init_db` to apply migrations
-- If `_REQUIRES_REBUILD` appears and DB is non-empty, run `sqlite_rebuild.py` with backups
+- If a migration requires rebuilds (detected via MIGRATION-META) and DB is non-empty, run `sqlite_rebuild.py` with backups
 - Add tests for new behavior and include them under `tests/`
 - Submit a PR with a clear description and migration notes
 

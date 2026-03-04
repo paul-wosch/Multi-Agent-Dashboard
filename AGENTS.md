@@ -593,7 +593,7 @@ For explicit control, call `LLMClient.flush_langfuse()` before exit. An automati
 
 ### Rebuilding SQLite Database
 
-**Rebuilding SQLite database (for non-empty DBs with `_REQUIRES_REBUILD` migrations):**
+**Rebuilding SQLite database (for non-empty DBs with migrations that require rebuilds):**
 
 ```bash
 # Preview rebuild plan
@@ -610,7 +610,7 @@ python src/multi_agent_dashboard/db/infra/sqlite_rebuild.py --all-with-diffs dat
 - The canonical schema is defined in `db/infra/schema.py`.
 - Migrations are generated automatically via `generate_migration.py`.
 - Migration files are stored in `data/migrations/` with sequential numbering.
-- Filenames ending with `_REQUIRES_REBUILD` indicate destructive changes that require `sqlite_rebuild.py`.
+- Destructive changes that require `sqlite_rebuild.py` are indicated by the `rebuild.requires_rebuild` metadata in the MIGRATION-META header, not by filename suffixes. (The `_REQUIRES_REBUILD` suffix in some filenames is a legacy artifact.)
 
 ### Fresh DB Heuristic
 
