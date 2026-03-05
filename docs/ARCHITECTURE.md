@@ -338,26 +338,48 @@ This appendix provides visual representations of the Multi‑Agent Dashboard arc
 ### Diagram 1: Basic Layered Architecture
 
 ```mermaid
-graph TD
-    UI["UI Layer<br/>ui/"]
-    Service["Service Layer<br/>db/services.py"]
-    Persistence["Persistence Layer<br/>db/*.py"]
-    DBInfra["DB Infrastructure<br/>db/infra/"]
-    Engine["Engine Layer<br/>engine/"]
-    Runtime["Runtime Layer<br/>runtime/"]
-    LLMClient["LLM Client Layer<br/>llm_client/"]
-    Models["Models & Result DTOs<br/>models.py + engine/"]
-    Shared["Shared Utilities<br/>shared/"]
-    
-    UI --> Service
-    Service --> Persistence
-    Persistence --> DBInfra
-    Service --> Engine
-    Engine --> Runtime
-    Runtime --> LLMClient
-    LLMClient --> Models
-    Shared -.-> Engine
-    Shared -.-> Runtime
+flowchart TB
+
+subgraph UI["UI Layer"]
+    Streamlit["Streamlit UI"]
+end
+
+subgraph ServiceLayer["Service Layer"]
+    Services["RunService • AgentService • PipelineService"]
+end
+
+subgraph PersistenceLayer["Persistence Layer"]
+    DAO["Data Access Objects"]
+    DBInfraCore["Schema • Migrations • DB Core"]
+    SQLite[(SQLite)]
+end
+
+subgraph EngineRuntimeLayer["Engine & Runtime Layer"]
+    EngineCore["MultiAgentEngine"]
+    RuntimeCore["AgentRuntime"]
+end
+
+subgraph LLMClientLayer["LLM Client Layer"]
+    LLMClientCore["LLM Client"]
+end
+
+subgraph Shared["Shared Utilities"]
+    SharedUtils["Config • Instrumentation • Hooks"]
+end
+
+subgraph ModelsLayer["Models & Result DTOs"]
+    ModelsCore["AgentSpec • PipelineSpec • Results"]
+end
+
+UI --> ServiceLayer
+ServiceLayer ---> PersistenceLayer
+DAO --> DBInfraCore --> SQLite
+ServiceLayer --> EngineRuntimeLayer
+EngineCore --> RuntimeCore
+EngineRuntimeLayer --> LLMClientLayer
+Shared -.-> EngineRuntimeLayer
+LLMClientLayer -.-> ModelsLayer
+EngineRuntimeLayer -.-> ModelsLayer
 ```
 
 *Shows the seven core layers and their directional dependencies. Dashed lines indicate advisory/utility relationships.*
@@ -365,18 +387,20 @@ graph TD
 ### Diagram 2: Compact Flow Chart
 
 ```mermaid
-graph TD
-    A[UI: User triggers pipeline run] --> B["Engine: run_seq()"]
-    B --> C["Runtime: AgentRuntime.run()"]
-    C --> D["LLM Client: invoke_agent()"]
-    D --> E[Provider-specific adapter]
-    E --> F[LangChain init_chat_model]
-    F --> G["LLM API call (tools if configured, Langfuse)"]
-    G --> H[Response normalized]
-    H --> I[Runtime processes output]
-    I --> J[Engine aggregates results]
-    J --> K["RunService: save_run()"]
-    K --> L[UI displays results]
+flowchart TB
+User["User starts pipeline"] --> Engine["MultiAgentEngine.run_seq()"]
+Engine --> Runtime["AgentRuntime.run()"]
+Runtime --> LLMClient["LLMClient.invoke_agent()"]
+LLMClient --> Provider["Provider-specific adapter"]
+Provider --> LangChain["LangChain init_chat_model"]
+LangChain --> LLM["LLM API call (tools if configured, Langfuse)"]
+LLM --> Normalize["Normalize response"]
+Normalize --> State["Update pipeline state"]
+State --> Next["Next agent step"]
+Next --> Engine
+Engine --> Result["Engine aggregates results"]
+Result --> Save["RunService.save_run()"]
+Save --> UI["UI displays results"]
 ```
 
 *High‑level flow of a pipeline execution from user action to result display.*
@@ -385,6 +409,7 @@ graph TD
 
 ```mermaid
 sequenceDiagram
+    autonumber
     participant U as UI
     participant S as RunService
     participant E as Engine
@@ -463,72 +488,79 @@ This appendix contains extended versions of the architecture diagrams for reader
 
 ```mermaid
 graph TD
-    subgraph "UI Layer"
+    subgraph UILayer["UI"]
         UI["Streamlit UI<br/>ui/app.py"]
-        UIModes["UI Modes<br/>agent_editor_mode.py, run_mode.py, history_mode.py"]
+        UIModes["Run Mode • Agent Editor • History Mode"]
     end
     
-    subgraph "Service Layer"
+    subgraph ServiceLayer["Services"]
         RunService[RunService]
         AgentService[AgentService]
         PipelineService[PipelineService]
     end
     
-    subgraph "Persistence Layer"
-        AgentsDAO[AgentDAO]
-        PipelinesDAO[PipelineDAO]
-        RunsDAO[RunDAO]
+    subgraph PersistenceLayer["Persistence"]
+        subgraph DAOs["Data Access Objects"]
+            AgentsDAO[AgentDAO]
+            RunsDAO[RunDAO]
+            PipelinesDAO[PipelineDAO]
+        end
+        subgraph DBInfraLayer["DB Infrastructure"]
+            Schema["Schema & Migrations<br/>db/infra/schema.py"]
+            Core["Core DB<br/>db/infra/core.py"]
+        end
     end
     
-    subgraph "DB Infrastructure"
-        Schema["Schema & Migrations<br/>db/infra/schema.py"]
-        Core["Core DB<br/>db/infra/core.py"]
-    end
+    SQLite[(SQLite)]
+
     
-    subgraph "Engine Layer"
+    subgraph EngineLayer["Engine"]
         MultiAgentEngine["MultiAgentEngine.run_seq()"]
         Orchestrator[Orchestrator]
         StateManager[StateManager]
     end
     
-    subgraph "Runtime Layer"
+    subgraph RuntimeLayer["Runtime"]
         AgentRuntime["AgentRuntime.run()"]
         FileProcessor[FileProcessor]
         ToolConverter[ToolConverter]
     end
     
-    subgraph "LLM Client Layer"
+    subgraph LLMClientLayer["LLM Client"]
         LLMClient["LLMClient.invoke_agent()"]
         ProviderAdapters[Provider Adapters]
         ToolIntegration[Tool Integration]
     end
     
-    subgraph "Models & Result DTOs"
+    subgraph ModelsResultsLayer["Models & Result DTOs"]
         AgentSpec[AgentSpec]
         PipelineSpec[PipelineSpec]
         EngineResult[EngineResult]
     end
     
-    subgraph "Shared Utilities"
-        Instrumentation[Instrumentation]
-        Config[Configuration]
-        Observability["Observability (Langfuse)"]
+    subgraph SharedLayer["Shared Utilities"]
+        SharedUtils["Config • Instrumentation • Hooks"]
+    end
+
+    subgraph Observability["Observability"]
+        Langfuse[Langfuse]
     end
     
-    UI --> RunService
-    RunService --> MultiAgentEngine
+    UILayer --> ServiceLayer
+    UI --> UIModes
     RunService --> RunsDAO
+    RunService --> MultiAgentEngine
+    
     AgentService --> AgentsDAO
     PipelineService --> PipelinesDAO
-    AgentsDAO --> Schema
-    PipelinesDAO --> Schema
-    RunsDAO --> Schema
+    PersistenceLayer --> SQLite
     MultiAgentEngine --> AgentRuntime
     AgentRuntime --> LLMClient
     LLMClient --> ProviderAdapters
     LLMClient --> ToolIntegration
-    Instrumentation -.-> AgentRuntime
-    Config -.-> LLMClient
+    SharedUtils -.-> EngineLayer
+    SharedUtils -.-> RuntimeLayer
+    SharedUtils -.-> LLMClientLayer
     Observability -.-> LLMClient
     AgentSpec -.-> MultiAgentEngine
     PipelineSpec -.-> MultiAgentEngine
@@ -540,7 +572,7 @@ graph TD
 ### Diagram 6: Extended Flow Chart
 
 ```mermaid
-graph TD
+flowchart TD
     A["UI: User triggers pipeline run<br/>ui/run_mode.py"] --> C["Engine: MultiAgentEngine.run_seq()<br/>engine/engine_orchestrator.py"]
     C --> D[For each agent step]
     D --> E["Runtime: AgentRuntime.run()<br/>runtime/agent_runtime.py"]
@@ -574,6 +606,7 @@ graph TD
 
 ```mermaid
 sequenceDiagram
+    autonumber
     participant U as UI (run_mode.py)
     participant S as RunService
     participant D as RunDAO
@@ -741,3 +774,39 @@ classDiagram
 ```
 
 *Complete interface specification with data‑transfer objects (DTOs) and their fields. Shows the full type signature of cross‑layer calls. Note: `AgentRuntime` already holds an `AgentSpec` instance; `LLMClient.invoke_agent`'s `agent` parameter is a LangChain agent instance, not an `AgentSpec`. The signatures reflect the actual code interfaces.*
+
+### Diagram 9: Package Dependency graph
+
+```mermaid
+flowchart LR
+    db --> config
+    db --> shared
+    engine --> config
+    engine --> llm_client
+    engine --> models
+    engine --> provider_data
+    engine --> runtime
+    engine --> shared
+    llm_client --> models
+    llm_client --> observability
+    llm_client --> shared
+    llm_client --> tool_integration
+    models --> db
+    models --> engine
+    models --> runtime
+    observability --> config
+    provider_data --> config
+    runtime --> config
+    runtime --> llm_client
+    runtime --> tool_integration
+    shared --> provider_data
+    tool_integration --> shared
+    ui --> config
+    ui --> db
+    ui --> engine
+    ui --> llm_client
+    ui --> models
+    ui --> shared
+```
+
+*Auto-generated diagram showing true architectural relationships for all packages*
