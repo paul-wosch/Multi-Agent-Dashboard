@@ -775,7 +775,7 @@ classDiagram
 
 *Complete interface specification with data‑transfer objects (DTOs) and their fields. Shows the full type signature of cross‑layer calls. Note: `AgentRuntime` already holds an `AgentSpec` instance; `LLMClient.invoke_agent`'s `agent` parameter is a LangChain agent instance, not an `AgentSpec`. The signatures reflect the actual code interfaces.*
 
-### Diagram 9: Package Dependency graph
+### Diagram 9: Package Dependency Graph
 
 ```mermaid
 flowchart LR
