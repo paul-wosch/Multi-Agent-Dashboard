@@ -355,6 +355,11 @@ def render_warnings(result: EngineResult):
         st.markdown(f"- {w}")
 
 
+def render_task_block():
+    with st.expander("Task", expanded=False):
+        st.code(st.session_state.last_task)
+
+
 def render_output_block(
     label: str,
     text: Any,
@@ -422,6 +427,8 @@ def render_final_output(
         st.info("No output yet.")
         return
 
+    render_task_block()
+
     render_output_block(
         "Final Output",
         result.final_output,
@@ -441,6 +448,8 @@ def render_final_output(
 
 
 def render_agent_outputs(result: EngineResult, steps: List[str]):
+    render_task_block()
+
     for agent in steps:
         out = result.memory.get(agent, "")
         render_output_block(
