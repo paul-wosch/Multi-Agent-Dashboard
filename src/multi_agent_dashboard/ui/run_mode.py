@@ -366,6 +366,7 @@ def render_output_block(
     *,
     is_json_hint: Optional[bool] = None,
     key_prefix: str,
+    expanded: Optional[bool] = None,
 ):
     """
     Shared viewer: try JSON, else Markdown/Code toggle.
@@ -376,7 +377,11 @@ def render_output_block(
       - any other string -> show Markdown/Code toggle
       - None -> show "No output."
     """
-    with st.expander(label, expanded=(label.lower().startswith("final output"))):
+    if expanded is not None:
+        expanded = expanded
+    else:
+        expanded = label.lower().startswith("final output")
+    with st.expander(label, expanded=expanded):
         if text is None:
             st.info("No output.")
             return

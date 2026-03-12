@@ -150,15 +150,44 @@ def render_history_mode():
     final_is_json = run["final_is_json"]
     final_model = run["final_model"]
 
+    st.divider()
+
+    run_id_str = f"Run {run_id}"
+    agent_names = get_agent_names_for_run(run_id).replace(", ", " → ")
+    tool_usages = tool_usages or []
+    st.header(run_id_str)
+    st.markdown(f"Agent(s): `{agent_names}`")
+    with st.expander("Task", expanded=False):
+        st.code(task)
+
+    # Final output viewer
+    from multi_agent_dashboard.ui.run_mode import render_output_block
+
+    header = "Final Output"
+    if final_model:
+        header += f" · {final_model}"
+
+    render_output_block(
+        header,
+        final,
+        is_json_hint=bool(final_is_json),
+        key_prefix=f"hist_run_{run_id}_final",
+        expanded=False
+    )
+
     # Run-level badge for strict schema exit
     if run.get("strict_schema_exit"):
         st.error("This run exited early due to strict schema validation.", icon=":material/error:")
+
+    st.divider()
 
     # Shared cost & latency rendering for stored metrics
     # Pass agent_run_configs so we can populate the Model column for historic runs.
     metrics_view = metrics_view_from_db_rows(metrics, agent_run_configs)
     if metrics_view:
-        render_cost_latency_section(metrics_view, title_suffix="Stored")
+        render_cost_latency_section(metrics_view, title_suffix=run_id_str)
+
+    st.divider()
 
     # ---------- Tools & Advanced Configuration (historic, per run snapshot) ----------
     agent_run_cfg_by_name: Dict[str, dict] = {}
@@ -173,13 +202,13 @@ def render_history_mode():
     render_agent_config_section(
         config_view,
         tool_usages_by_agent,
-        title_suffix="stored",
+        title_suffix=run_id_str,
         is_historic=True,
     )
 
     # Per-call Tool Usage Overview for stored runs
     st.markdown("---")
-    st.subheader("Tool Usage Overview (per call, stored)")
+    st.subheader(f"Tool Usage Overview (per call, {run_id_str})")
     df_calls_stored = build_tool_calls_overview(
         tool_usages_by_agent,
         is_historic=True,
@@ -190,24 +219,9 @@ def render_history_mode():
         st.info("No tool calls recorded for this run.")
 
     st.markdown("---")
-    st.subheader(f"Run {run_id}")
-    st.code(task)
-
-    header = "Final Output"
-    if final_model:
-        header += f" · {final_model}"
-
-    # Final output viewer
-    from multi_agent_dashboard.ui.run_mode import render_output_block
-
-    render_output_block(
-        header,
-        final,
-        is_json_hint=bool(final_is_json),
-        key_prefix=f"hist_run_{run_id}_final",
-    )
 
     # Per-agent outputs
+    st.subheader("Per-Agent Outputs")
     for a in agents:
         name = a["agent_name"]
         output = a["output"]
@@ -380,6 +394,8 @@ def render_history_mode():
         },
         "agents": export_agents,
     }
+
+    st.divider()
 
     st.download_button(
         "Download Run as JSON",
