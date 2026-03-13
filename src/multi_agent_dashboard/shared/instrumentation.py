@@ -134,10 +134,6 @@ def _collect_tool_calls(raw_metrics: Dict[str, Any] | None) -> List[Dict[str, An
                 _recurse(msg)
         for key in ("agent_response", "response", "result"):
             _recurse(node_dict.get(key))
-        output = node_dict.get("output")
-        if isinstance(output, list):
-            for entry in output:
-                _recurse(entry)
         events = node_dict.get("instrumentation_events") or node_dict.get("_multi_agent_dashboard_events")
         if isinstance(events, list):
             for event in events:
