@@ -210,10 +210,7 @@ class ResponseProcessor:
             messages = None
             # Prefer actual message objects/structures from the returned result
             if isinstance(result, dict):
-                messages = result.get("messages") or result.get("messages", None)
-                # also consider nested agent_response.messages
-                if not messages and "agent_response" in result and isinstance(result["agent_response"], dict):
-                    messages = result["agent_response"].get("messages") or None
+                messages = result.get("messages", None)
             if messages is None:
                 # Try attribute access (some Agent result objects provide .messages)
                 try:
