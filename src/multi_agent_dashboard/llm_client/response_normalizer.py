@@ -193,17 +193,6 @@ class ResponseNormalizer:
             if isinstance(src.get("content_blocks"), list):
                 _append_list("content_blocks", src.get("content_blocks"))
 
-            output_entries = src.get("output")
-            if isinstance(output_entries, list):
-                for entry in output_entries:
-                    if not isinstance(entry, dict):
-                        continue
-                    cb_entry = entry.get("content_blocks")
-                    if isinstance(cb_entry, list):
-                        _append_list("content_blocks", cb_entry)
-                    _merge_agent_response(entry.get("response"))
-                    _merge_agent_response(entry.get("result"))
-                    _merge_agent_response(entry.get("agent_response"))
 
             nested = src.get("agent_response")
             if nested is not None:
