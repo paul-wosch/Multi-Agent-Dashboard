@@ -9,9 +9,11 @@ Key functions:
 - `_extract_instrumentation_events`: Extract instrumentation events from raw
   metrics with backward compatibility support
 - `_collect_content_blocks`: Aggregate content blocks from instrumentation events
+  and raw metrics
 - `_structured_from_instrumentation`: Extract structured output from
   instrumentation events
-- `_collect_tool_calls`: Collect tool call information from content blocks
+- `_collect_tool_calls`: Collect tool call information from raw metrics
+  (recursively searches messages, response, result, etc.)
 - `_tool_usage_entry_from_payload`: Create standardized tool usage entries from
   tool call payloads
 
@@ -132,7 +134,7 @@ def _collect_tool_calls(raw_metrics: Dict[str, Any] | None) -> List[Dict[str, An
         if isinstance(messages, list):
             for msg in messages:
                 _recurse(msg)
-        for key in ("agent_response", "response", "result"):
+        for key in ("response", "result"):
             _recurse(node_dict.get(key))
         events = node_dict.get("instrumentation_events") or node_dict.get("_multi_agent_dashboard_events")
         if isinstance(events, list):

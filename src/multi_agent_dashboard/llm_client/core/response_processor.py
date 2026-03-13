@@ -11,7 +11,7 @@ Key extraction capabilities:
 - Usage metadata extraction (tokens, latency, costs)
 - Tool call extraction and normalization
 - Content block merging and text extraction
-- Nested agent_response chain flattening
+- Nested response chain flattening
 - Provider-specific response format handling
 
 The response processor ensures that regardless of the underlying LLM

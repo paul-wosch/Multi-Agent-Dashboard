@@ -3,14 +3,13 @@ Response Normalizer for standardizing LLM provider responses.
 
 This module normalizes diverse LLM provider responses into consistent,
 serializable dictionaries. It handles provider-specific response formats,
-extracts tool calls, merges content blocks, and flattens nested agent
-response chains for uniform processing by the agent pipeline.
+extracts tool calls, merges content blocks, and flattens nested response structures for uniform processing by the agent pipeline.
 
 Key normalization tasks:
 - Convert provider SDK objects to serializable dictionaries
 - Merge multiple content blocks into single text responses
 - Extract and structure tool calls from provider-specific formats
-- Handle nested agent_response chains (e.g., from LangChain agents)
+- Flatten nested response structures
 - Preserve metadata (usage, tokens, costs) across normalization
 
 The normalizer ensures that regardless of the underlying LLM provider,
@@ -24,7 +23,7 @@ logger = logging.getLogger(__name__)
 class ResponseNormalizer:
     """
     Convert SDK/LangChain responses into serializable dicts, merging content blocks,
-    extracting tool calls, and flattening nested agent_response chains.
+    extracting tool calls, and flattening nested response structures.
     """
 
     @staticmethod
@@ -50,7 +49,7 @@ class ResponseNormalizer:
         Convert SDK/LangChain response into a serializable dict (best-effort),
         avoiding noisy Pydantic serializer warnings from the SDK's internal model graph.
         Ensure `content_blocks` and `usage_metadata` are surfaced when present.
-        Also flatten nested 'agent_response' shapes commonly returned by LangChain agents.
+        Also flatten nested response shapes for uniform processing.
         """
         out: Dict[str, Any] = {}
         try:
@@ -136,75 +135,7 @@ class ResponseNormalizer:
         except Exception:
             pass
 
-        # -------------------------
-        # Flatten LangChain agent_response chains (LangChain 2025/2026)
-        # -------------------------
-        seen_agent_responses = set()
 
-        def _append_list(dest_key: str, value: Any) -> None:
-            if value is None:
-                return
-            existing = out.get(dest_key)
-            if existing is None:
-                existing = []
-                out[dest_key] = existing
-            elif not isinstance(existing, list):
-                existing = [existing]
-                out[dest_key] = existing
-            if isinstance(value, list):
-                existing.extend(value)
-            else:
-                existing.append(value)
-
-        def _ensure_key_from_source(source: dict, src_key: str, dest_key: Optional[str] = None) -> None:
-            if dest_key is None:
-                dest_key = src_key
-            if dest_key in out:
-                return
-            if src_key in source and source[src_key] is not None:
-                out[dest_key] = source[src_key]
-
-        def _prepare_source(candidate: Any) -> Optional[Dict[str, Any]]:
-            if candidate is None:
-                return None
-            if isinstance(candidate, dict):
-                return candidate
-            normalized = ResponseNormalizer.normalize_to_dict(candidate)
-            if isinstance(normalized, dict):
-                return normalized
-            return None
-
-        def _merge_agent_response(source: Any) -> None:
-            src = _prepare_source(source)
-            if not src:
-                return
-            marker = id(src)
-            if marker in seen_agent_responses:
-                return
-            seen_agent_responses.add(marker)
-
-            for key in ("usage", "usage_metadata", "structured_response", "structured", "messages"):
-                _ensure_key_from_source(src, key)
-
-            _append_list("tool_calls", src.get("tool_calls"))
-            _append_list("instrumentation_events", src.get("instrumentation_events"))
-            _append_list("_multi_agent_dashboard_events", src.get("_multi_agent_dashboard_events"))
-
-            if isinstance(src.get("content_blocks"), list):
-                _append_list("content_blocks", src.get("content_blocks"))
-
-
-            nested = src.get("agent_response")
-            if nested is not None:
-                _merge_agent_response(nested)
-
-        _merge_agent_response(response)
-        _merge_agent_response(out.get("agent_response"))
-        try:
-            attr_agent_resp = getattr(response, "agent_response", None)
-        except Exception:
-            attr_agent_resp = None
-        _merge_agent_response(attr_agent_resp)
 
         events = out.get("instrumentation_events")
         events_alt = out.get("_multi_agent_dashboard_events")

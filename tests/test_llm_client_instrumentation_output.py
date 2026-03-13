@@ -35,11 +35,9 @@ def test_invoke_agent_merges_instrumentation_and_content_blocks() -> None:
     class FakeAgent:
         def invoke(self, state: Any, context: Any = None, config=None):
             return {
-                "agent_response": {
-                    "_multi_agent_dashboard_events": fake_events,
-                    "instrumentation_events": fake_events,
-                    "content_blocks": fake_events[0]["content_blocks"],
-                },
+                "_multi_agent_dashboard_events": fake_events,
+                "instrumentation_events": fake_events,
+                "content_blocks": fake_events[0]["content_blocks"],
                 "text": '{"answer":"ok"}',
             }
 
@@ -62,10 +60,7 @@ def test_invoke_agent_extracts_tokens_from_nested_usage() -> None:
     class FakeAgent:
         def invoke(self, state: Any, context: Any = None, config=None):
             return {
-                "agent_response": {
-                    "usage": {"input_tokens": 12, "completion_tokens": 34},
-                    "text": "{}",
-                },
+                "usage": {"input_tokens": 12, "completion_tokens": 34},
                 "text": "{}",
             }
 
