@@ -63,14 +63,8 @@ def test_invoke_agent_extracts_tokens_from_nested_usage() -> None:
         def invoke(self, state: Any, context: Any = None, config=None):
             return {
                 "agent_response": {
-                    "output": [
-                        {
-                            "response": {
-                                "usage": {"input_tokens": 12, "completion_tokens": 34},
-                                "text": "{}",
-                            }
-                        }
-                    ]
+                    "usage": {"input_tokens": 12, "completion_tokens": 34},
+                    "text": "{}",
                 },
                 "text": "{}",
             }
