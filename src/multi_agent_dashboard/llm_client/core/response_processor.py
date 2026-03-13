@@ -35,48 +35,7 @@ class ResponseProcessor:
     extracting usage, tool calls, content blocks, and text from raw agent results.
     """
     
-    @staticmethod
-    def extract_usage_from_candidate(candidate: Any) -> Optional[Dict[str, Any]]:
-        """
-        Recursively search a candidate dict for usage or usage_metadata.
-        
-        This method performs a deep search through nested structures to find usage
-        metadata, checking common field names and nested structures like agent_response
-        and output lists.
-        
-        Args:
-            candidate: Dictionary or object to search for usage data
-            
-        Returns:
-            Usage dictionary containing token counts and other metadata, or None if not found
-        """
-        if not isinstance(candidate, dict):
-            return None
-        usage_payload = candidate.get("usage") or candidate.get("usage_metadata")
-        if isinstance(usage_payload, dict) and usage_payload:
-            return usage_payload
 
-        nested = candidate.get("agent_response")
-        if isinstance(nested, dict):
-            payload = ResponseProcessor.extract_usage_from_candidate(nested)
-            if payload:
-                return payload
-
-        output_entries = candidate.get("output")
-        if isinstance(output_entries, list):
-            for entry in output_entries:
-                if not isinstance(entry, dict):
-                    continue
-                payload = ResponseProcessor.extract_usage_from_candidate(entry.get("response"))
-                if payload:
-                    return payload
-                payload = ResponseProcessor.extract_usage_from_candidate(entry.get("result"))
-                if payload:
-                    return payload
-                payload = ResponseProcessor.extract_usage_from_candidate(entry.get("agent_response"))
-                if payload:
-                    return payload
-        return None
     
     @staticmethod
     def extract_usage_from_messages(messages: Any) -> Dict[str, Any]:
@@ -509,12 +468,7 @@ class ResponseProcessor:
                 except Exception:
                     logger.debug("Failed to attach message usage into raw_dict", exc_info=True)
             
-            nested_usage = ResponseProcessor.extract_usage_from_candidate(raw_dict.get("agent_response"))
-            if not nested_usage:
-                try:
-                    nested_usage = ResponseProcessor.extract_usage_from_candidate(getattr(result, "agent_response", None))
-                except Exception:
-                    nested_usage = None
+            nested_usage = raw_dict.get("usage") or raw_dict.get("usage_metadata")
             if isinstance(nested_usage, dict):
                 if input_tokens is None:
                     input_tokens = nested_usage.get("input_tokens") or nested_usage.get(
