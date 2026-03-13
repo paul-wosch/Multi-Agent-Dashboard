@@ -79,38 +79,77 @@ class ResponseProcessor:
         return None
     
     @staticmethod
-    def extract_usage_from_messages(messages: Any) -> Optional[Dict[str, Any]]:
+    def extract_usage_from_messages(messages: Any) -> Dict[str, Any]:
         """
-        Extract usage metadata from the last AIMessage-like object in a messages list.
+        Extract and accumulate usage metadata from all AIMessage-like objects.
         
-        This method searches through message structures from the end to find usage
-        metadata (token counts, etc.) in various formats including usage_metadata,
-        usage, and response_metadata fields.
-        
-        Args:
-            messages: List of message objects or dictionaries to search
-            
-        Returns:
-            Usage dictionary containing token counts and other metadata, or None if not found
+        Returns dict with accumulated input_tokens and output_tokens (both may be 0).
         """
+        result = {"input_tokens": 0, "output_tokens": 0}
         if not isinstance(messages, list):
-            return None
-        for msg in reversed(messages):
+            return result
+        
+        for msg in messages:  # NOT reversed - we want ALL messages
             try:
-                # dict-shaped message
+                # Determine if this is an AI message (where token usage is relevant)
+                is_ai = False
+                if isinstance(msg, dict):
+                    is_ai = msg.get("type") == "ai"
+                else:
+                    # Check LangChain AIMessage types
+                    msg_type = getattr(msg, "type", "")
+                    if msg_type == "ai" or hasattr(msg, "usage_metadata") or hasattr(msg, "usage"):
+                        is_ai = True
+                
+                if not is_ai:
+                    continue
+                
+                # Extract usage payload (same logic as before)
                 if isinstance(msg, dict):
                     usage_payload = msg.get("usage_metadata") or msg.get("usage") or msg.get("response_metadata")
-                    if isinstance(usage_payload, dict) and usage_payload:
-                        return usage_payload
-                # object-shaped message
-                usage_payload = getattr(msg, "usage_metadata", None) or getattr(msg, "usage", None) or getattr(msg,
-                                                                                                               "response_metadata",
-                                                                                                               None)
-                if isinstance(usage_payload, dict) and usage_payload:
-                    return usage_payload
+                else:
+                    usage_payload = getattr(msg, "usage_metadata", None) or getattr(msg, "usage", None) or getattr(msg,
+                                                                                                                   "response_metadata",
+                                                                                                                   None)
+                
+                if not isinstance(usage_payload, dict):
+                    continue
+                    
+                # Extract token counts with fallback logic (preserve zero values)
+                input_tokens = usage_payload.get("input_tokens")
+                if input_tokens is None:
+                    input_tokens = usage_payload.get("prompt_tokens")
+                if input_tokens is None:
+                    input_tokens = usage_payload.get("prompt_token_count")
+                
+                output_tokens = usage_payload.get("output_tokens")
+                if output_tokens is None:
+                    output_tokens = usage_payload.get("completion_tokens")
+                if output_tokens is None:
+                    output_tokens = usage_payload.get("completion_token_count")
+                
+                # Also check nested token_usage field
+                token_usage = usage_payload.get("token_usage")
+                if isinstance(token_usage, dict):
+                    if input_tokens is None:
+                        input_tokens = token_usage.get("prompt_tokens")
+                        if input_tokens is None:
+                            input_tokens = token_usage.get("input_tokens")
+                    if output_tokens is None:
+                        output_tokens = token_usage.get("completion_tokens")
+                        if output_tokens is None:
+                            output_tokens = token_usage.get("output_tokens")
+                
+                # Accumulate (treat None as 0)
+                if isinstance(input_tokens, (int, float)):
+                    result["input_tokens"] += int(input_tokens)
+                if isinstance(output_tokens, (int, float)):
+                    result["output_tokens"] += int(output_tokens)
+                    
             except Exception:
-                continue
-        return None
+                continue  # Middleware must not raise
+        
+        return result
     
     @staticmethod
     def extract_tool_info_from_messages(messages: Any) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
