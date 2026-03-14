@@ -536,7 +536,7 @@ class RunDAO:
                             cfg.get("reasoning_summary"),
                             json.dumps(cfg.get("reasoning_config") or {}),
                             # Reserved for future options such as temperature
-                            json.dumps(cfg.get("extra") or {}),
+                            json.dumps(cfg.get("extra")) if cfg.get("extra") is not None else None,
                             cfg.get("system_prompt_template"),
                             cfg.get("max_output"),
                             cfg.get("max_output_effective"),

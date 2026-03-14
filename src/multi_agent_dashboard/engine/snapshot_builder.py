@@ -123,8 +123,7 @@ class RunSnapshotBuilder:
         except Exception:
             structured_response = None
 
-        # Record whether instrumentation middleware was attached to the agent (if agent runtime set it)
-        instrumentation_attached_flag = bool(metrics.get("instrumentation_attached"))
+
 
         extra_dict: Dict[str, Any] = {}
         if content_blocks_summary is not None:
@@ -137,8 +136,8 @@ class RunSnapshotBuilder:
             extra_dict["instrumentation_events"] = instrumentation_events
         if structured_response is not None:
             extra_dict["structured_response"] = structured_response
-        if instrumentation_attached_flag:
-            extra_dict["instrumentation_attached"] = True
+        if not extra_dict:
+            extra_dict = None
 
         agent_config = {
             "model": agent.spec.model,

@@ -149,16 +149,6 @@ class AgentExecutor:
         try:
             used_langchain = bool(metrics.get("used_langchain_agent"))
             instrumentation_attached = bool(metrics.get("instrumentation_attached"))
-            has_content_blocks = bool(metrics.get("content_blocks"))
-            has_instrumentation_events = bool(metrics.get("instrumentation_events"))
-            # If instrumentation was attached at agent-create time but we still see no content blocks
-            if used_langchain and instrumentation_attached and not (has_content_blocks or has_instrumentation_events or metrics.get("detected_provider_profile")):
-                # Instrumentation expected for LangChain agents to capture content_blocks/tool traces
-                self._warn(
-                    f"[{agent_name}] Ran via LangChain with instrumentation attached but produced no content_blocks or instrumentation events. "
-                    "Confirm provider supports content_blocks or middleware hooks executed.",
-                    pipeline_state,
-                )
             # If instrumentation was not attached and LangChain used, warn once
             if used_langchain and not instrumentation_attached:
                 self._warn(
