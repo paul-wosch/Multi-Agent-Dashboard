@@ -168,7 +168,6 @@ def test_create_agent_for_spec_passes_response_format():
     # Ensure other parameters passed
     assert call_kwargs["model"] == mock_model
     assert call_kwargs["system_prompt"] is None
-    assert len(call_kwargs["middleware"]) == 1  # Instrumentation middleware
     assert call_kwargs["tools"] == []
 
 

@@ -8,7 +8,6 @@ binding, and chat model factory to create fully configured agent instances.
 
 Key responsibilities:
 - Coordinate agent creation across multiple specialized components
-- Apply instrumentation middleware for observability
 - Bind tools and structured output based on agent specification
 - Cache and reuse chat model instances for performance
 - Handle provider-specific agent configuration variations
@@ -161,13 +160,7 @@ class AgentCreationFacade:
             except Exception:
                 logger.debug("Unable to set provider info on agent instance", exc_info=True)
 
-            # If instrumentation was not attached, log an explicit warning so operators are aware
-            if not instrumentation_attached:
-                logger.warning(
-                    "create_agent_for_spec: instrumentation middleware was not attached for agent=%s. "
-                    "This may prevent collection of content_blocks/tool traces. See logs for details.",
-                    getattr(spec, "name", "<unnamed>"),
-                )
+
 
             return agent
         except Exception as e:

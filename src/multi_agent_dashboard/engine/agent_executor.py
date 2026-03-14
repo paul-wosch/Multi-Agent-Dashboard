@@ -145,19 +145,7 @@ class AgentExecutor:
         metrics = getattr(agent, "last_metrics", {}) or {}
         raw_metrics = metrics.get("raw") or {}
 
-        # If LangChain agent path was used but instrumentation appears missing, warn
-        try:
-            used_langchain = bool(metrics.get("used_langchain_agent"))
-            instrumentation_attached = bool(metrics.get("instrumentation_attached"))
-            # If instrumentation was not attached and LangChain used, warn once
-            if used_langchain and not instrumentation_attached:
-                self._warn(
-                    f"[{agent_name}] Ran via LangChain but instrumentation middleware was not attached. "
-                    "Enable instrumentation to capture content_blocks/tool traces.",
-                    pipeline_state,
-                )
-        except Exception:
-            logger.debug("Failed to validate instrumentation presence for agent=%s", agent_name, exc_info=True)
+
 
         # Extract config used for this agent call
         tc = metrics.get("tools_config")

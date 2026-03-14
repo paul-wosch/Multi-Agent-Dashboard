@@ -16,7 +16,7 @@ The package uses LangChain's unified init_chat_model interface internally while
 exposing a simplified, consistent API to the engine and UI layers.
 """
 # multi_agent_dashboard.llm_client package
-# Exports the main LLM client interface and instrumentation middleware.
+# Exports the main LLM client interface (instrumentation middleware is exported as None for compatibility).
 
 import sys
 
