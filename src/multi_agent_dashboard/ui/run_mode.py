@@ -177,6 +177,7 @@ def render_run_sidebar() -> Tuple[
         available_agents,
         default=base_steps,
         format_func=format_agent_label,
+        key="selected_steps",
     )
 
     # Persist Ad-hoc steps so they survive pipeline switching & reruns
