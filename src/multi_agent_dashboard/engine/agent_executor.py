@@ -219,36 +219,18 @@ class AgentExecutor:
         pipeline_state.memory[agent_name] = raw_output
         # last_output = raw_output  # Not needed here; engine loop tracks last_output
 
-        # ---- Prefer structured outputs surfaced via LangChain content_blocks or structured response ----
+        # ---- Prefer structured outputs surfaced via LLMClient or LangChain structured response ----
         parsed = None
-        # 1) If the LLM client included a canonical 'structured' key (created by LLMClient when with_structured_output returned a parsed object),
-        #    or when using LangChain agents, a top-level 'structured_response' key from the agent state.
+        # If the LLM client included a canonical 'structured' key
+        # (created by LLMClient when with_structured_output returned a parsed object),
+        # or when using LangChain agents, a top-level 'structured_response' key from the agent state.
         if isinstance(raw_metrics, dict):
             if "structured" in raw_metrics:
                 parsed = raw_metrics.get("structured")
             elif "structured_response" in raw_metrics:
                 parsed = raw_metrics.get("structured_response")
-            else:
-                # 2) Look through content_blocks for structured / structured_response / server_tool_result
-                cbs = raw_metrics.get("content_blocks") or raw_metrics.get("output") or []
-                if isinstance(cbs, list):
-                    for cb in cbs:
-                        if not isinstance(cb, dict):
-                            continue
-                        ctype = cb.get("type", "").lower()
-                        # Typical structured response block names
-                        if ctype in ("structured", "structured_response", "structured_output"):
-                            # block may carry its payload under 'value' / 'data' / 'json' / 'args'
-                            parsed = cb.get("value") or cb.get("data") or cb.get("json") or cb.get("args") or cb.get("output")
-                            break
-                        # Another pattern: provider returns a tool call with args that represent structured payload
-                        if ctype in ("tool_call", "server_tool_call") and isinstance(cb.get("args"), dict):
-                            # If agent declares output_vars with single key, try to use tool args as parsed output
-                            parsed = cb.get("args")
-                            # do not break here if you prefer more explicit; break for pragmatic mapping
-                            break
 
-        # 3) Fallback: try best-effort JSON parsing of the textual output
+        # Fallback: try best-effort JSON parsing of the textual output
         if parsed is None:
             parsed = LLMClient.safe_json(raw_output) if isinstance(raw_output, str) else None
 
