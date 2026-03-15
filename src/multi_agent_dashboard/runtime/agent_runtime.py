@@ -208,7 +208,6 @@ class AgentRuntime:
         input_tokens, output_tokens = extract_tokens_from_raw(raw, response)
 
         instrumentation_events = _extract_instrumentation_events(raw)
-        content_blocks = []
 
         # Base last_metrics stored for engine consumption
         self.last_metrics = {
@@ -216,7 +215,6 @@ class AgentRuntime:
             "output_tokens": output_tokens,
             "latency": response.latency,
             "raw": raw,
-            "content_blocks": content_blocks,
             "instrumentation_events": instrumentation_events,
             "tools_config": tc,
             "reasoning_config": rc,

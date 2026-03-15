@@ -103,7 +103,7 @@ def _collect_tool_calls(raw_metrics: Dict[str, Any] | None) -> List[Dict[str, An
         # Also collect web_search_call objects (OpenAI Responses API)
         if node_dict.get("type") == "web_search_call":
             calls.append(node_dict)
-        # Recurse into content list if present (OpenAI Responses API content blocks)
+        # Recurse into content list if present (OpenAI Responses API)
         content = node_dict.get("content")
         if isinstance(content, list):
             for item in content:
@@ -127,7 +127,7 @@ def _collect_tool_calls(raw_metrics: Dict[str, Any] | None) -> List[Dict[str, An
 def _tool_usage_entry_from_payload(payload: Dict[str, Any]) -> Dict[str, Any] | None:
     raw_type = payload.get("type") or payload.get("tool_type") or ""
     raw_type_l = str(raw_type).lower()
-    # Skip non-tool content blocks (e.g., text/reasoning)
+    # Skip non-tool entries (e.g., text/reasoning)
     if raw_type_l in ("text", "reasoning"):
         return None
     tool_type = payload.get("name") or payload.get("tool_type") or payload.get("type") or "unknown"

@@ -279,7 +279,7 @@ def build_export_from_engine_result(
         tools_config = run_cfg.get("tools_config")
         reasoning_config = run_cfg.get("reasoning_config")
 
-        # Extra from the per-run snapshot (these often include content_blocks, detected_provider_profile, instrumentation events)
+        # Extra from the per-run snapshot (these often include detected_provider_profile, instrumentation events)
         extra = run_cfg.get("extra") or {}
 
         agent_config = {

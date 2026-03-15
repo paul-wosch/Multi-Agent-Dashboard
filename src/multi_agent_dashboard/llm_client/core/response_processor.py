@@ -32,7 +32,7 @@ class ResponseProcessor:
     Static methods for processing LLM agent responses.
     
     This class encapsulates the logic previously in LLMClient._process_response,
-    extracting usage, tool calls, content blocks, and text from raw agent results.
+    extracting usage, tool calls, response parts, and text from raw agent results.
     """
     
 
@@ -192,7 +192,7 @@ class ResponseProcessor:
         This method walks through message structures from the end to the beginning,
         preferring assistant/AI messages, then falls back to other fields. It handles
         various message formats including dicts, LangChain message objects, and
-        OpenAI-style content blocks.
+        OpenAI-style response parts.
         
         Args:
             result: Raw agent response object

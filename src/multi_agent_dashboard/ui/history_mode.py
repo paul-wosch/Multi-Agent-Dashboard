@@ -277,9 +277,6 @@ def render_history_mode():
         reasoning_cfg_json = parse_json_field(
             cfg.get("reasoning_config_json"), {}
         )
-        extra_cfg_json = parse_json_field(
-            cfg.get("extra_config_json"), {}
-        )
         provider_feats = parse_json_field(cfg.get("provider_features_json"), {})
 
         # Extract allowed domains from the low-level stored tools_config_json (if present)
@@ -334,7 +331,6 @@ def render_history_mode():
                 "tools_json": tools_json or None,
                 "tools_config_json": tools_cfg_json or None,
                 "reasoning_config_json": reasoning_cfg_json or None,
-                "extra_config_json": extra_cfg_json or None,
             },
             # Provider snapshot (captured at run time) including friendly name and host
             "provider": {

@@ -194,7 +194,6 @@ class RunDAO:
                            reasoning_effort,
                            reasoning_summary,
                            reasoning_config_json,
-                           extra_config_json,
                            system_prompt_template,
                            provider_id,
                            model_class,
@@ -506,11 +505,10 @@ class RunDAO:
                              reasoning_effort,
                              reasoning_summary,
                              reasoning_config_json,
-                             extra_config_json,
                              system_prompt_template,
                              max_output,
                              max_output_effective)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             run_id,
@@ -535,8 +533,6 @@ class RunDAO:
                             cfg.get("reasoning_effort"),
                             cfg.get("reasoning_summary"),
                             json.dumps(cfg.get("reasoning_config") or {}),
-                            # Reserved for future options such as temperature
-                            json.dumps(cfg.get("extra")) if cfg.get("extra") is not None else None,
                             cfg.get("system_prompt_template"),
                             cfg.get("max_output"),
                             cfg.get("max_output_effective"),

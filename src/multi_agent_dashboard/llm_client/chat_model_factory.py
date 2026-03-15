@@ -172,7 +172,7 @@ class ChatModelFactory:
         # Convey Responses API preference for providers that support it (e.g., OpenAI)
         if use_responses_api:
             init_kwargs["use_responses_api"] = True
-            # Recommend the responses output_version for consistent content_blocks formatting when available
+            # Recommend the responses output_version for consistent response formatting when available
             # many integrations accept 'output_version' (e.g., ChatOpenAI)
             init_kwargs["output_version"] = "responses/v1"
 

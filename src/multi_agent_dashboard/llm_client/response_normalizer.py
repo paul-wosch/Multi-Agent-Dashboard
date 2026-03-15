@@ -3,11 +3,11 @@ Response Normalizer for standardizing LLM provider responses.
 
 This module normalizes diverse LLM provider responses into consistent,
 serializable dictionaries. It handles provider-specific response formats,
-extracts tool calls, merges content blocks, and flattens nested response structures for uniform processing by the agent pipeline.
+extracts tool calls, merges response parts, and flattens nested response structures for uniform processing by the agent pipeline.
 
 Key normalization tasks:
 - Convert provider SDK objects to serializable dictionaries
-- Merge multiple content blocks into single text responses
+- Merge multiple response parts into single text responses
 - Extract and structure tool calls from provider-specific formats
 - Flatten nested response structures
 - Preserve metadata (usage, tokens, costs) across normalization
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 class ResponseNormalizer:
     """
-    Convert SDK/LangChain responses into serializable dicts, merging content blocks,
+    Convert SDK/LangChain responses into serializable dicts, merging response parts,
     extracting tool calls, and flattening nested response structures.
     """
 
