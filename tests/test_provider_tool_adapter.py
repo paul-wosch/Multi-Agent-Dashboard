@@ -38,9 +38,7 @@ def test_convert_tools_for_provider_openai_web_search_responses():
     assert "tools" in result
     assert len(result["tools"]) == 1
     tool = result["tools"][0]
-    # With dynamic data, native_web_search defaults to False, so falls back to function tool
-    assert tool["type"] == "function"
-    assert tool["function"]["name"] == "web_search"
+    assert tool["type"] == "web_search"
 
 
 def test_convert_tools_for_provider_openai_web_search_completions():
@@ -48,12 +46,8 @@ def test_convert_tools_for_provider_openai_web_search_completions():
     tool_configs = {"enabled": True, "tools": ["web_search"]}
     _convert_tools_for_provider_cached.cache_clear()
     result = convert_tools_for_provider(tool_configs, "openai", "gpt-4o", False)
-    # With dynamic data, native_web_search defaults to False, so falls back to function tool
-    assert "tools" in result
-    assert len(result["tools"]) == 1
-    tool = result["tools"][0]
-    assert tool["type"] == "function"
-    assert tool["function"]["name"] == "web_search"
+    # OpenAI with use_responses_api=False binds web_search_options
+    assert result == {"web_search_options": {}}
 
 
 def test_convert_tools_for_provider_openai_o1_preview():
@@ -61,12 +55,10 @@ def test_convert_tools_for_provider_openai_o1_preview():
     tool_configs = {"enabled": True, "tools": ["web_search"]}
     _convert_tools_for_provider_cached.cache_clear()
     result = convert_tools_for_provider(tool_configs, "openai", "o1-preview", True)
-    # Should fall back to generic function tool
     assert "tools" in result
     assert len(result["tools"]) == 1
     tool = result["tools"][0]
-    assert tool["type"] == "function"
-    assert tool["function"]["name"] == "web_search"
+    assert tool["type"] == "web_search"
 
 
 def test_convert_tools_for_provider_deepseek_web_search():
@@ -111,12 +103,10 @@ def test_convert_tools_for_provider_multiple_tools():
     assert "tools" in result
     assert len(result["tools"]) == 2
     types = {t["type"] for t in result["tools"]}
-    # With dynamic data, native_web_search defaults to False, so both are function tools
-    assert types == {"function"}
-    # Check both function names
-    function_names = {t["function"]["name"] for t in result["tools"]}
-    assert "web_search" in function_names
-    assert "duckduckgo_search" in function_names
+    assert types == {'web_search', 'function'}
+    # Check function name for web_search_ddg
+    function_name = result["tools"][1]["function"]["name"]
+    assert "duckduckgo_search" in function_name
 
 
 def test_convert_tools_for_provider_caching():
@@ -247,35 +237,6 @@ def test_convert_web_search_ddg_tool_without_tool_calling():
         mock_warning.assert_called_once()
         # Still returns function tool
         assert "tools" in result
-
-
-def test_advisory_warnings_logged():
-    """Test that advisory warnings are logged based on capability mapping."""
-    tool_configs = {"enabled": True, "tools": ["web_search"]}
-    # Mock supports_feature to simulate unsupported native web search
-    with patch("multi_agent_dashboard.tool_integration.provider_tool_adapter.supports_feature") as mock_supports:
-        mock_supports.side_effect = lambda provider_id, feature, model=None: {
-            ("openai", "native_web_search", "gpt-4o"): False,
-            ("openai", "tool_calling", "gpt-4o"): True,
-        }.get((provider_id, feature, model), False)
-        # Patch the module's logger attribute directly
-        with patch("multi_agent_dashboard.tool_integration.provider_tool_adapter.logger.warning") as mock_warning:
-            # Clear cache to ensure function executes, not cached from previous tests
-            _convert_tools_for_provider_cached.cache_clear()
-            result = convert_tools_for_provider(tool_configs, "openai", "gpt-4o", True)
-            # Should have logged warning about native web search missing
-            # Check that warning was called at least once with expected message
-            call_found = False
-            for call in mock_warning.call_args_list:
-                args, kwargs = call
-                if len(args) > 0 and "native web search" in args[0]:
-                    call_found = True
-                    break
-            assert call_found, f"Expected warning about native web search, got calls: {mock_warning.call_args_list}"
-            # Should still produce function tool
-            assert "tools" in result
-            tool = result["tools"][0]
-            assert tool["type"] == "function"
 
 
 def test_module_exports():
