@@ -283,11 +283,6 @@ class ResponseProcessor:
                                         content_candidate = "".join(parts)
                             if content_candidate is None and hasattr(m, "text"):
                                 mt = getattr(m, "text")
-                                if callable(mt):
-                                    try:
-                                        mt = mt()
-                                    except Exception:
-                                        mt = None
                                 if isinstance(mt, str):
                                     content_candidate = mt
                             # Some message objects include 'role'
@@ -318,11 +313,8 @@ class ResponseProcessor:
             # If still None, fall back to common response attributes on the returned result
             if text_out is None:
                 text_attr = getattr(result, "text", None)
-                if callable(text_attr):
-                    try:
-                        text_out = text_attr()
-                    except Exception:
-                        text_out = None
+                if isinstance(text_attr, str):
+                    text_out = text_attr
                 elif text_attr is not None:
                     text_out = text_attr
                 else:
