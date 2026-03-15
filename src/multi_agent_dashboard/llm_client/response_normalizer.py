@@ -48,7 +48,7 @@ class ResponseNormalizer:
         """
         Convert SDK/LangChain response into a serializable dict (best-effort),
         avoiding noisy Pydantic serializer warnings from the SDK's internal model graph.
-        Ensure `content_blocks` and `usage_metadata` are surfaced when present.
+        Ensure usage_metadata is surfaced when present.
         Also flatten nested response shapes for uniform processing.
         """
         out: Dict[str, Any] = {}
@@ -87,29 +87,7 @@ class ResponseNormalizer:
         except Exception:
             pass
 
-        # content_blocks: prefer provider-agnostic structured blocks when available
-        try:
-            cb = getattr(response, "content_blocks", None)
-            if cb is not None:
-                blocks = []
-                for b in cb:
-                    if isinstance(b, dict):
-                        blocks.append(b)
-                    else:
-                        try:
-                            if hasattr(b, "model_dump"):
-                                blocks.append(b.model_dump())
-                            elif hasattr(b, "to_dict"):
-                                blocks.append(b.to_dict())
-                            elif hasattr(b, "__dict__"):
-                                blocks.append(dict(b.__dict__))
-                            else:
-                                blocks.append(repr(b))
-                        except Exception:
-                            blocks.append(repr(b))
-                out.setdefault("content_blocks", blocks)
-        except Exception:
-            pass
+
 
         # Attempt to surface tool_calls for compatibility
         try:

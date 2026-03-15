@@ -350,18 +350,7 @@ def render_history_mode():
             "strict_schema_validation": bool(cfg.get("strict_schema_validation")),
         }
 
-        # Also explicitly expose content_blocks and instrumentation events if present in extra_config_json:
-        try:
-            if isinstance(extra_cfg_json, dict):
-                if "content_blocks" in extra_cfg_json:
-                    agent_config["content_blocks"] = extra_cfg_json.get("content_blocks")
-                if "instrumentation_events" in extra_cfg_json:
-                    agent_config["instrumentation_events"] = extra_cfg_json.get("instrumentation_events")
-                if "structured_response" in extra_cfg_json:
-                    agent_config["structured_response"] = extra_cfg_json.get("structured_response")
-        except Exception:
-            # Non-fatal: leave as-is if parsing/extraction fails
-            pass
+
 
         export_agents[name] = {
             "output": agent_output,

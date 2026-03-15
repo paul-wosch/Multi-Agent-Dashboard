@@ -211,8 +211,7 @@ def build_export_from_engine_result(
     st.session_state (previous behavior). Optionally pass an engine explicitly for
     testing or isolation.
 
-    This export now exposes provider metadata (id, name, host), content_blocks,
-    instrumentation events, and low-level reasoning/tools config so downstream
+    This export now exposes provider metadata (id, name, host) and low-level reasoning/tools config so downstream
     consumers can fully reconstruct the runtime environment.
     """
     if engine is None:
@@ -283,11 +282,6 @@ def build_export_from_engine_result(
         # Extra from the per-run snapshot (these often include content_blocks, detected_provider_profile, instrumentation events)
         extra = run_cfg.get("extra") or {}
 
-        # Extract content_blocks & instrumentation events explicitly when available
-        content_blocks = extra.get("content_blocks") if isinstance(extra, dict) else None
-        instrumentation_events = extra.get("instrumentation_events") if isinstance(extra, dict) else None
-        structured_response = extra.get("structured_response") if isinstance(extra, dict) else None
-
         agent_config = {
             "model": model,
             "role": getattr(runtime.spec, "role", None) if runtime else None,
@@ -304,10 +298,6 @@ def build_export_from_engine_result(
             "system_prompt_template": (run_cfg.get("system_prompt_template") if run_cfg and run_cfg.get("system_prompt_template") is not None else (getattr(runtime.spec, "system_prompt_template", None) if runtime else None)),
             # Low-level tools config
             "tools_config": tools_config,
-            # Structured/extra metadata surfaced from LangChain middleware / responses
-            "content_blocks": content_blocks,
-            "instrumentation_events": instrumentation_events,
-            "structured_response": structured_response,
             # Raw extra for auditing / debugging
             "raw_extra": extra,
             # Schema validation flags
