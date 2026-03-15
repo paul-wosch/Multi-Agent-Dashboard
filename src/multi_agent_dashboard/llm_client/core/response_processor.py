@@ -2,7 +2,7 @@
 Response processor for extracting and normalizing LLM agent responses.
 
 This module provides the ResponseProcessor class that extracts metadata,
-tool calls, content blocks, and text from LangChain agent responses and
+tool calls and text from LangChain agent responses and
 normalizes them into a consistent TextResponse format. It handles the
 complexities of different response structures across providers and
 LangChain versions.
@@ -10,7 +10,7 @@ LangChain versions.
 Key extraction capabilities:
 - Usage metadata extraction (tokens, latency, costs)
 - Tool call extraction and normalization
-- Content block merging and text extraction
+- Text extraction
 - Nested response chain flattening
 - Provider-specific response format handling
 
@@ -111,11 +111,11 @@ class ResponseProcessor:
         return result
     
     @staticmethod
-    def extract_tool_info_from_messages(messages: Any) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    def extract_tool_info_from_messages(messages: Any) -> List[Dict[str, Any]]:
         """
-        Extract tool_calls and content_blocks from AIMessage-like objects in a messages list.
+        Extract tool_calls from AIMessage-like objects in a messages list.
         
-        This method searches through message structures to find tool calls and content blocks,
+        This method searches through message structures to find tool calls,
         handling various formats including dicts, LangChain message objects, and OpenAI-style
         message structures with additional_kwargs.
         
@@ -123,11 +123,10 @@ class ResponseProcessor:
             messages: List of message objects or dictionaries to search
             
         Returns:
-            Tuple of (tool_calls, content_blocks) where each is a list of dictionaries
-            representing the extracted tool calls and content blocks
+            List of dictionaries representing the extracted tool calls
         """
         if not isinstance(messages, list):
-            return [], []
+            return []
 
         def _msg_to_dict(m: Any) -> Optional[Dict[str, Any]]:
             if isinstance(m, dict):
@@ -153,7 +152,6 @@ class ResponseProcessor:
             return None
 
         tool_calls: list[dict] = []
-        content_blocks: list[dict] = []
 
         for msg in messages:
             msg_dict = _msg_to_dict(msg)
@@ -172,21 +170,9 @@ class ResponseProcessor:
                     e = _msg_to_dict(entry)
                     if isinstance(e, dict):
                         tool_calls.append(e)
-            cb = msg_dict.get("content_blocks")
-            if isinstance(cb, list):
-                for entry in cb:
-                    e = _msg_to_dict(entry)
-                    if isinstance(e, dict):
-                        content_blocks.append(e)
-            # OpenAI-native content blocks are often under "content"
-            content = msg_dict.get("content")
-            if isinstance(content, list) and content and isinstance(content[0], dict):
-                for entry in content:
-                    e = _msg_to_dict(entry)
-                    if isinstance(e, dict):
-                        content_blocks.append(e)
 
-        return tool_calls, content_blocks
+
+        return tool_calls
     
     @staticmethod
     def extract_text_from_messages(result: Any, raw_dict: Dict[str, Any]) -> str:
@@ -348,7 +334,7 @@ class ResponseProcessor:
         Process raw agent response into a normalized TextResponse.
         
         This is the main entry point for response processing. It extracts usage metadata,
-        tool calls, content blocks, and text from the raw agent response, normalizes them
+        tool calls and text from the raw agent response, normalizes them
         into a consistent format, and returns a TextResponse object.
         
         Args:
@@ -366,26 +352,15 @@ class ResponseProcessor:
         # Convert to serializable dict using ResponseNormalizer
         raw_dict = ResponseNormalizer.to_dict(result)
         
-        # Ensure instrumentation events propagate structured response/content blocks.
+        # Ensure instrumentation events propagate structured response.
         events = (
                 raw_dict.get("instrumentation_events")
                 or raw_dict.get("_multi_agent_dashboard_events")
         )
         if isinstance(events, list):
-            cb_list = raw_dict.get("content_blocks")
-            if cb_list is None:
-                cb_list = []
-                raw_dict["content_blocks"] = cb_list
-            elif not isinstance(cb_list, list):
-                cb_list = [cb_list]
-                raw_dict["content_blocks"] = cb_list
-
             for ev in events:
                 if not isinstance(ev, dict):
                     continue
-                ev_blocks = ev.get("content_blocks")
-                if isinstance(ev_blocks, list):
-                    cb_list.extend(ev_blocks)
                 if "structured_response" in ev and "structured_response" not in raw_dict:
                     raw_dict["structured_response"] = ev["structured_response"]
         
@@ -412,7 +387,7 @@ class ResponseProcessor:
                 if output_tokens is None:
                     output_tokens = token_usage.get("completion_tokens") or token_usage.get("output_tokens")
         
-        # Promote tool_calls/content_blocks from agent messages into raw_dict (always)
+        # Promote tool_calls from agent messages into raw_dict (always)
         messages = None
         try:
             if isinstance(result, dict):
@@ -423,12 +398,10 @@ class ResponseProcessor:
             messages = None
 
         try:
-            tool_calls, content_blocks = ResponseProcessor.extract_tool_info_from_messages(messages)
+            tool_calls = ResponseProcessor.extract_tool_info_from_messages(messages)
             if isinstance(raw_dict, dict):
                 if tool_calls and "tool_calls" not in raw_dict:
                     raw_dict["tool_calls"] = tool_calls
-                # Do NOT promote content_blocks into raw_dict here to avoid duplication.
-                # _collect_content_blocks() already inspects messages and raw content_blocks.
         except Exception:
             logger.debug("Failed to attach tool info from messages into raw_dict", exc_info=True)
         
@@ -487,29 +460,7 @@ class ResponseProcessor:
         # Extract text from messages
         text_out = ResponseProcessor.extract_text_from_messages(result, raw_dict)
         
-        # Ensure content_blocks are surfaced in raw_dict if present on result
-        try:
-            cb = getattr(result, "content_blocks", None)
-            if cb is not None and "content_blocks" not in raw_dict:
-                blocks = []
-                for b in cb:
-                    if isinstance(b, dict):
-                        blocks.append(b)
-                    else:
-                        try:
-                            if hasattr(b, "model_dump"):
-                                blocks.append(b.model_dump())
-                            elif hasattr(b, "to_dict"):
-                                blocks.append(b.to_dict())
-                            elif hasattr(b, "__dict__"):
-                                blocks.append(dict(b.__dict__))
-                            else:
-                                blocks.append(repr(b))
-                        except Exception:
-                            blocks.append(repr(b))
-                raw_dict["content_blocks"] = blocks
-        except Exception:
-            pass
+
         
         from .client import TextResponse
         return TextResponse(
