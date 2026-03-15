@@ -213,15 +213,8 @@ def _convert_web_search_tool(
     or {"tools": [function_tool_dict]} for providers without native web search.
     Returns None if web search cannot be represented.
     """
-    # Log advisory warnings
-    if not advisory_native_web_search:
-        logger.warning(
-            f"Provider {provider_id} likely does not support native web search. "
-            f"Attempting to bind as function-calling tool."
-        )
-
     # OpenAI-specific native web search
-    if provider_id == "openai" and advisory_native_web_search:
+    if provider_id == "openai":
         if use_responses_api:
             # Responses API: tools list with web_search type
             tool_obj: Dict[str, Any] = {"type": "web_search"}
@@ -233,12 +226,15 @@ def _convert_web_search_tool(
             # Note: allowed_domains can be added later by caller
             return {"web_search_options": web_search_options}
     else:
-        # Non-OpenAI or OpenAI without native web search support:
-        # treat as a generic search function-calling tool
+        # Non-OpenAI or OpenAI without native web search support
+        logger.warning(
+            f"Provider {provider_id} likely does not support native web search. "
+            f"Attempting to bind as function-calling tool. Web search may fail."
+        )
         if not advisory_tool_calling:
             logger.warning(
                 f"Provider {provider_id} likely does not support tool calling. "
-                f"Web search may fail."
+                f"Attempting to bind as function-calling tool. Web search may fail."
             )
         # Create a generic web search function tool (similar to DuckDuckGo but generic)
         function_schema: Dict[str, Any] = {
