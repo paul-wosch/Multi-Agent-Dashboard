@@ -3,13 +3,11 @@ Instrumentation helper functions for extracting and processing LLM response meta
 
 This module provides shared utilities for working with instrumentation events
 and metrics collected during LLM agent execution. It handles extraction from
-raw response data, content block processing, and structured output detection.
+raw response data, instrumentation event processing, and structured output detection.
 
 Key functions:
 - `_extract_instrumentation_events`: Extract instrumentation events from raw
   metrics with backward compatibility support
-- `_collect_content_blocks`: Aggregate content blocks from instrumentation events
-  and raw metrics
 - `_structured_from_instrumentation`: Extract structured output from
   instrumentation events
 - `_collect_tool_calls`: Collect tool call information from raw metrics
@@ -68,34 +66,7 @@ def _value_to_dict(value: Any) -> Dict[str, Any] | None:
     return None
 
 
-def _collect_content_blocks(raw_metrics: Dict[str, Any] | None) -> List[Dict[str, Any]]:
-    if not isinstance(raw_metrics, dict):
-        return []
-    blocks: List[Dict[str, Any]] = []
-    for event in _extract_instrumentation_events(raw_metrics):
-        payload = event.get("content_blocks")
-        if isinstance(payload, list):
-            blocks.extend(payload)
-    direct = raw_metrics.get("content_blocks")
-    if isinstance(direct, list):
-        blocks.extend(direct)
-    # Also inspect messages for content/content_blocks (LangChain agent state)
-    messages = raw_metrics.get("messages")
-    if isinstance(messages, list):
-        for msg in messages:
-            msg_dict = _value_to_dict(msg)
-            if not isinstance(msg_dict, dict):
-                continue
-            cb = msg_dict.get("content_blocks")
-            if isinstance(cb, list):
-                blocks.extend(cb)
-            # OpenAI-native content blocks live under "content" as a list of dicts
-            content = msg_dict.get("content")
-            if isinstance(content, list) and content and isinstance(content[0], dict):
-                blocks.extend(content)
-    elif isinstance(raw_metrics.get("output"), list):
-        blocks.extend(raw_metrics["output"])
-    return blocks
+
 
 
 def _structured_from_instrumentation(raw_metrics: Dict[str, Any] | None) -> Any:

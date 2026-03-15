@@ -25,7 +25,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ..shared.instrumentation import (
     _extract_instrumentation_events,
-    _collect_content_blocks,
     _collect_tool_calls,
     _tool_usage_entry_from_payload,
 )
@@ -78,14 +77,7 @@ def collect_tool_usage(raw: Dict[str, Any], content_blocks: List[Dict[str, Any]]
         seen_tool_entries.add(key)
         used_tools.append(entry)
 
-    TOOL_BLOCK_TYPES = {"tool_call", "server_tool_call", "web_search_call", "web_search", "function_call"}
-    for item in content_blocks:
-        if not isinstance(item, dict):
-            continue
-        btype = str(item.get("type") or "").lower()
-        if btype and btype not in TOOL_BLOCK_TYPES:
-            continue
-        _maybe_add_tool_entry(_tool_usage_entry_from_payload(item))
+
 
     for call_payload in _collect_tool_calls(raw):
         _maybe_add_tool_entry(_tool_usage_entry_from_payload(call_payload))

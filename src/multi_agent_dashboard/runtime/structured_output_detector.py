@@ -1,22 +1,20 @@
 """
 Structured output detection and parsing for agent runtime execution.
 
-This module implements the 4-path detection strategy for extracting structured
+This module implements the 3-path detection strategy for extracting structured
 output (JSON/dict/list) from LLM responses. It handles multiple response formats
 across different providers and instrumentation patterns.
 
 Detection paths (in order of precedence):
 1. Direct structured keys in raw response (`structured`, `structured_response`)
 2. Instrumentation events with structured payloads
-3. Content blocks with structured types (`structured`, `structured_response`,
-   `structured_output`, `tool_call` with args)
-4. Fallback JSON parsing of raw text output
+3. Fallback JSON parsing of raw text output
 
 The module also provides state writeback functionality to update execution
 state with parsed structured output while preserving existing state values.
 
 Key functions:
-- `detect_structured_output`: Main detection function implementing the 4-path
+- `detect_structured_output`: Main detection function implementing the 3-path
   strategy with graceful fallbacks
 - `writeback_to_state`: Safely merges parsed structured output into execution
   state, handling nested structures and type conflicts
@@ -54,20 +52,7 @@ def detect_structured_output(
             # 2) Inspect instrumentation events
             parsed = _structured_from_instrumentation(raw)
 
-        # 3) If still none, look through content blocks for structured payloads
-        if parsed is None and isinstance(content_blocks, list):
-            for cb in content_blocks:
-                if not isinstance(cb, dict):
-                    continue
-                ctype = (cb.get("type") or "").lower()
-                # Typical structured response block names
-                if ctype in ("structured", "structured_response", "structured_output"):
-                    parsed = cb.get("value") or cb.get("data") or cb.get("json") or cb.get("args") or cb.get("output")
-                    break
-                # Another pattern: provider returns a tool call with args that represent structured payload
-                if ctype in ("tool_call", "server_tool_call") and isinstance(cb.get("args"), dict):
-                    parsed = cb.get("args")
-                    break
+
 
     # 4) Fallback: try best-effort JSON parsing of the textual output
     if parsed is None and isinstance(raw_output, str):

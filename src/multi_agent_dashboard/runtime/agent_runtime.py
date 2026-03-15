@@ -10,7 +10,7 @@ from ..models import AgentSpec
 
 from ..shared.instrumentation import (
     _extract_instrumentation_events,
-    _collect_content_blocks,
+
     _structured_from_instrumentation,
     _collect_tool_calls,
     _tool_usage_entry_from_payload,
@@ -208,7 +208,7 @@ class AgentRuntime:
         input_tokens, output_tokens = extract_tokens_from_raw(raw, response)
 
         instrumentation_events = _extract_instrumentation_events(raw)
-        content_blocks = _collect_content_blocks(raw)
+        content_blocks = []
 
         # Base last_metrics stored for engine consumption
         self.last_metrics = {

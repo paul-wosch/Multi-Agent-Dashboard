@@ -25,7 +25,7 @@ from multi_agent_dashboard.config import RAISE_ON_AGENT_FAIL
 
 from ..shared.instrumentation import (
     _extract_instrumentation_events,
-    _collect_content_blocks,
+
     _structured_from_instrumentation,
 )
 from .utils import (

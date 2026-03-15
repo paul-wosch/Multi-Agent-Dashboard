@@ -16,7 +16,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from ..shared.instrumentation import (
-    _collect_content_blocks,
+
     _extract_instrumentation_events,
     _structured_from_instrumentation,
 )
@@ -66,7 +66,7 @@ class RunSnapshotBuilder:
         # Also include a compact summary of content_blocks for auditing
         content_blocks = metrics.get("content_blocks")
         if not isinstance(content_blocks, list):
-            content_blocks = _collect_content_blocks(raw_metrics)
+            content_blocks = []
 
         def _filter_extra_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             # Exclude plain text blocks from extra_config_json to avoid duplicating agent_outputs.output
