@@ -32,12 +32,11 @@ logger = logging.getLogger(__name__)
 
 def detect_structured_output(
     raw: Dict[str, Any],
-    content_blocks: List[Dict[str, Any]],
     raw_output: str,
 ) -> Optional[Any]:
     """
-    Detect structured output from raw metrics, content blocks, and raw text.
-    Implements the four-path detection used in AgentRuntime.run.
+    Detect structured output from raw metrics and raw text.
+    Implements the three-path detection used in AgentRuntime.run.
     Returns parsed dict/list/None.
     """
     parsed = None

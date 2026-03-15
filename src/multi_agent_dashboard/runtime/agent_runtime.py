@@ -232,9 +232,9 @@ class AgentRuntime:
             self.last_metrics["detected_provider_profile"] = detected
 
         # -------------------------
-        # Tool usage extraction from content_blocks and legacy tool_calls
+        # Tool usage extraction from raw metrics
         # -------------------------
-        used_tools = collect_tool_usage(raw, content_blocks)
+        used_tools = collect_tool_usage(raw)
         if used_tools:
             self.last_metrics["tools"] = used_tools
 
@@ -242,7 +242,7 @@ class AgentRuntime:
         # Structured output detection & local writeback (standalone runtime behavior)
         # -------------------------
         raw_output = response.text
-        parsed = detect_structured_output(raw, content_blocks, raw_output)
+        parsed = detect_structured_output(raw, raw_output)
         writeback_to_state(self.spec, state, parsed, raw_output)
 
         return response.text

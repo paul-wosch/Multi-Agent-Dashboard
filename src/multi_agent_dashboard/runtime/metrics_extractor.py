@@ -9,8 +9,8 @@ and structured instrumentation events.
 Key functions:
 - `extract_tokens_from_raw`: Extract input/output token counts from raw
   response data with fallback mechanisms for different provider formats
-- `collect_tool_usage`: Aggregate tool invocation data from content blocks
-  and raw metrics, deduplicating repeated entries
+- `collect_tool_usage`: Extract tool invocation data from raw metrics,
+  deduplicating repeated entries
 - `extract_detected_provider_profile`: Detect provider capabilities and
   features from response metadata for advisory purposes
 
@@ -57,9 +57,9 @@ def extract_tokens_from_raw(raw: Dict[str, Any], response: Any) -> Tuple[Optiona
     return input_tokens, output_tokens
 
 
-def collect_tool_usage(raw: Dict[str, Any], content_blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def collect_tool_usage(raw: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
-    Extract tool usage entries from raw metrics and content blocks.
+    Extract tool usage entries from raw metrics.
     Returns a list of tool usage dicts.
     """
     used_tools: List[Dict[str, Any]] = []
