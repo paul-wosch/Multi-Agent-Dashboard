@@ -170,6 +170,16 @@ class ResponseProcessor:
                     e = _msg_to_dict(entry)
                     if isinstance(e, dict):
                         tool_calls.append(e)
+            # Also look for web_search_call objects inside content arrays (OpenAI Responses API)
+            content = msg_dict.get("content")
+            if isinstance(content, list):
+                for item in content:
+                    item_dict = _msg_to_dict(item)
+                    if isinstance(item_dict, dict) and item_dict.get("type") == "web_search_call":
+                        tool_calls.append(item_dict)
+            # Also collect web_search_call objects at message level (unlikely but kept for safety)
+            if msg_dict.get("type") == "web_search_call":
+                tool_calls.append(msg_dict)
 
 
         return tool_calls

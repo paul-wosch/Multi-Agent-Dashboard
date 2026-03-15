@@ -100,6 +100,14 @@ def _collect_tool_calls(raw_metrics: Dict[str, Any] | None) -> List[Dict[str, An
                 entry_dict = _value_to_dict(entry)
                 if isinstance(entry_dict, dict):
                     calls.append(entry_dict)
+        # Also collect web_search_call objects (OpenAI Responses API)
+        if node_dict.get("type") == "web_search_call":
+            calls.append(node_dict)
+        # Recurse into content list if present (OpenAI Responses API content blocks)
+        content = node_dict.get("content")
+        if isinstance(content, list):
+            for item in content:
+                _recurse(item)
         # Recurse into messages list if present (LangChain agent state)
         messages = node_dict.get("messages")
         if isinstance(messages, list):
