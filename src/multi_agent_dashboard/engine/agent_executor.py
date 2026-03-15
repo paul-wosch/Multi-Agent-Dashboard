@@ -29,7 +29,6 @@ from ..shared.instrumentation import (
     _structured_from_instrumentation,
 )
 from .utils import (
-    _normalize_content_blocks,
     _extract_provider_features_from_profile,
 )
 from .snapshot_builder import RunSnapshotBuilder

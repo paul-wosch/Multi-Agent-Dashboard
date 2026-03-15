@@ -21,7 +21,6 @@ from ..shared.instrumentation import (
     _structured_from_instrumentation,
 )
 from .utils import (
-    _normalize_content_blocks,
     _extract_provider_features_from_profile,
 )
 from multi_agent_dashboard.runtime import AgentRuntime
@@ -36,7 +35,7 @@ class RunSnapshotBuilder:
     The snapshot includes:
       - Agent specification (model, templates, role, input/output vars, tools, etc.)
       - Runtime configuration (tools_config, reasoning_config, provider_features)
-      - Observability data (content_blocks summary, instrumentation events, structured_response)
+      - Observability data (instrumentation events, structured_response)
       - Provider metadata (provider_id, model_class, endpoint, use_responses_api)
       - Structured output configuration
       - Strict schema validation flag
@@ -63,40 +62,6 @@ class RunSnapshotBuilder:
         # This keeps agent config concerns out of tool_usages rows.
         # Include both user-facing prompt_template and system_prompt_template so
         # stored runs capture both templates used during execution.
-        # Also include a compact summary of content_blocks for auditing
-        content_blocks = metrics.get("content_blocks")
-        if not isinstance(content_blocks, list):
-            content_blocks = []
-
-        def _filter_extra_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-            # Exclude plain text blocks from extra_config_json to avoid duplicating agent_outputs.output
-            out: List[Dict[str, Any]] = []
-            for b in blocks:
-                if not isinstance(b, dict):
-                    continue
-                btype = (b.get("type") or "").lower()
-                if btype == "text":
-                    continue
-                out.append(b)
-            return out
-
-        content_blocks_summary = None
-        try:
-            if isinstance(content_blocks, list) and content_blocks:
-                filtered_blocks = _filter_extra_blocks(content_blocks)
-                content_blocks_summary = [
-                    {
-                        "type": (cb.get("type") if isinstance(cb, dict) else None),
-                        "name": (cb.get("name") if isinstance(cb, dict) else None),
-                        "id": (cb.get("id") if isinstance(cb, dict) else None),
-                    }
-                    for cb in filtered_blocks
-                ]
-        except Exception:
-            content_blocks_summary = None
-
-        # Normalize full content blocks for DB storage (best-effort)
-        content_blocks_full = _normalize_content_blocks(_filter_extra_blocks(content_blocks or []))
 
         # Provider profile hints detected at runtime (from model or response)
         detected_profile = metrics.get("detected_provider_profile") or raw_metrics.get("detected_provider_profile")
@@ -123,13 +88,8 @@ class RunSnapshotBuilder:
         except Exception:
             structured_response = None
 
-
-
         extra_dict: Dict[str, Any] = {}
-        if content_blocks_summary is not None:
-            extra_dict["content_blocks_summary"] = content_blocks_summary
-        if content_blocks_full:
-            extra_dict["content_blocks"] = content_blocks_full
+
         if detected_profile is not None:
             extra_dict["detected_provider_profile"] = detected_profile
         if instrumentation_events:

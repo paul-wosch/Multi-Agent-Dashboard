@@ -2,7 +2,7 @@
 Utility functions for the engine package.
 
 Consolidated helper functions extracted from engine.py and models.py for
-content block normalization and provider feature extraction.
+provider feature extraction.
 """
 
 from __future__ import annotations
@@ -12,31 +12,6 @@ import re
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
-
-
-def _normalize_content_blocks(blocks: List[Any]) -> List[Dict[str, Any]]:
-    """
-    Ensure each content block is a serializable dict (best-effort).
-    """
-    out_blocks: List[Dict[str, Any]] = []
-    if not isinstance(blocks, list):
-        return []
-    for b in blocks:
-        if isinstance(b, dict):
-            out_blocks.append(b)
-            continue
-        try:
-            if hasattr(b, "model_dump"):
-                out_blocks.append(b.model_dump())
-            elif hasattr(b, "to_dict"):
-                out_blocks.append(b.to_dict())
-            elif hasattr(b, "__dict__"):
-                out_blocks.append(dict(b.__dict__))
-            else:
-                out_blocks.append({"__repr": repr(b)})
-        except Exception:
-            out_blocks.append({"__repr": repr(b)})
-    return out_blocks
 
 
 def _extract_provider_features_from_profile(profile: Dict[str, Any]) -> Dict[str, Any]:
