@@ -168,8 +168,6 @@ SCHEMA = {
             "reasoning_effort": "TEXT",
             "reasoning_summary": "TEXT",
             "reasoning_config_json": "TEXT",
-            # Future‑proof bag for additional options (temperature, top_p, etc.)
-            "extra_config_json": "TEXT",
             # Snapshot of the system prompt used for this agent/run
             "system_prompt_template": "TEXT",
             "max_output": "INTEGER DEFAULT 0",
