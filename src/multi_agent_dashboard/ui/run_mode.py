@@ -137,6 +137,7 @@ def render_run_sidebar() -> Tuple[
     selected_pipeline = st.sidebar.selectbox(
         "Pipeline",
         [AD_HOC_PIPELINE_LABEL] + pipeline_names,
+        key="selected_pipeline",
     )
 
     # -------------------------
@@ -164,6 +165,19 @@ def render_run_sidebar() -> Tuple[
         base_steps = st.session_state.get("adhoc_pipeline_steps", [])
 
     # -------------------------
+    # Keep multiselect state in sync when pipeline changes
+    # -------------------------
+    # Track last-seen pipeline so we only override selected_steps when the pipeline actually changes
+    last_pipeline = st.session_state.get("_last_selected_pipeline")
+    if last_pipeline != selected_pipeline:
+        # pipeline changed -> set the persisted selected_steps to the pipeline's steps (or adhoc steps)
+        if selected_pipeline != AD_HOC_PIPELINE_LABEL:
+            st.session_state["selected_steps"] = base_steps
+        else:
+            st.session_state["selected_steps"] = st.session_state.get("adhoc_pipeline_steps", base_steps)
+        st.session_state["_last_selected_pipeline"] = selected_pipeline
+
+    # -------------------------
     # Agent selection (SOURCE OF TRUTH)
     # -------------------------
     agent_symbols = get_agent_symbol_map()
@@ -172,10 +186,16 @@ def render_run_sidebar() -> Tuple[
         symbol = agent_symbols.get(name, DEFAULT_SYMBOL)
         return f"{symbol} {name}"
 
+    # Initialize widget's default before using it
+    # to prevent Streamlit session state conflict
+    if "selected_steps" not in st.session_state:
+        st.session_state.my_input = base_steps
+
+    # Use an explicit key to avoid "double click" issue
+    # The value will be in st.session_state["selected_steps"] (kept in sync above)
     selected_steps = st.sidebar.multiselect(
         "Agents (execution order)",
         available_agents,
-        default=base_steps,
         format_func=format_agent_label,
         key="selected_steps",
     )
