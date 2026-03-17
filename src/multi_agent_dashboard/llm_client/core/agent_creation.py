@@ -94,6 +94,8 @@ class AgentCreationFacade:
             timeout=timeout or self._client._timeout,
             temperature=getattr(spec, "temperature", None),
             max_tokens=max_tokens_val,
+            reasoning_effort=getattr(spec, "reasoning_effort", None),
+            reasoning_summary=getattr(spec, "reasoning_summary", None),
         )
 
         try:

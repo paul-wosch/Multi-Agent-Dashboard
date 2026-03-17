@@ -121,6 +121,8 @@ class ChatModelFactory:
             timeout: Optional[float] = None,
             temperature: Optional[float] = None,
             max_tokens: Optional[int] = None,
+            reasoning_effort: Optional[str] = None,
+            reasoning_summary: Optional[str] = None,
     ):
         """
         Return a LangChain chat model instance for the provided metadata.
@@ -192,6 +194,13 @@ class ChatModelFactory:
                 init_kwargs["max_tokens"] = int(max_tokens)
             except Exception:
                 init_kwargs["max_tokens"] = max_tokens
+
+        if provider_norm == "openai":
+            init_kwargs.setdefault("reasoning", {})
+            if reasoning_effort and reasoning_effort != "none":
+                init_kwargs["reasoning"]["effort"] = reasoning_effort
+            if reasoning_summary and reasoning_summary != "none":
+                init_kwargs["reasoning"]["summary"] = reasoning_summary
 
         model_provider = provider_id or None
 
