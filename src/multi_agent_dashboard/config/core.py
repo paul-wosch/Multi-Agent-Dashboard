@@ -77,6 +77,7 @@ DEEPSEEK_API_KEY = _env.get("DEEPSEEK_API_KEY", None)
 LOG_LEVEL = _env.get("LOG_LEVEL", _logging['default_log_level']).upper()
 RAISE_ON_AGENT_FAIL = _env.get("RAISE_ON_AGENT_FAIL", "true").lower() == "true"
 STRICT_OUTPUT_TOKEN_CAP_OVERRIDE = _env.get("STRICT_OUTPUT_TOKEN_CAP_OVERRIDE", "false").lower() == "true"
+COLLECT_REASONING_CONTENT_AS_TOOL_CALL = _env.get("COLLECT_REASONING_CONTENT_AS_TOOL_CALL", "false").lower() == "true"
 
 # Langfuse observability (optional)
 LANGFUSE_PUBLIC_KEY = _env.get("LANGFUSE_PUBLIC_KEY")

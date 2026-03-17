@@ -22,6 +22,7 @@ well-structured responses with complete metadata.
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
+from multi_agent_dashboard.config import COLLECT_REASONING_CONTENT_AS_TOOL_CALL
 from ..response_normalizer import ResponseNormalizer
 
 logger = logging.getLogger(__name__)
@@ -170,17 +171,31 @@ class ResponseProcessor:
                     e = _msg_to_dict(entry)
                     if isinstance(e, dict):
                         tool_calls.append(e)
-            # Also look for web_search_call objects inside content arrays (OpenAI Responses API)
+            # Also look for web_search_call inside content arrays (OpenAI Responses API)
             content = msg_dict.get("content")
             if isinstance(content, list):
                 for item in content:
                     item_dict = _msg_to_dict(item)
                     if isinstance(item_dict, dict) and item_dict.get("type") == "web_search_call":
                         tool_calls.append(item_dict)
-            # Also collect web_search_call objects at message level (unlikely but kept for safety)
+            # Also collect web_search_call at message level (unlikely but kept for safety)
             if msg_dict.get("type") == "web_search_call":
                 tool_calls.append(msg_dict)
-
+            # When set in .env allow reasoning object inspection for OpenAI as tool calls
+            # TODO:
+            #  - standardize reasoning inspection across providers
+            #  - store reasoning content in a separate database table
+            #  - allows display of reasoning content in the UI
+            if COLLECT_REASONING_CONTENT_AS_TOOL_CALL:
+                # Collect reasoning objects as tool calls
+                if isinstance(content, list):
+                    for item in content:
+                        item_dict = _msg_to_dict(item)
+                        if isinstance(item_dict, dict) and item_dict.get("type") == "reasoning":
+                            tool_calls.append(item_dict)
+                # Collect reasoning objects at message level (unlikely but kept for safety)
+                if msg_dict.get("type") == msg_dict.get("type") == "reasoning":
+                    tool_calls.append(msg_dict)
 
         return tool_calls
     
@@ -409,8 +424,13 @@ class ResponseProcessor:
 
         try:
             tool_calls = ResponseProcessor.extract_tool_info_from_messages(messages)
-            if isinstance(raw_dict, dict):
-                if tool_calls and "tool_calls" not in raw_dict:
+            if isinstance(raw_dict, dict) and tool_calls:
+                existing = raw_dict.get("tool_calls")
+                if isinstance(existing, list):
+                    # extend existing list with new entries
+                    existing.extend(tool_calls)
+                else:
+                    # create/overwrite with our extracted calls
                     raw_dict["tool_calls"] = tool_calls
         except Exception:
             logger.debug("Failed to attach tool info from messages into raw_dict", exc_info=True)

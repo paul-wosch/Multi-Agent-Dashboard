@@ -127,8 +127,8 @@ def _collect_tool_calls(raw_metrics: Dict[str, Any] | None) -> List[Dict[str, An
 def _tool_usage_entry_from_payload(payload: Dict[str, Any]) -> Dict[str, Any] | None:
     raw_type = payload.get("type") or payload.get("tool_type") or ""
     raw_type_l = str(raw_type).lower()
-    # Skip non-tool entries (e.g., text/reasoning)
-    if raw_type_l in ("text", "reasoning"):
+    # Filter to Skip non-tool entries (e.g., text/reasoning)
+    if raw_type_l in ("text"):
         return None
     tool_type = payload.get("name") or payload.get("tool_type") or payload.get("type") or "unknown"
     if tool_type in ("unknown", "", None) and not payload.get("name"):
@@ -140,7 +140,7 @@ def _tool_usage_entry_from_payload(payload: Dict[str, Any]) -> Dict[str, Any] | 
     status = payload.get("status") or payload.get("state")
     if status is not None:
         entry["status"] = status
-    action = payload.get("args") or payload.get("action") or payload.get("input") or payload.get("result")
+    action = payload.get("args") or payload.get("action") or payload.get("input") or payload.get("result") or payload.get("summary")
     if isinstance(action, str):
         try:
             action = json.loads(action)
