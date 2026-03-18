@@ -63,10 +63,13 @@ class StructuredOutputBinder:
             adapter = get_adapter(provider_id)
             structured_output_method = adapter.get_structured_output_method(model)
             schema, schema_name = self.extract_schema(response_format, provider_id, spec)
-            
+
             # Apply binding
             if tools is not None:
                 # Unified binding with tools
+                logger.info(f"Applying unified tools+structured_output binding for {provider_id}")
+                if provider_id != "openai".lower():
+                    logger.warning(f"Tools + structured output currently only supported for OpenAI")
                 unified_model = model_instance.with_structured_output(
                     schema,
                     method=structured_output_method,
@@ -75,16 +78,13 @@ class StructuredOutputBinder:
                 )
                 model_instance = StructuredOutputWrapper.wrap(unified_model)
                 effective_response_format = None
-                logger.info(f"Applied unified tools+structured_output binding for {provider_id}")
             else:
                 # Structured output only
                 if model == "deepseek-reasoner":
-                    # quick fix to prevent deepseek returning code 400 w/ structured output
-                    # removed strict flag and explicitly set "json_mode"
-                    # TODO: analyze and fix root cause why structured_output_method does not hold correct value
+                    # remove strict keyword to prevent error 400
                     structured_model = model_instance.with_structured_output(
                         schema,
-                        method="json_mode",
+                        method=structured_output_method,
                         include_raw=True,
                     )
                 else:
@@ -96,7 +96,6 @@ class StructuredOutputBinder:
                     )
                 model_instance = StructuredOutputWrapper.wrap(structured_model)
                 effective_response_format = None
-                logger.info(f"Applied provider-specific structured output binding for {provider_id}")
             return model_instance, effective_response_format
         except Exception as e:
             logger.warning(f"Structured output binding failed: {e}")

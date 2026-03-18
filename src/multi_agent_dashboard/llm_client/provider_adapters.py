@@ -87,7 +87,7 @@ class DeepSeekAdapter(ProviderAdapter):
 
     def get_structured_output_method(self, model_name: str) -> str:
         # Reasoner models often reject tool_choice; prefer json_mode
-        if "reasoner" in model_name.lower():
+        if model_name == "deepseek-reasoner":
             return "json_mode"
         return "function_calling"
 
