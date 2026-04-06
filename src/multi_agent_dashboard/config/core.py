@@ -16,13 +16,12 @@ The module maintains backward compatibility with the previous config.py API
 while introducing structured validation and modular configuration management.
 """
 from pathlib import Path
-from dotenv import dotenv_values
+from dotenv import dotenv_values, load_dotenv
 import logging
 from typing import Optional
 
 # Import the loader (adjust if Pydantic not used)
 from .loader import load_yaml_config
-
 
 # --- Path resolution (adjusted for config/ package location) ---
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -70,6 +69,9 @@ if _db_file_env is not None and str(_db_file_env).strip():
     DB_FILE = Path(str(_db_file_env).strip())
 
 DB_FILE_PATH = (DATA_PATH / DB_DIR / DB_FILE).resolve()
+
+# --- Set .env key-value pairs in os.environ ---
+load_dotenv(dotenv_path=DOTENV_FILE_PATH)
 
 # --- Environment variables ---
 OPENAI_API_KEY = _env.get("OPENAI_API_KEY", None)
